@@ -20,7 +20,7 @@ import subscriptionRoutes from "./modules/subscription/subscriptionRoutes";
 import externalLinksRoutes from "./modules/admin/externalLinks/externalLinksRoutes";
 import myPlantRoutes from "./modules/myPlants/myPlantRoute";
 import professionalRoutes from "./modules/professional/professionalRoutes";
-import suppliersRoutes from "./modules/suppliers/suppliersRoutes";
+// import suppliersRoutes from "./modules/suppliers/suppliersRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import translationMiddleware from "./core/middleware/translationMiddleware";
 import { connectDB } from "./core/config/db";
@@ -91,7 +91,7 @@ app.use("/api/v1/professional", professionalRoutes);
 // Error handler (must be last middleware)
 app.use("/api/v1/allplants", myPlantRoutes);
 // Suppliers Routes
-app.use("/api/v1/suppliers", suppliersRoutes);
+// app.use("/api/v1/suppliers", suppliersRoutes);
 //landscape design routes
 app.use("/api/v1/landscape", landScapeDesignRoutes);
 // registerBlockExpiredTrialsCron();
