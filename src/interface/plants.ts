@@ -88,7 +88,7 @@ export interface PlantDiagnosis {
     healthProbability: number;
     issues: HealthIssue[];
   };
-  kasagardemSolutions: AutomationSolution[];
+  GARDENOVASolutions: AutomationSolution[];
 }
 
 /** Represents an individual plant health issue (disease, pest, environmental, nutrient). */

@@ -13,12 +13,10 @@ import {
   getUserProfileById,
   updateValidatedUserProfile,
 } from "./userProfileModel";
-import {
-  deleteFileFromS3,
-  getSignedFileUrl,
-  uploadBase64ToS3,
-} from "../../core/services/s3UploadService";
+import env from "../../core/config/env";
 import { AuthRequest } from "../../interface/auth";
+import fs from "fs";
+import path from "path";
 
 /**
  * Retrieves the currently authenticated user's profile.
@@ -48,7 +46,6 @@ export const getCurrentUserProfile = async (
   }
 
   try {
-    // 1. Get user basic details
     const user = await findUserByEmail(userPayload.userEmail);
     if (!user) {
       await error("Profile retrieval failed - User not found", {
@@ -63,9 +60,6 @@ export const getCurrentUserProfile = async (
     }
 
     const client = getDB();
-
-    // 2. Run both queries in parallel
-    //  const client = getDB();
 
     const { rows: profileRows } = await client.query<IUserProfileRow>(
       `
@@ -89,13 +83,22 @@ export const getCurrentUserProfile = async (
 
     const userProfile: IUserProfileRow | null = profileRows[0] ?? null;
 
+    // Build the base URL from the incoming request (e.g. http://localhost:3000)
+    // const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = env.APPDEV_URL || `${req.protocol}://${req.get("host")}`;
+
     const fullProfile: IFullUserProfile = {
       name: user.name ?? null,
       email: user.email ?? null,
       contactNumber: user.phone_number ?? null,
+
+      // Convert stored relative path → accessible URL
+      // e.g. "uploads/Users/ProfileImages/123.jpg"
+      //   → "http://localhost:3000/uploads/Users/ProfileImages/123.jpg"
       profileImage: userProfile?.profile_image
-        ? (await getSignedFileUrl(userProfile.profile_image)) ?? null
+        ? `${baseUrl}/${userProfile.profile_image.replace(/\\/g, "/")}`
         : null,
+
       dateOfBirth: userProfile?.date_of_birth
         ? new Date(userProfile.date_of_birth).toISOString().split("T")[0]
         : null,
@@ -112,19 +115,18 @@ export const getCurrentUserProfile = async (
       company: userProfile?.company ?? null,
     };
 
-    res.status(HTTP_STATUS.OK).json(successResponse(
-      fullProfile,
-      "User profile retrieved successfully"
-    ));
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(fullProfile, "User profile retrieved successfully"));
   } catch (err: unknown) {
     const errorObj: CustomError =
       err instanceof Error
         ? (err as CustomError)
         : ({
-          name: "UnknownError",
-          message:
-            typeof err === "string" ? err : "An unknown error occurred",
-        } as CustomError);
+            name: "UnknownError",
+            message:
+              typeof err === "string" ? err : "An unknown error occurred",
+          } as CustomError);
 
     await error("Profile retrieval error", {
       email: userPayload?.userEmail,
@@ -137,6 +139,110 @@ export const getCurrentUserProfile = async (
     next(errorObj);
   }
 };
+// export const getCurrentUserProfile = async (
+//   req: AuthRequest,
+//   res: Response,
+//   next: NextFunction
+// ): Promise<void> => {
+//   const userPayload = req.user as { userEmail?: string } | undefined;
+
+//   if (!userPayload?.userEmail) {
+//     res
+//       .status(HTTP_STATUS.UNAUTHORIZED)
+//       .json(errorResponse("Unauthorized request"));
+//     return;
+//   }
+
+//   try {
+//     // 1. Get user basic details
+//     const user = await findUserByEmail(userPayload.userEmail);
+//     if (!user) {
+//       await error("Profile retrieval failed - User not found", {
+//         email: userPayload.userEmail,
+//         action: "getCurrentUserProfile",
+//         req,
+//       });
+//       res
+//         .status(HTTP_STATUS.NOT_FOUND)
+//         .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+//       return;
+//     }
+
+//     const client = getDB();
+
+//     // 2. Run both queries in parallel
+//     //  const client = getDB();
+
+//     const { rows: profileRows } = await client.query<IUserProfileRow>(
+//       `
+//       SELECT
+//         profile_image,
+//         date_of_birth,
+//         gender,
+//         bio,
+//         street,
+//         city,
+//         state,
+//         country,
+//         zip_code,
+//         occupation,
+//         company
+//       FROM userprofiles
+//       WHERE user_id = $1
+//       `,
+//       [user.id]
+//     );
+
+//     const userProfile: IUserProfileRow | null = profileRows[0] ?? null;
+
+//     const fullProfile: IFullUserProfile = {
+//       name: user.name ?? null,
+//       email: user.email ?? null,
+//       contactNumber: user.phone_number ?? null,
+//       profileImage: userProfile?.profile_image
+//         ? (await getSignedFileUrl(userProfile.profile_image)) ?? null
+//         : null,
+//       dateOfBirth: userProfile?.date_of_birth
+//         ? new Date(userProfile.date_of_birth).toISOString().split("T")[0]
+//         : null,
+//       gender: (userProfile?.gender ?? null) as "male" | "female" | "other" | null,
+//       bio: userProfile?.bio ?? null,
+//       address: {
+//         street: userProfile?.street ?? null,
+//         city: userProfile?.city ?? null,
+//         state: userProfile?.state ?? null,
+//         country: userProfile?.country ?? null,
+//         zipCode: userProfile?.zip_code ?? null,
+//       },
+//       occupation: userProfile?.occupation ?? null,
+//       company: userProfile?.company ?? null,
+//     };
+
+//     res.status(HTTP_STATUS.OK).json(successResponse(
+//       fullProfile,
+//       "User profile retrieved successfully"
+//     ));
+//   } catch (err: unknown) {
+//     const errorObj: CustomError =
+//       err instanceof Error
+//         ? (err as CustomError)
+//         : ({
+//           name: "UnknownError",
+//           message:
+//             typeof err === "string" ? err : "An unknown error occurred",
+//         } as CustomError);
+
+//     await error("Profile retrieval error", {
+//       email: userPayload?.userEmail,
+//       error: errorObj.message,
+//       stack: errorObj.stack,
+//       action: "getCurrentUserProfile",
+//       req,
+//     });
+
+//     next(errorObj);
+//   }
+// };
 /**
  * Updates the authenticated user's profile.
  *
@@ -165,7 +271,6 @@ export const updateUserProfile = async (
   }
 
   try {
-    //  Find user
     const user = await findUserByEmail(userPayload.userEmail);
     if (!user) {
       await error("Profile update failed - User not found", {
@@ -181,7 +286,6 @@ export const updateUserProfile = async (
 
     const client = getDB();
 
-    //  Find existing profile
     const { rows: existingProfileRows } = await client.query(
       `SELECT id FROM userprofiles WHERE user_id = $1`,
       [user.id]
@@ -202,35 +306,67 @@ export const updateUserProfile = async (
 
     const profileId = existingProfileRows[0].id;
 
-    // Handle base64 image upload
+    // Handle base64 image upload locally
     if (req.body.profileImage && typeof req.body.profileImage === "string") {
       const isBase64 = /^data:image\/[a-zA-Z]+;base64,/.test(
         req.body.profileImage
       );
+
       if (isBase64) {
         try {
-          const plantName = `${Date.now()}.jpg`; // or `${user.id}_${Date.now()}.jpg`
-          const folder = "Users/ProfileImages"; // or any folder name you prefer
-          // Fetch old profile image from DB
+          // Strip the base64 header and get the raw data
+          const matches = req.body.profileImage.match(
+            /^data:image\/([a-zA-Z]+);base64,(.+)$/
+          );
+
+          if (!matches || matches.length !== 3) {
+            res
+              .status(HTTP_STATUS.BAD_REQUEST)
+              .json(errorResponse("Invalid base64 image format"));
+            return;
+          }
+
+          const imageBuffer = Buffer.from(matches[2], "base64");
+
+          // Define upload directory and file path
+          const uploadDir = path.join(
+            process.cwd(),
+            "uploads",
+            "Users",
+            "ProfileImages"
+          );
+          const fileName = `${Date.now()}.jpg`;
+          const newFilePath = path.join(uploadDir, fileName);
+
+          // Relative path to store in DB (acts like a "file key")
+          const newFileKey = path.join(
+            "uploads",
+            "Users",
+            "ProfileImages",
+            fileName
+          );
+
+          // Ensure the upload directory exists
+          fs.mkdirSync(uploadDir, { recursive: true });
+
+          // Delete old image if it exists
           const oldProfile = await getUserProfileById(profileId);
           const oldFileKey = oldProfile?.profile_image || null;
 
-          // Upload new image
-          const uploadedFileKey = await uploadBase64ToS3(
-            req.body.profileImage,
-            plantName,
-            folder
-          );
-
-          // Delete old image (if exists)
           if (oldFileKey) {
-            await deleteFileFromS3(oldFileKey);
+            const oldFilePath = path.join(process.cwd(), oldFileKey);
+            if (fs.existsSync(oldFilePath)) {
+              fs.unlinkSync(oldFilePath);
+            }
           }
 
-          // Assign new file key to request body
-          req.body.profileImage = uploadedFileKey;
+          // Write new image to disk
+          fs.writeFileSync(newFilePath, imageBuffer);
+
+          // Store the relative path in DB (same role as S3 file key)
+          req.body.profileImage = newFileKey;
         } catch (uploadErr: unknown) {
-          await error("Image upload to S3 Bucket failed", {
+          await error("Local image save failed", {
             email: userPayload.userEmail,
             userId: user.id,
             error: (uploadErr as Error).message,
@@ -238,13 +374,12 @@ export const updateUserProfile = async (
           });
           res
             .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse("Failed to upload profile image"));
+            .json(errorResponse("Failed to save profile image"));
           return;
         }
       }
     }
 
-    // Validate and update using your service method
     const updatedProfile = await updateValidatedUserProfile(
       profileId,
       req.body
@@ -261,6 +396,7 @@ export const updateUserProfile = async (
         .json(errorResponse("User profile not found"));
       return;
     }
+
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(null, MESSAGES.PROFILE_UPDATED));
@@ -269,9 +405,9 @@ export const updateUserProfile = async (
       err instanceof Error
         ? (err as CustomError)
         : ({
-          name: "UnknownError",
-          message: "An unknown error occurred",
-        } as CustomError);
+            name: "UnknownError",
+            message: "An unknown error occurred",
+          } as CustomError);
 
     await error("Profile updation error", {
       email: userPayload?.userEmail,
@@ -284,6 +420,148 @@ export const updateUserProfile = async (
     next(errorObj);
   }
 };
+
+
+
+
+
+
+
+
+// export const updateUserProfile = async (
+//   req: AuthRequest,
+//   res: Response,
+//   next: NextFunction
+// ): Promise<void> => {
+//   const userPayload = req.user as { userEmail?: string } | undefined;
+
+//   if (!userPayload?.userEmail) {
+//     res
+//       .status(HTTP_STATUS.UNAUTHORIZED)
+//       .json(errorResponse("Unauthorized request"));
+//     return;
+//   }
+
+//   try {
+//     //  Find user
+//     const user = await findUserByEmail(userPayload.userEmail);
+//     if (!user) {
+//       await error("Profile update failed - User not found", {
+//         email: userPayload.userEmail,
+//         action: "updateUserProfile",
+//         req,
+//       });
+//       res
+//         .status(HTTP_STATUS.NOT_FOUND)
+//         .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+//       return;
+//     }
+
+//     const client = getDB();
+
+//     //  Find existing profile
+//     const { rows: existingProfileRows } = await client.query(
+//       `SELECT id FROM userprofiles WHERE user_id = $1`,
+//       [user.id]
+//     );
+
+//     if (existingProfileRows.length === 0) {
+//       await warn("Profile update failed - Profile not found", {
+//         email: userPayload.userEmail,
+//         userId: user.id,
+//         action: "updateUserProfile",
+//         req,
+//       });
+//       res
+//         .status(HTTP_STATUS.NOT_FOUND)
+//         .json(errorResponse("User profile not found"));
+//       return;
+//     }
+
+//     const profileId = existingProfileRows[0].id;
+
+//     // Handle base64 image upload
+//     if (req.body.profileImage && typeof req.body.profileImage === "string") {
+//       const isBase64 = /^data:image\/[a-zA-Z]+;base64,/.test(
+//         req.body.profileImage
+//       );
+//       if (isBase64) {
+//         try {
+//           const plantName = `${Date.now()}.jpg`; // or `${user.id}_${Date.now()}.jpg`
+//           const folder = "Users/ProfileImages"; // or any folder name you prefer
+//           // Fetch old profile image from DB
+//           const oldProfile = await getUserProfileById(profileId);
+//           const oldFileKey = oldProfile?.profile_image || null;
+
+//           // Upload new image
+//           const uploadedFileKey = await uploadBase64ToS3(
+//             req.body.profileImage,
+//             plantName,
+//             folder
+//           );
+
+//           // Delete old image (if exists)
+//           if (oldFileKey) {
+//             await deleteFileFromS3(oldFileKey);
+//           }
+
+//           // Assign new file key to request body
+//           req.body.profileImage = uploadedFileKey;
+//         } catch (uploadErr: unknown) {
+//           await error("Image upload to S3 Bucket failed", {
+//             email: userPayload.userEmail,
+//             userId: user.id,
+//             error: (uploadErr as Error).message,
+//             req,
+//           });
+//           res
+//             .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+//             .json(errorResponse("Failed to upload profile image"));
+//           return;
+//         }
+//       }
+//     }
+
+//     // Validate and update using your service method
+//     const updatedProfile = await updateValidatedUserProfile(
+//       profileId,
+//       req.body
+//     );
+
+//     if (!updatedProfile) {
+//       await warn("Profile update failed - No record updated", {
+//         email: userPayload.userEmail,
+//         userId: user.id,
+//         req,
+//       });
+//       res
+//         .status(HTTP_STATUS.NOT_FOUND)
+//         .json(errorResponse("User profile not found"));
+//       return;
+//     }
+//     res
+//       .status(HTTP_STATUS.OK)
+//       .json(successResponse(null, MESSAGES.PROFILE_UPDATED));
+//   } catch (err: unknown) {
+//     const errorObj: CustomError =
+//       err instanceof Error
+//         ? (err as CustomError)
+//         : ({
+//           name: "UnknownError",
+//           message: "An unknown error occurred",
+//         } as CustomError);
+
+//     await error("Profile updation error", {
+//       email: userPayload?.userEmail,
+//       error: errorObj.message,
+//       stack: errorObj.stack,
+//       action: "updateUserProfile",
+//       req,
+//     });
+
+//     next(errorObj);
+//   }
+// };
 
 
 /**

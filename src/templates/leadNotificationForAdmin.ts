@@ -83,7 +83,7 @@ export const leadNotificationForAdmin = (
                               <tr>
                                 <td style="vertical-align: top; padding: 20px; background-color: #2E3A30;" valign="top">
                                   <img src="https://newbucketassets.s3.sa-east-1.amazonaws.com/logo.png"
-                                    alt="Kasagardem" border="0"
+                                    alt="GARDENOVA" border="0"
                                     style="width: 60px; margin: 0 auto; display: block; padding: 20px 0;" />
                                  </td>
                               </tr>
@@ -276,7 +276,7 @@ export const leadNotificationForAdmin = (
                                       <!-- Sign off -->
                                       <tr>
                                         <td style="font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 20px; font-weight: 600; line-height: 1.42; color: #424242; padding: 20px; text-align: center;">
-                                          Kasagardem Platform — Automated Alert
+                                          GARDENOVA Platform — Automated Alert
                                          </td>
                                       </tr>
 
@@ -305,7 +305,7 @@ export const leadNotificationForAdmin = (
                                       <tr><td style="height: 15px; font-size: 0px;" valign="top">&nbsp;</td></tr>
                                       <tr>
                                         <td style="font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 1.62; color: #ffffff; padding: 0 20px; text-align: center;" align="center" valign="top">
-                                          Need assistance? <a href="mailto:helpdesk@kasagardem.com" style="color: #fff;">helpdesk@kasagardem.com</a>
+                                          Need assistance? <a href="mailto:helpdesk@GARDENOVA.com" style="color: #fff;">helpdesk@GARDENOVA.com</a>
                                          </td>
                                       </tr>
                                     </tbody>

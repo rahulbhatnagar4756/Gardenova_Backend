@@ -365,7 +365,7 @@ export const professionalWelcomeEmailTemplate = (
                                                                             <tr>
                                                                                 <td class="pc-fb-font"
                                                                                     style="vertical-align: top; font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 20px; font-weight: 700; line-height: 1.42; letter-spacing: -0.4px; color: #424242; padding: 0 20px;text-align: center;">
-                                                                                    Welcome to Kasagardem Professional!
+                                                                                    Welcome to GARDENOVA Professional!
                                                                                 </td>
                                                                             </tr>
                                                                             <tr>
@@ -701,7 +701,7 @@ export const professionalWelcomeEmailTemplate = (
                                                                                     align="center" valign="top">
                                                                                     Need help? Contact us at
                                                                                     
-                                                                                        href="mailto:helpdesk@kasagardem.com" style="color: #fff;">helpdesk@kasagardem.com</a>
+                                                                                        href="mailto:helpdesk@GARDENOVA.com" style="color: #fff;">helpdesk@GARDENOVA.com</a>
                                                                                 </td>
                                                                             </tr>
                                                                         </tbody>

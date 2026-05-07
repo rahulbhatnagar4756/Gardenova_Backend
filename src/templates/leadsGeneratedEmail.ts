@@ -422,7 +422,7 @@ export const leadSuccessEmailTemplateForUser = (
                                                                                 <td class="pc-fb-font"
                                                                                     style="vertical-align: top; font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 400; line-height: 1.42; letter-spacing: -0.4px; color: #424242; padding: 0 20px; ">
 
-                                                                                Thank you for choosing Kasagardem! We're delighted to inform you that your quote request has been successfully received and forwarded to
+                                                                                Thank you for choosing GARDENOVA! We're delighted to inform you that your quote request has been successfully received and forwarded to
                                                                                 <span style=" font-weight: 600;" >
                                                                                     ${partnerCount} trusted partner${partnerCount > 1 ? "s" : ""}: ${partnerNames}
                                                                                 </span>
@@ -629,9 +629,9 @@ export const leadSuccessEmailTemplateForUser = (
                                                                                     align="center" valign="top">
                                                                                     Need assistance?
                                                                                     <a
-                                                                                        href="mailto:helpdesk@kasagardem.com" style="
+                                                                                        href="mailto:helpdesk@GARDENOVA.com" style="
     color: #fff;
-">helpdesk@kasagardem.com.</a>
+">helpdesk@GARDENOVA.com.</a>
                                                                                 </td>
                                                                             </tr>
 
@@ -1377,7 +1377,7 @@ export const leadSuccessEmailTemplateForPartner = (
                                                                   through your
                                                                   partnership
                                                                   with
-                                                                  Kasagardem.
+                                                                  GARDENOVA.
                                                                   This is an
                                                                   excellent
                                                                   opportunity to
@@ -3001,7 +3001,7 @@ ${partners
                                                                                     align="center" valign="top">
                                                                                    Automated Admin Notification
                                                                                     <br>
-                                                                                 Kasagardem Lead Growth Management System
+                                                                                 GARDENOVA Lead Growth Management System
 
                                                                                 </td>
                                                                             </tr>
@@ -3014,7 +3014,7 @@ ${partners
                                                                                 <td class="pc-fb-font"
                                                                                     style="vertical-align: top; font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 1.62; letter-spacing: -0.4px; color: #ffffff; padding: 0 20px;text-align: center;"
                                                                                     align="center" valign="top">
-                                                                                   © 2025 Kasagardem • Internal Use Only • Confidential
+                                                                                   © 2025 GARDENOVA • Internal Use Only • Confidential
                                                                                    
                                                                                 </td>
                                                                             </tr>

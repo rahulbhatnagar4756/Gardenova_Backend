@@ -24,9 +24,10 @@ export interface Config {
   CSC_API_BASE_URL: string;
   CSC_API_KEY: string;
   ADMIN_EMAIL: string;
-  KASAGARDEM_PLANTAPI_KEY: string;
-  KASAGARDEM_PLANTAPI_URL: string;
-  KASAGARDEM_PLANTAPI_KEY_NAME: string;
+  GARDENOVA_PLANTAPI_KEY: string;
+  GARDENOVA_PLANTAPI_URL: string;
+  GARDENOVA_PLANTAPI_KEY_NAME: string;
   FB_APP_ID: string;
+  // APPDEV_URL: string;
   FB_APP_SECRET: string;
 }

@@ -414,7 +414,7 @@ export const passwordResetEmailTemplate = (
                                                                                     style="vertical-align: top; font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 400; line-height: 1.42; letter-spacing: -0.4px; color: #424242; padding: 0 20px; ">
 
                                                                                     We received a request to reset your
-                                                                                    password for your Kasagardem
+                                                                                    password for your GARDENOVA
                                                                                     account. To proceed with the
                                                                                     password reset, please use the
                                                                                     verification code below.
@@ -593,7 +593,7 @@ export const passwordResetEmailTemplate = (
                                                                                             with anyone
                                                                                         </li>
                                                                                         <li>
-                                                                                            Kasagardem will never ask
+                                                                                            GARDENOVA will never ask
                                                                                             for your password via email
                                                                                         </li>
                                                                                         <li>
@@ -688,9 +688,9 @@ export const passwordResetEmailTemplate = (
                                                                                     align="center" valign="top">
                                                                                     Need assistance?
                                                                                     <a
-                                                                                        href="mailto:helpdesk@kasagardem.com" style="
+                                                                                        href="mailto:helpdesk@GARDENOVA.com" style="
     color: #fff;
-">helpdesk@kasagardem.com.</a>
+">helpdesk@GARDENOVA.com.</a>
                                                                                 </td>
                                                                             </tr>
 

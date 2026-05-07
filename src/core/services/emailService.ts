@@ -108,7 +108,7 @@ export const sendLeadEmails = async (
   const userMailOptions = {
     from: process.env.EMAIL_FROM,
     to: userData.email,
-    subject: `Quote Request Confirmation - ${partnersData.length} Partner${partnersData.length > 1 ? "s" : ""} | Kasagardem`,
+    subject: `Quote Request Confirmation - ${partnersData.length} Partner${partnersData.length > 1 ? "s" : ""} | GARDENOVA`,
     html: leadSuccessEmailTemplateForUser(
       partnersData, // Pass full array of partners
       userData.name
@@ -120,7 +120,7 @@ export const sendLeadEmails = async (
     const partnerMailOptions = {
       from: process.env.EMAIL_FROM,
       to: partner.email,
-      subject: `New Lead Alert - ${userData.name} | Kasagardem`,
+      subject: `New Lead Alert - ${userData.name} | GARDENOVA`,
       html: leadSuccessEmailTemplateForPartner(
         partner.name,
         userData.name,
@@ -189,7 +189,7 @@ export const sendProfessionalWelcomeEmail = async (
   const mailOptions = {
     from: process.env.EMAIL_FROM,
     to: data.email,
-    subject: "Welcome to Kasagardem Professional - Your Account is Ready!",
+    subject: "Welcome to GARDENOVA Professional - Your Account is Ready!",
     html: professionalWelcomeEmailTemplate(
       data.name,
       data.email,
@@ -233,7 +233,7 @@ export const sendLeadsEmailToSuppliers = async (
     transporter.sendMail({
       from: process.env.EMAIL_FROM,
       to: supplier.email,
-      subject: `New Lead Alert - ${userData.name} | Kasagardem`,
+      subject: `New Lead Alert - ${userData.name} | GARDENOVA`,
       html: leadTemplateForSuppliers(supplier.company_name, userData.name, userData.email),
     })
   );

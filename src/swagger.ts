@@ -7,7 +7,7 @@ const options = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "Kasagardem Backend API",
+      title: "GARDEOVA Backend API",
       version: "1.0.0",
       description: "User Authentication REST API documentation",
     },

@@ -2091,7 +2091,7 @@ export async function updateLeadStatusService(id: string): Promise<void> {
 }
 
 const BATCH_SIZE = 500;
-const STATIC_PASSWORD = "kasagardem@123#";
+const STATIC_PASSWORD = "GARDENOVA@123#";
 const BCRYPT_ROUNDS = 12;
 
 /**

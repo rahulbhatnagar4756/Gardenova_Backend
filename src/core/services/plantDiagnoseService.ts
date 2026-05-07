@@ -261,17 +261,17 @@ const generateTreatment = (
 };
 
 /**
- * Generates tailored Kasagardem automation solutions based on detected plant health issues.
+ * Generates tailored GARDENOVA automation solutions based on detected plant health issues.
  *
  * The function evaluates each health issue (disease, pest, environmental, nutrient)
  * and returns a set of actionable automation features such as smart irrigation,
  * AI monitoring, and climate control. Each solution includes benefits and setup steps
- * to guide users in improving plant health using Kasagardem's automation ecosystem.
+ * to guide users in improving plant health using GARDENOVA's automation ecosystem.
  *
  * @param healthIssues - List of detected plant health issues.
  * @returns A list of automation solutions recommended for the given health issues.
  */
-export const generateKasagardemSolutions = (
+export const generateGARDENOVASolutions = (
   healthIssues: HealthIssue[]
 ): AutomationSolution[] => {
   const solutions: AutomationSolution[] = [];
@@ -282,7 +282,7 @@ export const generateKasagardemSolutions = (
         issue: issue.name,
         automationFeature: "Smart Irrigation System",
         howItHelps:
-          "Kasagardem's automated watering system monitors soil moisture in real-time and delivers precise amounts of water exactly when your plants need it, eliminating the guesswork and preventing both overwatering and underwatering.",
+          "GARDENOVA's automated watering system monitors soil moisture in real-time and delivers precise amounts of water exactly when your plants need it, eliminating the guesswork and preventing both overwatering and underwatering.",
         benefits: [
           "Prevents water-related stress and diseases",
           "Saves water by up to 50% compared to manual watering",
@@ -291,7 +291,7 @@ export const generateKasagardemSolutions = (
         ],
         setupSteps: [
           "Install soil moisture sensors in your garden beds",
-          "Connect to Kasagardem hub and configure plant zones",
+          "Connect to GARDENOVA hub and configure plant zones",
           "Set preferred moisture levels for each plant type",
           "System automatically adjusts watering schedule",
         ],
@@ -303,7 +303,7 @@ export const generateKasagardemSolutions = (
         issue: issue.name,
         automationFeature: "AI-Powered Plant Health Monitoring",
         howItHelps:
-          "Kasagardem's smart cameras continuously monitor your plants and use AI to detect early signs of disease or pest infestation, alerting you before problems become severe.",
+          "GARDENOVA's smart cameras continuously monitor your plants and use AI to detect early signs of disease or pest infestation, alerting you before problems become severe.",
         benefits: [
           "Early detection prevents major outbreaks",
           "Receive instant mobile notifications",
@@ -311,7 +311,7 @@ export const generateKasagardemSolutions = (
           "Track plant health trends over time",
         ],
         setupSteps: [
-          "Position Kasagardem cameras to view your plants",
+          "Position GARDENOVA cameras to view your plants",
           "Enable AI health monitoring in the app",
           "Set notification preferences",
           "Review daily health reports and alerts",
@@ -324,7 +324,7 @@ export const generateKasagardemSolutions = (
         issue: "Environmental optimization",
         automationFeature: "Climate Control & Environmental Monitoring",
         howItHelps:
-          "Kasagardem tracks temperature, humidity, and light levels, automatically adjusting your grow environment or alerting you when conditions aren't ideal for your plants.",
+          "GARDENOVA tracks temperature, humidity, and light levels, automatically adjusting your grow environment or alerting you when conditions aren't ideal for your plants.",
         benefits: [
           "Maintains optimal growing conditions",
           "Prevents stress from environmental extremes",
@@ -347,7 +347,7 @@ export const generateKasagardemSolutions = (
       issue: "Comprehensive plant care",
       automationFeature: "Integrated Smart Garden System",
       howItHelps:
-        "Kasagardem's complete automation platform combines watering, monitoring, and environmental control to create the perfect growing conditions while you focus on enjoying your garden.",
+        "GARDENOVA's complete automation platform combines watering, monitoring, and environmental control to create the perfect growing conditions while you focus on enjoying your garden.",
       benefits: [
         "Complete hands-off garden management",
         "Healthier plants with less effort",
@@ -355,7 +355,7 @@ export const generateKasagardemSolutions = (
         "Reduce plant loss by up to 80%",
       ],
       setupSteps: [
-        "Complete Kasagardem system installation",
+        "Complete GARDENOVA system installation",
         "Register all plants in the app",
         "Configure automation preferences",
         "Let the system handle daily care automatically",

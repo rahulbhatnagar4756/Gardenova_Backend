@@ -14,7 +14,7 @@ import {
 } from "../../interface/plants";
 import {
   categorizeHealthIssue,
-  generateKasagardemSolutions,
+  generateGARDENOVASolutions,
 } from "../../core/services/plantDiagnoseService";
 
 /**
@@ -505,12 +505,12 @@ const pollForResult = async (
   accessToken: string,
   retries = 15
 ): Promise<PlantIDApiResponse> => {
-  const endpoint = `${config.KASAGARDEM_PLANTAPI_URL}/identification/${accessToken}?details=common_names,url,description,description_gpt,description_all,taxonomy,rank,gbif_id,inaturalist_id,image,images,synonyms,edible_parts,watering,propagation_methods,best_watering,best_light_condition,best_soil_type,common_uses,toxicity,cultural_significance,gpt&language=en`;
+  const endpoint = `${config.GARDENOVA_PLANTAPI_URL}/identification/${accessToken}?details=common_names,url,description,description_gpt,description_all,taxonomy,rank,gbif_id,inaturalist_id,image,images,synonyms,edible_parts,watering,propagation_methods,best_watering,best_light_condition,best_soil_type,common_uses,toxicity,cultural_significance,gpt&language=en`;
 
   for (let i = 0; i < retries; i++) {
     const res = await axios.get<PlantIDApiResponse>(endpoint, {
       headers: {
-        "Api-Key": config.KASAGARDEM_PLANTAPI_KEY,
+        "Api-Key": config.GARDENOVA_PLANTAPI_KEY,
       },
     });
 
@@ -541,7 +541,7 @@ export const identifyPlantFromPlantID = async (
   }).toString();
 
   const postResponse = await axios.post<PlantIDApiResponse>(
-    `${config.KASAGARDEM_PLANTAPI_URL}/identification?${params}`,
+    `${config.GARDENOVA_PLANTAPI_URL}/identification?${params}`,
     {
       ...payload,
       health: "all",
@@ -549,7 +549,7 @@ export const identifyPlantFromPlantID = async (
     },
     {
       headers: {
-        "Api-Key": config.KASAGARDEM_PLANTAPI_KEY,
+        "Api-Key": config.GARDENOVA_PLANTAPI_KEY,
         "Content-Type": "application/json",
       },
     }
@@ -624,7 +624,7 @@ export const identifyPlantService = async (
     .slice(0, 5)
     .map(categorizeHealthIssue);
 
-  const kasagardemSolutions = generateKasagardemSolutions(healthIssues);
+  const GARDENOVASolutions = generateGARDENOVASolutions(healthIssues);
 
   return {
     isPlant: result.result.is_plant.binary,
@@ -635,6 +635,6 @@ export const identifyPlantService = async (
       healthProbability: result.result.is_healthy.probability,
       issues: healthIssues,
     },
-    kasagardemSolutions,
+    GARDENOVASolutions,
   };
 };

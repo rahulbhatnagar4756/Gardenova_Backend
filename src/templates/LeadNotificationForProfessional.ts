@@ -86,7 +86,7 @@ export const leadNotificationForProfessional = (
                               <tr>
                                 <td style="vertical-align: top; padding: 20px; background-color: #2E3A30;" valign="top">
                                   <img src="https://newbucketassets.s3.sa-east-1.amazonaws.com/logo.png"
-                                    alt="Kasagardem" border="0"
+                                    alt="GARDENOVA" border="0"
                                     style="width: 60px; margin: 0 auto; display: block; padding: 20px 0;" />
                                  </td>
                               </tr>
@@ -127,7 +127,7 @@ export const leadNotificationForProfessional = (
                                       <!-- Intro text -->
                                       <tr>
                                         <td style="font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 400; line-height: 1.42; color: #424242; padding: 0 20px;">
-                                          Great news! A new lead has been successfully received through your partnership with Kasagardem. A potential customer is interested in your services — here are their details:
+                                          Great news! A new lead has been successfully received through your partnership with GARDENOVA. A potential customer is interested in your services — here are their details:
                                          </td>
                                       </tr>
 
@@ -244,7 +244,7 @@ export const leadNotificationForProfessional = (
                                       <tr><td style="height: 15px; font-size: 0px;" valign="top">&nbsp;</td></tr>
                                       <tr>
                                         <td style="font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 1.62; color: #ffffff; padding: 0 20px; text-align: center;" align="center" valign="top">
-                                          Need assistance? <a href="mailto:helpdesk@kasagardem.com" style="color: #fff;">helpdesk@kasagardem.com</a>
+                                          Need assistance? <a href="mailto:helpdesk@GARDENOVA.com" style="color: #fff;">helpdesk@GARDENOVA.com</a>
                                          </td>
                                       </tr>
                                     </tbody>
