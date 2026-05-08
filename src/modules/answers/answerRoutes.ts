@@ -4,143 +4,113 @@ import { answerValidation } from "./answerValidation";
 import {
   submitAnswer,
   getRecommendedPlantsController,
-  getRecommendedPartnersController,
+  // getRecommendedPartnersController,
 } from "./answerController";
 
 const router: Router = express.Router();
-
-/**
- * @swagger
- * tags:
- *   name: Answers
- *   description: API for submitting survey answers and fetching recommendations
- */
-
 /**
  * @swagger
  * components:
  *   schemas:
- *     AnswerItem:
+ *     SurveyAnswerItem:
  *       type: object
  *       required:
  *         - questionId
  *         - type
+ *         - selectedOption
  *       properties:
  *         questionId:
  *           type: string
  *           format: uuid
- *           description: Unique identifier of the question (UUID from PostgreSQL)
- *           example: "c9d4c053-49b6-410c-bc78-2d54a9991870"
+ *           example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
  *         type:
  *           type: integer
- *           enum: [1, 2]
- *           description: "1 = selectedOption, 2 = selectedAddress"
  *           example: 1
  *         selectedOption:
  *           type: string
- *           description: Option selected by the user (required if type=1)
- *           example: "Aesthetics"
- *         selectedAddress:
- *           type: object
- *           description: Address selected by the user (required if type=2)
- *           properties:
- *             state:
- *               type: string
- *               example: "California"
- *             city:
- *               type: string
- *               example: "Los Angeles"
+ *           example: "Balcony or Terrace (Pots, planters, vertical space)"
  *
- *     AnswerInput:
+ *     SubmitAnswersInput:
  *       type: object
  *       required:
  *         - answers
  *       properties:
  *         answers:
  *           type: array
+ *           minItems: 1
+ *           maxItems: 6
  *           items:
- *             $ref: '#/components/schemas/AnswerItem'
+ *             $ref: '#/components/schemas/SurveyAnswerItem'
+ *           example:
+ *             - questionId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *               type: 1
+ *               selectedOption: "Balcony or Terrace (Pots, planters, vertical space)"
+ *             - questionId: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+ *               type: 1
+ *               selectedOption: "Partial Sun (3–6 hours, some shade)"
+ *             - questionId: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+ *               type: 1
+ *               selectedOption: "Grow Food (Vegetables, herbs & edible plants)"
+ *             - questionId: "d4e5f6a7-b8c9-0123-defa-234567890123"
+ *               type: 1
+ *               selectedOption: "Once a Week (Weekends or occasional watering)"
+ *             - questionId: "e5f6a7b8-c9d0-1234-efab-345678901234"
+ *               type: 1
+ *               selectedOption: "Tropical / Humid (Hot, wet, lush conditions year-round)"
+ *             - questionId: "f6a7b8c9-d0e1-2345-fabc-456789012345"
+ *               type: 1
+ *               selectedOption: "Casual Gardener (Tried a few plants with mixed success)"
  *
- *     PlantRecommendation:
- *       type: object
- *       properties:
- *         id:
- *           type: string
- *         name:
- *           type: string
- *         scientific:
- *           type: string
- *         image:
- *           type: string
- *         description:
- *           type: string
- *         whyRecommended:
- *           type: string
- *
- *     PartnerRecommendation:
- *       type: object
- *       properties:
- *         partnerId:
- *           type: string
- *         companyName:
- *           type: string
- *         speciality:
- *           type: string
- *         email:
- *           type: string
- *         mobileNumber:
- *           type: string
- *         contactPerson:
- *           type: string
- *         website:
- *           type: string
- *         address:
- *           type: string
- *         projectImageUrl:
- *           type: string
- *         whyRecommended:
- *           type: string
- *
- *     ApiResponse:
- *       type: object
- *       properties:
- *         success:
- *           type: boolean
- *         message:
- *           type: string
- *         data:
- *           type: object
- */
-
-/**
- * @swagger
  * /api/v1/answers:
  *   post:
- *     summary: Submit answers for survey questions
- *     description: Submit multiple answers in a single request. Supports both selected options and selected addresses.
+ *     summary: Submit survey answers
+ *     description: >
+ *       Submit all 6 survey answers in a single request.
+ *       Each answer corresponds to one question (space type, sunlight,
+ *       goal, watering frequency, climate, experience level).
+ *       All answers must be plain strings matching the displayed option text.
  *     tags: [Answers]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/AnswerInput'
+ *             $ref: '#/components/schemas/SubmitAnswersInput'
  *     responses:
  *       201:
  *         description: Answers submitted successfully
  *         content:
  *           application/json:
  *             schema:
- *               allOf:
- *                 - $ref: '#/components/schemas/ApiResponse'
+ *               $ref: '#/components/schemas/ApiResponse'
  *             example:
  *               success: true
  *               message: "Answers submitted successfully"
  *               data:
  *                 responseId: "b6e64bdb-61e2-4d58-bb58-5fcd6b9c8a77"
  *       400:
- *         description: Validation error
+ *         description: Validation error — missing answers, empty selectedOption, or invalid questionId format
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: "Validation failed"
+ *               data:
+ *                 issues:
+ *                   - path: ["answers", 0, "selectedOption"]
+ *                     message: "selectedOption must not be empty"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: "Something went wrong"
+ *               data:
+ *                 details: "Failed to create survey response — no row returned"
  */
+
+
 
 /**
  * @swagger
@@ -226,6 +196,6 @@ const router: Router = express.Router();
 
 router.post("", validateRequest(answerValidation), submitAnswer);
 router.get("/plants/:responseId", getRecommendedPlantsController);
-router.get("/partners/:responseId", getRecommendedPartnersController);
+// router.get("/partners/:responseId", getRecommendedPartnersController);
 
 export default router;

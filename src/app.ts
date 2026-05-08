@@ -24,6 +24,7 @@ import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import translationMiddleware from "./core/middleware/translationMiddleware";
 import { connectDB } from "./core/config/db";
+// import { createAllPlantTables } from "./db/createAllPlantTables";
 
 // import { createLeadsTable } from "./db/createLeadSchemaTables";
 const app = express();
@@ -60,7 +61,7 @@ app.use(translationMiddleware()); // enable translation globally
 // });
 // app.use(limiter);
 // User Authentication Routes
-// createProfessionalTable();
+// createAllPlantTables();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);
