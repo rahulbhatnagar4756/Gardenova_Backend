@@ -256,6 +256,7 @@ export const getRecommendedPlantsController = async (
 
     // ── Shape the API response ─────────────────────────────────────────────────
     const plantRecommendations = recommendedPlants.map((p) => ({
+      id: p.id,
       speciesId: p.species_id,
       speciesName: p.species_name,
       genusName: p.genus_name,

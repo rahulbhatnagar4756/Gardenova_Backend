@@ -30,6 +30,7 @@ export interface IUserAnswer {
 }
 
 export interface IPlantRecommendation {
+  id: number;
   species_id: number;
   species_name: string;
   genus_name: string | null;
@@ -654,6 +655,7 @@ export const getRecommendedPlants = async (
   const mainQuery = `
     WITH scored AS (
       SELECT
+        id,
         species_id,
         species_name,
         genus_name,
@@ -704,6 +706,7 @@ export const getRecommendedPlants = async (
 
       const fallbackQuery = `
         SELECT DISTINCT ON (species_id)
+        id,
           species_id,
           species_name,
           genus_name,
@@ -742,6 +745,7 @@ export const getRecommendedPlants = async (
 
   // ── Map to output type ──────────────────────────────────────────────────────
   return rows.map((plant) => ({
+    id:           plant.id          as number,
     species_id:    plant.species_id   as number,
     species_name:  plant.species_name as string,
     genus_name:   (plant.genus_name   as string)  ?? null,

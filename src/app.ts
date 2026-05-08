@@ -22,7 +22,7 @@ import myPlantRoutes from "./modules/myPlants/myPlantRoute";
 import professionalRoutes from "./modules/professional/professionalRoutes";
 // import suppliersRoutes from "./modules/suppliers/suppliersRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
-import translationMiddleware from "./core/middleware/translationMiddleware";
+// import translationMiddleware from "./core/middleware/translationMiddleware";
 import { connectDB } from "./core/config/db";
 // import { createAllPlantTables } from "./db/createAllPlantTables";
 
@@ -49,7 +49,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(translationMiddleware()); // enable translation globally
+// app.use(translationMiddleware()); // enable translation globally
 
 // const limiter = rateLimit({
 //   windowMs: 1 * 60 * 1000,
