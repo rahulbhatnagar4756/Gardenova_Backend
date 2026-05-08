@@ -48,9 +48,9 @@ export const getAllPlants = async (
         const page   = parseInt(req.query.page as string) || 1;
         const limit  = parseInt(req.query.limit as string) || 20;
         const search = (req.query.search as string)?.trim() || undefined;
-        const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); // 
+        // const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); // 
 
-        const data = await getAllPlantsService(page, limit, lang, search); // 
+        const data = await getAllPlantsService(page, limit, search); // 
 
         res.status(HTTP_STATUS.OK).json(successResponse(
             data,
@@ -114,9 +114,9 @@ export const getPlantById = async (
             return;
         }
 
-        const lang = (req.headers["accept-language"] ?? "en").toLowerCase(); // 👈
+        // const lang = (req.headers["accept-language"] ?? "en").toLowerCase(); // 👈
 
-        const data = await getPlantDetailsByIdService(plantId, lang); // 👈
+        const data = await getPlantDetailsByIdService(plantId); // 👈
 
         res.status(HTTP_STATUS.OK).json(
             successResponse(data, "Plant details retrieved successfully")
@@ -248,9 +248,9 @@ export const getAllUserPlants = async (
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 20;
         const search = (req.query.search as string)?.trim() || undefined;
-         const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); 
+        //  const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); 
 
-        const data = await getUserPlantsService(user.id!, page, limit, search, lang);
+        const data = await getUserPlantsService(user.id!, page, limit, search);
 
         res.status(HTTP_STATUS.OK).json(
             successResponse(data, "User plants retrieved successfully")
@@ -324,18 +324,10 @@ export const getUserPlantById = async (
         res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Plant ID is required"));
         return;
     }
-    const plantId = parseInt(req.params.id);
-    const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); 
-
-    if (isNaN(plantId)) {
-        res.status(HTTP_STATUS.BAD_REQUEST).json(
-            errorResponse("Invalid plant ID — must be an integer")
-        );
-        return;
-    }
+    
     // ── 3. Service ────────────────────────────────────────────────────────────
     try {
-        const plant = await getUserPlantByIdService(user.id!, plantId,lang);
+        const plant = await getUserPlantByIdService(user.id!, req.params.id);
 
         if (!plant) {
             res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Plant not found"));

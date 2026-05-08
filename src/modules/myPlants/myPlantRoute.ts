@@ -152,7 +152,7 @@ router.get("/",auth, getAllPlants);
  * /api/v1/allplants/{id}:
  *   get:
  *     summary: Get plant by ID
- *     description: Fetch the details of a plant by its unique serial ID.
+ *     description: Fetch the details of a plant by its unique UUID.
  *     tags: [My Plants]
  *     security:
  *       - bearerAuth: []
@@ -160,10 +160,11 @@ router.get("/",auth, getAllPlants);
  *       - in: path
  *         name: id
  *         required: true
+ *         description: Unique UUID of the plant
  *         schema:
- *           type: integer
- *           example: 1
- *         description: Unique serial ID of the plant
+ *           type: string
+ *           format: uuid
+ *           example: "550e8400-e29b-41d4-a716-446655440000"
  *     responses:
  *       200:
  *         description: Plant details retrieved successfully
@@ -194,7 +195,7 @@ router.get("/",auth, getAllPlants);
  *                   type: string
  *                   example: Plant ID is required
  *       401:
- *         description: Unauthorized - User must be authenticated.
+ *         description: Unauthorized - User must be authenticated
  *         content:
  *           application/json:
  *             schema:
@@ -242,8 +243,9 @@ router.get("/",auth, getAllPlants);
  *       type: object
  *       properties:
  *         id:
- *           type: integer
- *           example: 1
+ *           type: string
+ *           format: uuid
+ *           example: "550e8400-e29b-41d4-a716-446655440000"
  *         name:
  *           type: string
  *           example: Rose
@@ -857,8 +859,8 @@ router.get("/user/myplants", auth, getAllUserPlants);
  *         required: true
  *         schema:
  *           type: string
- *           format: integer
- *           example: 1
+ *           format: uuid
+ *           example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
  *         description: Unique identifier for the user's plant
  *     responses:
  *       200:

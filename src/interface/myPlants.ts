@@ -8,25 +8,19 @@ export interface GenericOption {
 
 // ─── Plant Species (from /allplants) ─────────────────────────────────────────
 export interface Plant {
-  id: string;
-  scientific_name: string;
+  plant_id: string;
+  species_name: string;
   common_name: string;
-  description: string | null;
+  genus_name: string | null;
+  family_name: string | null;
+  plant_type: string | null;
+  growth_habit: string | null;
+  edible: boolean | null;
+  edible_part: string | null;
+  vegetable: boolean | null;
   image_url: string | null;
 
-  water_reminder_frequency: number;
-  water_notification_enabled: boolean;
-
-  fertilizer_schedule: number;
-  fertilizer_notification_enabled: boolean;
-
-  pruning_alert: number;
-  pruning_notification_enabled: boolean;
-
-  generic_options: GenericOption[];
-
-  created_at: string;           // ISO date string
-  updated_at: string;
+  
 }
 
 // ─── Paginated response wrapper (/allplants) ──────────────────────────────────
@@ -41,8 +35,8 @@ export interface PaginatedPlants {
 // ─── User's own plant (from /userplants) ─────────────────────────────────────
 export interface UserPlant {
     user_plant_id: string;
-    plant_id: number;
-    common_name: string | null;
+    plant_id: string;
+    common_name: string ;
     scientific_name: string;
     family: string | null;
     genus: string | null;
@@ -87,7 +81,7 @@ export interface UserPlantsResult {
 
 // ─── Add plant input ──────────────────────────────────────────────────────────
 export interface AddUserPlantInput {
-  plant_id: number;
+  plant_id: string;
  
 
   watering_notification_enabled?: boolean;

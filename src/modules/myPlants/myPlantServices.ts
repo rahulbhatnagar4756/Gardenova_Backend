@@ -1,131 +1,16 @@
 import { getDB } from "../../core/config/db";
-import { AddUserPlantInput, CareNotificationInput, CareUpdateFields, FlatUpdateUserPlantInput, PaginatedUserPlants, PlantDetailsResponse, PlantResponse, UpdateUserPlantInput, UserPlant } from "../../interface/myPlants";
+import {
+    AddUserPlantInput,
+    CareNotificationInput,
+    CareUpdateFields,
+    FlatUpdateUserPlantInput,
+    PaginatedUserPlants,
+    PlantDetailsResponse,
+    PlantResponse,
+    UpdateUserPlantInput,
+    UserPlant
+} from "../../interface/myPlants";
 import { PaginatedPlants } from "../../interface/plants";
-
-
-
-// /**
-//  * Retrieves paginated plant species from the database.
-//  *
-//  * @param {number} page - Current page number.
-//  * @param {number} limit - Number of records per page.
-//  * @param lang
-//  * @param search
-//  * @returns {Promise<PaginatedPlants>} Paginated plant result including
-//  * current page, total pages, total count, and plant list.
-//  */
-// export const getAllPlantsService = async (
-//     page: number,
-//     limit: number,
-//     lang: string,
-//     search?: string
-// ): Promise<PaginatedPlants> => {
-//     const pool = await getDB();
-
-//     const safePage  = Math.max(1, page);
-//     const safeLimit = Math.min(100, Math.max(1, limit));
-//     const offset    = (safePage - 1) * safeLimit;
-
-//     const isPT          = lang?.toLowerCase().startsWith("pt");
-//     const commonNameCol = isPT
-//         ? `COALESCE(pc.common_name_pt, pc.common_name)`
-//         : `pc.common_name`;
-//     const nameCol      = isPT ? `pc.common_name_pt` : `pc.common_name`;
-//     const tsvectorLang = isPT ? `'portuguese'`       : `'english'`;
-
-//     // ── Base JOIN ─────────────────────────────────────────────────────────────
-//     const joinClause = `
-//         FROM  all_plants  ap
-//         LEFT  JOIN plant_care pc ON ap.scientific_name = pc.scientific_name
-//     `;
-
-//     // ── Search condition ──────────────────────────────────────────────────────
-//     // $1 = exact | $2 = starts-with (search%) | $3 = contains (%search%)
-//     const searchCondition = search
-//         ? `WHERE (
-//             to_tsvector(${tsvectorLang}, unaccent(COALESCE(${nameCol}, '')))         @@ plainto_tsquery(${tsvectorLang}, unaccent($1)) OR
-//             to_tsvector('simple',        unaccent(COALESCE(pc.scientific_name, ''))) @@ plainto_tsquery('simple',        unaccent($1)) OR
-//             unaccent(${nameCol})          % unaccent($1) OR
-//             unaccent(pc.scientific_name)  % unaccent($1) OR
-//             unaccent(${nameCol})          ILIKE unaccent($3) OR
-//             unaccent(pc.scientific_name)  ILIKE unaccent($3)
-//         )`
-//         : "";
-
-//     // ── Relevance score ───────────────────────────────────────────────────────
-//     const relevanceScore = search
-//         ? `(
-//             -- Exact match (highest)
-//             CASE WHEN unaccent(${nameCol})         ILIKE unaccent($1) THEN 100 ELSE 0 END +
-//             CASE WHEN unaccent(pc.scientific_name) ILIKE unaccent($1) THEN 100 ELSE 0 END +
-
-//             -- Starts with
-//             CASE WHEN unaccent(${nameCol})         ILIKE unaccent($2) THEN  75 ELSE 0 END +
-//             CASE WHEN unaccent(pc.scientific_name) ILIKE unaccent($2) THEN  75 ELSE 0 END +
-
-//             -- Contains anywhere
-//             CASE WHEN unaccent(${nameCol})         ILIKE unaccent($3) THEN  50 ELSE 0 END +
-//             CASE WHEN unaccent(pc.scientific_name) ILIKE unaccent($3) THEN  50 ELSE 0 END +
-
-//             -- Full-text match
-//             CASE WHEN to_tsvector(${tsvectorLang}, unaccent(COALESCE(${nameCol}, '')))         @@ plainto_tsquery(${tsvectorLang}, unaccent($1)) THEN 10 ELSE 0 END +
-//             CASE WHEN to_tsvector('simple',        unaccent(COALESCE(pc.scientific_name, ''))) @@ plainto_tsquery('simple',        unaccent($1)) THEN 10 ELSE 0 END +
-
-//             -- Fuzzy / trigram (lowest)
-//             CASE WHEN unaccent(${nameCol})         % unaccent($1) THEN 5 ELSE 0 END +
-//             CASE WHEN unaccent(pc.scientific_name) % unaccent($1) THEN 5 ELSE 0 END
-//         )`
-//         : "0";
-
-//     // $1 = search | $2 = search% | $3 = %search%
-//     const baseParams: (string | number)[] = search
-//         ? [search, `${search.trim()}%`, `%${search.trim()}%`]
-//         : [];
-
-//     // param indices shift depending on whether search is present
-//     const limitIdx  = search ? 4 : 1;
-//     const offsetIdx = search ? 5 : 2;
-
-//     // ── Total count ───────────────────────────────────────────────────────────
-//     const totalResult = await pool.query(
-//         `SELECT COUNT(*)::int AS count
-//          ${joinClause}
-//          ${searchCondition}`,
-//         baseParams
-//     );
-
-//     const totalCount = totalResult.rows[0]?.count ?? 0;
-//     const totalPages = totalCount === 0 ? 1 : Math.ceil(totalCount / safeLimit);
-
-//     // ── Data ──────────────────────────────────────────────────────────────────
-//     const plantsResult = await pool.query(
-//         `SELECT
-//             pc.id,
-//             pc.scientific_name,
-//             ${commonNameCol}                AS common_name,
-//             pc.family,
-//             pc.genus,
-//             pc.image_url,
-//             pc.created_at,
-//             pc.updated_at,
-//             ${relevanceScore}               AS relevance
-//          ${joinClause}
-//          ${searchCondition}
-//          ORDER BY relevance DESC, pc.id ASC
-//          LIMIT  $${limitIdx}
-//          OFFSET $${offsetIdx}`,
-//         [...baseParams, safeLimit, offset]
-//     );
-
-//     return {
-//         currentPage: safePage,
-//         totalPages,
-//         totalCount,
-//         limit: safeLimit,
-//         plants: plantsResult.rows,
-//     };
-// };
-
 
 /**
  * Retrieves paginated plant species from the database.
@@ -140,98 +25,94 @@ import { PaginatedPlants } from "../../interface/plants";
 export const getAllPlantsService = async (
     page: number,
     limit: number,
-    lang: string,
     search?: string
 ): Promise<PaginatedPlants> => {
     const pool = await getDB();
     const offset = (page - 1) * limit;
+    const TABLE = "plantstable"; // ← replace with your real table
 
-    const isPT = lang?.toLowerCase().startsWith("pt");
+    const searchValue = search?.trim() ?? "";
 
-    // ✅ Select correct column
-    const nameCol = isPT ? "pc.common_name_pt" : "pc.common_name";
+    const commonNameExpr = `COALESCE(inat_common_name, common_name, trefle_common_name)`;
 
-    const searchValue = search?.trim() || "";
-
-    // ✅ SEARCH CONDITION
+    // ── Search condition ───────────────────────────────────────────────────────
     const searchCondition = search
-        ? `
-    WHERE (
-      unaccent(pc.scientific_name) ILIKE unaccent($2)
-      OR unaccent(${nameCol}) ILIKE unaccent($2)
+        ? `AND (
+        unaccent(species_name)         ILIKE unaccent($2)
+        OR unaccent(inat_common_name)  ILIKE unaccent($2)
 
-      OR to_tsvector('simple', unaccent(COALESCE(pc.scientific_name,''))) @@ plainto_tsquery('simple', unaccent($1))
-      OR to_tsvector('simple', unaccent(COALESCE(${nameCol},''))) @@ plainto_tsquery('simple', unaccent($1))
+        OR to_tsvector('simple', unaccent(COALESCE(species_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))
+        OR to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))
 
-      OR unaccent(pc.scientific_name) % unaccent($1)
-      OR unaccent(${nameCol}) % unaccent($1)
-    )
-  `
+        OR unaccent(species_name)        % unaccent($1)
+        OR unaccent(COALESCE(inat_common_name,'')) % unaccent($1)
+      )`
         : "";
 
-    // ✅ RELEVANCE SCORE
+    // ── Relevance score ────────────────────────────────────────────────────────
     const relevanceScore = search
-        ? `
-    CASE
-      WHEN unaccent(pc.scientific_name) ILIKE unaccent($2) THEN 300
-      WHEN unaccent(${nameCol}) ILIKE unaccent($2) THEN 300
+        ? `CASE
+      WHEN unaccent(species_name)        ILIKE unaccent($2) THEN 300
+      WHEN unaccent(inat_common_name)    ILIKE unaccent($2) THEN 300
 
-      WHEN to_tsvector('simple', unaccent(COALESCE(pc.scientific_name,''))) @@ plainto_tsquery('simple', unaccent($1)) THEN 150
-      WHEN to_tsvector('simple', unaccent(COALESCE(${nameCol},''))) @@ plainto_tsquery('simple', unaccent($1)) THEN 150
+      WHEN to_tsvector('simple', unaccent(COALESCE(species_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
+      WHEN to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
 
-      WHEN unaccent(pc.scientific_name) % unaccent($1) THEN 80
-      WHEN unaccent(${nameCol}) % unaccent($1) THEN 80
+      WHEN unaccent(species_name)        % unaccent($1)     THEN 80
+      WHEN unaccent(COALESCE(inat_common_name,'')) % unaccent($1) THEN 80
 
       ELSE 0
-    END
-  `
-        : "0";
+    END`
+        : `0::integer`; // ← was "0", now explicitly cast so PG treats it as a value not a position
+    const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
-    const joinClause = `
-    FROM all_plants ap
-    LEFT JOIN plant_care pc ON ap.scientific_name = pc.scientific_name
+    // ── Total count ────────────────────────────────────────────────────────────
+    const totalQuery = `
+    SELECT COUNT(*) FROM (
+      SELECT DISTINCT ON (species_id) species_id
+      FROM ${TABLE}
+      WHERE species_name IS NOT NULL AND species_name <> ''
+      ${searchCondition}
+      ORDER BY species_id
+    ) AS deduped;
   `;
 
-    // ✅ PARAMS
+    const totalResult = await pool.query(totalQuery, searchParams);
+    const totalCount = Number(totalResult.rows[0].count);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // ── Main query ─────────────────────────────────────────────────────────────
+    const limitPh = `$${search ? 3 : 1}`;
+    const offsetPh = `$${search ? 4 : 2}`;
     const params = search
         ? [searchValue, `${searchValue}%`, limit, offset]
         : [limit, offset];
 
-    // ✅ TOTAL COUNT
-    const totalQuery = `
-    SELECT COUNT(*) 
-    ${joinClause}
-    ${searchCondition}
-  `;
-
-    const totalResult = await pool.query(
-        totalQuery,
-        search ? [searchValue, `${searchValue}%`] : []
-    );
-
-    const totalCount = Number(totalResult.rows[0].count);
-    const totalPages = Math.ceil(totalCount / limit);
-
-    // ✅ MAIN QUERY
     const dataQuery = `
-    SELECT
-      pc.id,
-      pc.scientific_name,
-      ${nameCol} AS common_name,
-      pc.family,
-      pc.genus,
-      pc.image_url,
-      pc.created_at,
-      pc.updated_at,
-      ${relevanceScore} AS relevance
-
-    ${joinClause}
+  SELECT *
+  FROM (
+    SELECT DISTINCT ON (species_id)
+      id,
+      species_name,
+      ${commonNameExpr}   AS common_name,
+      image_url,
+      ${relevanceScore}   AS relevance
+    FROM ${TABLE}
+    WHERE species_name IS NOT NULL AND species_name <> ''
     ${searchCondition}
-
-    ORDER BY relevance DESC, pc.scientific_name ASC
-    LIMIT $${search ? 3 : 1}
-    OFFSET $${search ? 4 : 2}
-  `;
+    ORDER BY
+      species_id,
+      (${relevanceScore}) DESC,                              -- ← wrap in parens
+      (image_url IS NOT NULL AND image_url <> '') DESC
+  ) AS deduped
+  ORDER BY relevance DESC, species_name ASC
+  LIMIT  ${limitPh}
+  OFFSET ${offsetPh};
+`;
 
     const plantsResult = await pool.query(dataQuery, params);
 
@@ -247,7 +128,6 @@ export const getAllPlantsService = async (
 
 
 
-
 /**
  * Retrieves detailed information about a plant by its ID.
  *
@@ -258,96 +138,54 @@ export const getAllPlantsService = async (
  * @throws {Error} If plant is not found or database query fails.
  */
 export const getPlantDetailsByIdService = async (
-    plantId: string,
-    lang: string        //  added
+    plantId: string
 ): Promise<PlantResponse> => {
     try {
         const pool = await getDB();
+        const TABLE = "plantstable"; // ← replace with your real table name
+        const speciesId = plantId;
 
-        const id = Number(plantId);
-        if (isNaN(id)) throw new Error("Invalid plant ID");
-
-        const isPT = lang.startsWith("pt");
-
-        // Language-aware common_name column
-        const commonNameCol = isPT
-            ? `COALESCE(pc.common_name_pt, pc.common_name)`
-            : `pc.common_name`;
+        // if (isNaN(speciesId)) throw new Error("Invalid plant ID");
 
         const result = await pool.query(
-            `SELECT scientific_name FROM plant_care WHERE id = $1`,
-            [id]
+            `SELECT DISTINCT ON (species_id)
+          id,
+          species_id,
+          species_name,
+          genus_name,
+          family_name,
+          COALESCE(inat_common_name, common_name, trefle_common_name) AS common_name,
+          inat_common_name,
+          image_url,
+          plant_type,
+          growth_habit,
+          edible,
+          edible_part,
+          vegetable,
+          lat,
+          lon
+        FROM ${TABLE}
+        WHERE id = $1
+          
+        ORDER BY
+          species_id,
+          (image_url IS NOT NULL AND image_url <> '') DESC`,
+            [speciesId]
         );
 
         if (result.rows.length === 0) throw new Error("Plant not found");
 
-        const plantDetailsResult = await pool.query(
-            `SELECT
-                pc.id AS plant_id,
-                ${commonNameCol} AS common_name,   -- 👈 language-aware
-                pc.scientific_name,
-                pc.family,
-                pc.genus,
-                pc.watering,
-                pc.sunlight,
-                pc.care_level,
-                pc.growth_rate,
-                pc.indoor,
-                pc.temperature_min,
-                pc.temperature_max,
-                pc.humidity_min,
-                pc.humidity_max,
-                pc.light_min,
-                pc.light_max,
-                pc.soil_moisture_min,
-                pc.soil_moisture_max,
-                pc.poisonous_to_humans,
-                pc.poisonous_to_pets,
-                pc.drought_tolerant,
-                pc.tropical,
-                pc.medical,
-                pc.edible,
-                pc.soil,
-                pc.fertilizer,
-                pc.pruning,
-                pc.cycle,
-                pc.pest,
-                pc.diseases,
-                pc.origin,
-                pc.category,
-                pc.climate,
-                pc.color,
-                pc.blooming,
-                pc.description,
-                pc.image_url,
-                pc.source
-            FROM plant_care pc
-            
-            WHERE pc.scientific_name = $1`,
-            [result.rows[0].scientific_name]
-        );
-
-        const fallbackResult = await pool.query(
-            `SELECT id AS plant_id, common_name, scientific_name, family, genus, image_url
-             FROM all_plants
-             WHERE id = $1`,
-            [id]
-        );
-
         return {
-            plant: plantDetailsResult.rows[0] ?? fallbackResult.rows[0],
+            plant: result.rows[0],
             reminder: {
                 watering_notification_enabled: false,
                 watering_reminder_frequency: 0,
                 watering_preferred_time: "09:00:00",
-
                 fertilizer_notification_enabled: false,
                 fertilizer_reminder_frequency: 0,
                 fertilizer_preferred_time: "09:00:00",
-
                 puring_notification_enabled: false,
                 pruning_reminder_frequency: 0,
-
                 generic_notification_enabled: false,
                 generic_care_reminder_frequency: 0,
             },
@@ -356,7 +194,7 @@ export const getPlantDetailsByIdService = async (
         if (err instanceof Error) throw err;
         throw new Error("Failed to fetch plant details");
     }
-}
+};
 /**
  * Calculates the date that is a specified number of days ahead of the current date.
  *
@@ -402,14 +240,14 @@ export const addPlantToUserService = async (
     } = payload;
 
     // ── Verify plant species exists ───────────────────────────────────────────
-    const species = await pool.query(
-        `SELECT id FROM plant_care WHERE id = $1`,
-        [plant_id]
-    );
+    // const species = await pool.query(
+    //     `SELECT id FROM plant_care WHERE id = $1`,
+    //     [plant_id]
+    // );
 
-    if (!species.rows.length) {
-        throw new Error("Plant species not found");
-    }
+    // if (!species.rows.length) {
+    //     throw new Error("Plant species not found");
+    // }
 
     // ── Calculate next care dates (null when notification disabled) ───────────
     const next_watered_at = calculateNextDate(
@@ -499,38 +337,7 @@ export const addPlantToUserService = async (
  * @throws {Error} If database query fails.
  */
 // ── Service ───────────────────────────────────────────────────────────────────
-const USER_PLANT_SELECT = `
-    up.id                               AS user_plant_id,
-    pc.id                               AS plant_id,
-    pc.common_name,
-    pc.scientific_name,
-    pc.family,
-    pc.genus,
-    pc.image_url,
-    up.health_status,
-    up.watering_notification_enabled,
-    up.watering_preferred_time,
-    up.watering_reminder_frequency,
-    up.last_watered_at,
-    up.last_watered_at,
-    up.next_watered_at,
-    up.fertilizer_notification_enabled,
-    up.fertilizer_preferred_time,
-    up.fertilizer_reminder_frequency,
-    up.last_fertilized_at,
-    up.next_fertilized_at,
-    up.pruning_notification_enabled,
-    up.pruning_reminder_frequency,
-    up.last_pruned_at,
-    up.next_pruned_at,
-    up.generic_notification_enabled,
-    up.generic_care_reminder_frequency,
-    up.last_generic_care_at,
-    up.next_generic_care_at,
-    up.added_at,
-    up.created_at,
-    up.updated_at
-`;
+
 /**
  * Retrieves a paginated list of a user's plants with optional search.
  *
@@ -563,65 +370,68 @@ export const getUserPlantsService = async (
     page: number = 1,
     limit: number = 20,
     search?: string,
-    lang?: string
 ): Promise<PaginatedUserPlants> => {
 
     const pool = await getDB();
 
-    const safePage  = Math.max(1, page);
+    const safePage = Math.max(1, page);
     const safeLimit = Math.min(100, Math.max(1, limit));
-    const offset    = (safePage - 1) * safeLimit;
+    const offset = (safePage - 1) * safeLimit;
 
-    const isPT        = lang?.toLowerCase().startsWith("pt");
-    const nameCol     = isPT ? "pc.common_name_pt" : "pc.common_name";
+
+
     const searchValue = search?.trim() ?? "";           // ✅ trimmed once
-    const isSearch    = searchValue.length > 0;         // ✅ safe guard
+    const isSearch = searchValue.length > 0;         // ✅ safe guard
 
     const fromClause = `
         FROM  user_plants up
-        JOIN  plant_care  pc ON pc.id = up.plant_id
+        JOIN  plantstable  pc ON pc.id = up.plant_id
         WHERE up.user_id = $1
     `;
 
-    // $1 = userId | $2 = searchValue | $3 = %searchValue%
-    const searchCondition = isSearch
-        ? `
-        AND (
-          unaccent(pc.scientific_name) ILIKE unaccent($3)
-          OR unaccent(${nameCol}) ILIKE unaccent($3)
+    const commonNameExpr = `COALESCE(inat_common_name, common_name, trefle_common_name)`;
 
-          OR to_tsvector('simple', unaccent(COALESCE(pc.scientific_name,''))) @@ plainto_tsquery('simple', unaccent($2))
-          OR to_tsvector('simple', unaccent(COALESCE(${nameCol},''))) @@ plainto_tsquery('simple', unaccent($2))
+    // ── Search condition ───────────────────────────────────────────────────────
+    const searchCondition = search
+        ? `AND (
+        unaccent(species_name)         ILIKE unaccent($2)
+        OR unaccent(inat_common_name)  ILIKE unaccent($2)
 
-          OR unaccent(pc.scientific_name) % unaccent($2)
-          OR unaccent(${nameCol}) % unaccent($2)
-        )
-        `
+        OR to_tsvector('simple', unaccent(COALESCE(species_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))
+        OR to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))
+
+        OR unaccent(species_name)        % unaccent($1)
+        OR unaccent(COALESCE(inat_common_name,'')) % unaccent($1)
+      )`
         : "";
 
-    const relevanceScore = isSearch
-        ? `
-        CASE
-          WHEN unaccent(pc.scientific_name) ILIKE unaccent($3) THEN 300
-          WHEN unaccent(${nameCol}) ILIKE unaccent($3) THEN 300
+    // ── Relevance score ────────────────────────────────────────────────────────
+    const relevanceScore = search
+        ? `CASE
+      WHEN unaccent(species_name)        ILIKE unaccent($2) THEN 300
+      WHEN unaccent(inat_common_name)    ILIKE unaccent($2) THEN 300
 
-          WHEN to_tsvector('simple', unaccent(COALESCE(pc.scientific_name,''))) @@ plainto_tsquery('simple', unaccent($2)) THEN 150
-          WHEN to_tsvector('simple', unaccent(COALESCE(${nameCol},''))) @@ plainto_tsquery('simple', unaccent($2)) THEN 150
+      WHEN to_tsvector('simple', unaccent(COALESCE(species_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
+      WHEN to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
+             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
 
-          WHEN unaccent(pc.scientific_name) % unaccent($2) THEN 80
-          WHEN unaccent(${nameCol}) % unaccent($2) THEN 80
+      WHEN unaccent(species_name)        % unaccent($1)     THEN 80
+      WHEN unaccent(COALESCE(inat_common_name,'')) % unaccent($1) THEN 80
 
-          ELSE 0
-        END
-        `
-        : "0";
+      ELSE 0
+    END`
+        : `0::integer`; // ← was "0", now explicitly cast so PG treats it as a value not a position
+    // const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
     // ✅ searchValue used consistently, not raw search
     const baseParams: (string | number)[] = isSearch
         ? [userId, searchValue, `%${searchValue}%`]
         : [userId];
 
-    const limitIdx  = isSearch ? 4 : 2;
+    const limitIdx = isSearch ? 4 : 2;
     const offsetIdx = isSearch ? 5 : 3;
 
     const countResult = await pool.query<{ count: number }>(
@@ -636,12 +446,11 @@ export const getUserPlantsService = async (
 
     const dataResult = await pool.query<UserPlant>(
         `SELECT
-            up.id                                   AS user_plant_id,
-            pc.id                                   AS plant_id,
-            ${nameCol}                              AS common_name,
-            pc.scientific_name,
-            pc.family,
-            pc.genus,
+            up.id,
+            pc.id                          AS plant_id,
+            ${commonNameExpr}              AS common_name,
+            pc.family_name                 As family,
+            pc.genus_name                  AS genus,
             pc.image_url,
             up.health_status,
             up.watering_notification_enabled,
@@ -713,109 +522,71 @@ export const getUserPlantsService = async (
  */
 export const getUserPlantByIdService = async (
     userId: string,
-    userPlantId: number,
-    lang: string
+    userPlantId: string
 ): Promise<PlantDetailsResponse | null> => {
-
-    const isPT        = lang?.toLowerCase().startsWith("pt");
-    const nameCol     = isPT ? "pc.common_name_pt" : "pc.common_name";
-
+    //   const TABLE = "plantstable";
     const pool = await getDB();
 
-    const userPlantResult = await pool.query<UserPlant>(
-        `SELECT ${USER_PLANT_SELECT}
-         FROM   user_plants up
-         JOIN   plant_care  pc ON pc.id = up.plant_id
-         WHERE  up.plant_id = $1 AND up.user_id = $2`,
-        [userPlantId, userId]
-    );
+    const userPlantQuery = await pool.query(
+        `SELECT * FROM user_plants WHERE user_id = $1 AND plant_id = $2`,
+        [userId, userPlantId]
+    )
+    if (userPlantQuery.rows.length === 0) return null;
 
-    if (userPlantResult.rows.length === 0) return null;
 
-    const userPlant = userPlantResult.rows[0];
-    if (!userPlant) {
-        throw new Error("User plant not found");
-    };
-
-    const plantDetailsResult = await pool.query(
-        `SELECT
-            pc.id AS plant_id,  
-            ${nameCol} AS common_name,
-            pc.scientific_name,
-            pc.family,
-            pc.genus,
-            pc.watering,
-            pc.sunlight,
-            pc.care_level,
-            pc.growth_rate,
-            pc.indoor,
-            pc.temperature_min,
-            pc.temperature_max,
-            pc.humidity_min,
-            pc.humidity_max,
-            pc.light_min,
-            pc.light_max,
-            pc.soil_moisture_min,
-            pc.soil_moisture_max,
-            pc.poisonous_to_humans,
-            pc.poisonous_to_pets,
-            pc.drought_tolerant,
-            pc.tropical,
-            pc.medical,
-            pc.edible,
-            pc.soil,
-            pc.fertilizer,
-            pc.pruning,
-            pc.cycle,
-            pc.pest,
-            pc.diseases,
-            pc.origin,
-            pc.category,
-            pc.climate,
-            pc.color,
-            pc.blooming,
-            pc.description,
-            pc.image_url,
-            pc.source
-        FROM plant_care pc
-        JOIN all_plants ap ON ap.scientific_name = pc.scientific_name
-        WHERE pc.scientific_name = $1`,
-        [userPlant.scientific_name]
-    );
-
-    const fallbackResult = await pool.query(
-        `SELECT id AS plant_id, common_name, scientific_name, family, genus, image_url
-         FROM all_plants
+    const plantDetailsQuery = await pool.query(
+        `SELECT *
+         FROM plantstable
          WHERE id = $1`,
         [userPlantId]
     );
+            
+    if (plantDetailsQuery.rows.length === 0) return null;
+
+    const userPlantDetails = plantDetailsQuery.rows[0];
+    const usercareDetails = userPlantQuery.rows[0];
+   
 
     return {
-        user_plant_id: userPlant.user_plant_id,
-        plant: plantDetailsResult.rows[0] ?? fallbackResult.rows[0],
+        user_plant_id: userPlantDetails.plant_id,
+        plant: {
+            plant_id: userPlantDetails.plant_id,
+            common_name: userPlantDetails.common_name,
+            species_name: userPlantDetails.species_name,
+            genus_name: userPlantDetails.genus_name,
+            family_name: userPlantDetails.family_name,
+            image_url: userPlantDetails.image_url,
+            plant_type: userPlantDetails.plant_type,
+            growth_habit: userPlantDetails.growth_habit,
+            edible: userPlantDetails.edible,
+            edible_part: userPlantDetails.edible_part,
+            vegetable: userPlantDetails.vegetable,
+        },
         reminder: {
-            watering_notification_enabled: userPlant.watering_notification_enabled,
-            watering_reminder_frequency: userPlant.watering_reminder_frequency,
-            watering_preferred_time: userPlant.watering_preferred_time,
-            next_watered_at: userPlant.next_watered_at,
-            last_watered_at: userPlant.last_watered_at,
-            fertilizer_notification_enabled: userPlant.fertilizer_notification_enabled,
-            fertilizer_reminder_frequency: userPlant.fertilizer_reminder_frequency,
-            fertilizer_preferred_time: userPlant.fertilizer_preferred_time,
-            next_fertilized_at: userPlant.next_fertilized_at,
-            last_fertilized_at: userPlant.last_fertilized_at,
-            puring_notification_enabled: userPlant.pruning_notification_enabled,
-            pruning_reminder_frequency: userPlant.pruning_reminder_frequency,
-            next_pruned_at: userPlant.next_pruned_at,
-            last_pruned_at: userPlant.last_pruned_at,
-            generic_notification_enabled: userPlant.generic_notification_enabled,
-            generic_care_reminder_frequency: userPlant.generic_care_reminder_frequency,
-            last_generic_care_at: userPlant.last_generic_care_at,
-            next_generic_care_at: userPlant.next_generic_care_at,
+            watering_notification_enabled: usercareDetails.watering_notification_enabled,
+            watering_reminder_frequency: usercareDetails.watering_reminder_frequency,
+            watering_preferred_time: usercareDetails.watering_preferred_time,
+            next_watered_at: usercareDetails.next_watered_at,
+            last_watered_at: usercareDetails.last_watered_at,
+
+            fertilizer_notification_enabled: usercareDetails.fertilizer_notification_enabled,
+            fertilizer_reminder_frequency: usercareDetails.fertilizer_reminder_frequency,
+            fertilizer_preferred_time: usercareDetails.fertilizer_preferred_time,
+            next_fertilized_at: usercareDetails.next_fertilized_at,
+            last_fertilized_at: usercareDetails.last_fertilized_at,
+
+            puring_notification_enabled: usercareDetails.pruning_notification_enabled,
+            pruning_reminder_frequency: usercareDetails.pruning_reminder_frequency,
+            next_pruned_at: usercareDetails.next_pruned_at,
+            last_pruned_at: usercareDetails.last_pruned_at,
+
+            generic_notification_enabled: usercareDetails.generic_notification_enabled,
+            generic_care_reminder_frequency: usercareDetails.generic_care_reminder_frequency,
+            last_generic_care_at: usercareDetails.last_generic_care_at,
+            next_generic_care_at: usercareDetails.next_generic_care_at,
         },
     };
 };
-
 
 const CARE_TYPES_WITH_PREFERRED_TIME = new Set(["watering", "fertilizer"]);
 

@@ -21,7 +21,7 @@ export async function userplantTable(): Promise<void> {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
         user_id UUID NOT NULL,
-        plant_id INTEGER NOT NULL,
+        plant_id uuid NOT NULL,
 
         added_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
@@ -72,7 +72,7 @@ export async function userplantTable(): Promise<void> {
 
         CONSTRAINT fk_plant
             FOREIGN KEY(plant_id)
-            REFERENCES All_plants(id)
+            REFERENCES plantstable(id)
             ON DELETE CASCADE,
 
         -- Unique constraint
