@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, getAllPlants, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
 import { reminderValidation } from "./myPlantValidation";
 import multer from "multer";
@@ -372,10 +372,10 @@ router.get("/:id",auth, getPlantById);
  *         name: userPlantId
  *         required: true
  *         schema:
- *           type: string
- *           format: uuid
- *         description: UUID of the user_plant record to update
- *         example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *           type: number
+ *           format: id
+ *         description: id of the user_plant record to update
+ *         example: 1
  *     requestBody:
  *       required: true
  *       content:
@@ -1061,5 +1061,36 @@ const upload = multer({
  *         description: Import failed
  */
 router.post("/import", upload.single("file"), importPlantsController);
+/**
+ * @swagger
+ * /api/v1/allplants/admin/getAllPlants:
+ *   get:
+ *     summary: Get all plants (Admin)
+ *     description: Retrieve a list of all plants. Accessible only by authenticated admin users.
+ *     tags:
+ *       - [My Plants]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved all plants
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get("/admin/getAllPlants", auth, getAllPlantsAdmin);
  
 export default router;

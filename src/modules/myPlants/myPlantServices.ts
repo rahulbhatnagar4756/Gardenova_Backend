@@ -1,6 +1,7 @@
 import { getDB } from "../../core/config/db";
 import {
     AddUserPlantInput,
+    AdminPlant,
     CareNotificationInput,
     CareUpdateFields,
     FlatUpdateUserPlantInput,
@@ -14,7 +15,7 @@ import { PaginatedPlants } from "../../interface/plants";
 import { parse } from "@fast-csv/parse";
 import config from "../../core/config/env";
 import fs from "fs";
-import { Transform,TransformCallback } from "stream";
+import { Transform, TransformCallback } from "stream";
 import { pipeline } from "stream/promises";
 import pg from "pg";
 import copyFrom from "pg-copy-streams";
@@ -126,21 +127,19 @@ export const getAllPlantsService = async (
     };
 };
 
-
-
-
-
 /**
  * Retrieves detailed information about a plant by its ID.
  *
  * @param {string} plantId - UUID of the plant.
+ * @param {string} userId - UUID of the authenticated user, used to check if the plant is already added to their collection.
  * @param lang
  * @throws {Error} If plant is not found or database query fails.
  * @returns {Promise<void>} Plant details object.
  * @throws {Error} If plant is not found or database query fails.
  */
 export const getPlantDetailsByIdService = async (
-    plantId: string
+    plantId: string,
+    userId: string
 ): Promise<PlantResponse> => {
     try {
         const pool = getDB();
@@ -212,10 +211,18 @@ export const getPlantDetailsByIdService = async (
             [id]
         );
 
+        const userPlantResult = await pool.query(
+            `SELECT * FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
+            [id, userId]
+        );
+
+        const userPlant = userPlantResult.rows[0];
+
         if (result.rows.length === 0) throw new Error("Plant not found");
 
         return {
             plant: result.rows[0],
+            AlreadyAdded: !!userPlant,
             reminder: {
                 watering_notification_enabled: false,
                 watering_reminder_frequency: 0,
@@ -264,6 +271,8 @@ export const addPlantToUserService = async (
 ): Promise<Record<string, unknown>> => {
     const pool = await getDB();
 
+
+
     const {
         plant_id,
         watering_notification_enabled,
@@ -278,6 +287,13 @@ export const addPlantToUserService = async (
         generic_care_reminder_frequency,
     } = payload;
 
+    const query2 = `
+        SELECT * from user_plants where plant_id = $1 and user_id = $2`;
+
+    const result2 = await pool.query(query2, [plant_id, userId]);
+    if (result2.rows.length > 0) {
+        throw new Error("user already has this plant added");
+    }
     // ── Verify plant species exists ───────────────────────────────────────────
     // const species = await pool.query(
     //     `SELECT id FROM plant_care WHERE id = $1`,
@@ -304,6 +320,7 @@ export const addPlantToUserService = async (
     const next_generic_care_at = calculateNextDate(
         generic_notification_enabled ? (generic_care_reminder_frequency ?? null) : null
     );
+
 
     // ── Insert ────────────────────────────────────────────────────────────────
     try {
@@ -576,8 +593,10 @@ export const getUserPlantByIdService = async (
     `;
 
     const result = await pool.query(query, [userId, userPlantId]);
-
     if (result.rows.length === 0) return null;
+
+
+
 
     const row = result.rows[0];
 
@@ -909,7 +928,7 @@ export const updateUserPlantService = async (
 
     // ── Verify the user_plant record belongs to this user ─────────────────────
     const existing = await pool.query(
-        `SELECT id FROM user_plants WHERE id = $1 AND user_id = $2`,
+        `SELECT id FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
         [userPlantId, userId]
     );
 
@@ -989,7 +1008,7 @@ export const updateUserPlantService = async (
     const query = `
         UPDATE user_plants
         SET ${setClauses.join(", ")}
-        WHERE id = $${paramIndex++} AND user_id = $${paramIndex++}
+        WHERE plant_id = $${paramIndex++} AND user_id = $${paramIndex++}
         RETURNING *
     `;
 
@@ -1318,3 +1337,112 @@ export async function importPlantsService(filePath: string): Promise<ImportResul
         }
     }
 }
+
+/**
+ * Retrieves paginated plant records for admin users.
+ *
+ * Supports:
+ * - Pagination
+ * - Optional search filtering
+ *
+ * Database:
+ * - Reads data from `plant_table_final`
+ *
+ * Pagination:
+ * - `page` starts from 1
+ * - `limit` defines number of records per page
+ * - `offset` is calculated internally
+ *
+ * @param page Current page number
+ * @param limit Number of records per page
+ * @param search Optional search keyword for filtering plants
+ *
+ * @returns Promise resolving to an array of admin plant records
+ *
+ * @throws Error Throws database/query execution errors
+ */
+export const getAllPlantsAdminService = async (
+    page: number,
+    limit: number,
+   
+): Promise<AdminPlant[]> => {
+    const pool = await getDB();
+    const offset = (page - 1) * limit;
+
+    const query = `
+        SELECT *
+        FROM plant_table_final     
+        LIMIT $1 OFFSET $2
+    `;
+    const result = await pool.query(query, [limit, offset]);
+
+    return result.rows.map((row) => ({
+        plant_id: row.id,
+        scientific_name: row.scientific_name,
+        common_name: row.common_name,
+        other_name: row.other_name,
+        family: row.family,
+        genus: row.genus,
+        species_epithet: row.species_epithet,
+        hybrid: row.hybrid,
+        plant_type: row.type,
+        growth_habit: row.growth_habit,
+        author: row.authority,
+        edible: row.edible,
+        edible_part: row.edible_part,
+        vegetable: row.vegetable,
+        subspecies: row.subspecies,
+        cultivar: row.cultivar,
+        variety: row.variety,
+        origin: row.origin,
+        type: row.type,
+        cycle: row.cycle,
+        watering: row.watering,
+        watering_benchmark_value: row.watering_benchmark_value,
+        watering_benchmark_unit: row.watering_benchmark_unit,
+        sunlight: row.sunlight,
+        hardiness_min: row.hardiness_min,
+        hardiness_max: row.hardiness_max,
+        dimension_type: row.dimension_type,
+        dimension_min_value: row.dimension_min_value,
+        dimension_max_value: row.dimension_max_value,
+        dimension_unit: row.dimension_unit,
+        growth_rate: row.growth_rate,
+        maintenance: row.maintenance,
+        care_level: row.care_level,
+        soil: row.soil,
+        pruning_month: row.pruning_month,
+        propagation: row.propagation,
+        attracts: row.attracts,
+        pest_susceptibility: row.pest_susceptibility,
+        plant_anatomy: row.plant_anatomy,
+        drought_tolerant: row.drought_tolerant,
+        salt_tolerant: row.salt_tolerant,
+        thorny: row.thorny,
+        invasive: row.invasive,
+        tropical: row.tropical,
+        indoor: row.indoor,
+        flowers: row.flowers,
+        flowering_season: row.flowering_season,
+        cones: row.cones,
+        fruits: row.fruits,
+        edible_fruit: row.edible_fruit,
+        harvest_season: row.harvest_season,
+        leaf: row.leaf,
+        edible_leaf: row.edible_leaf,
+        seeds: row.seeds,
+        cuisine: row.cuisine,
+        medicinal: row.medicinal,
+        poisonous_to_humans: row.poisonous_to_humans,
+        poisonous_to_pets: row.poisonous_to_pets,
+        description: row.description,
+        care_guides_url: row.care_guides_url,
+        image_original_url: row.image_original_url,
+        image_regular_url: row.image_regular_url,
+        image_medium_url: row.image_medium_url,
+        image_small_url: row.image_small_url,
+        image_thumbnail: row.image_thumbnail,
+        image_license: row.image_license,
+    }));
+};
+

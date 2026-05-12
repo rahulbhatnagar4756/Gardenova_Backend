@@ -5,6 +5,7 @@ import { errorResponse, successResponse } from "../../core/utils/responseFormatt
 import { HTTP_STATUS } from "../../core/utils/constants";
 import { findUserByEmail } from "../auth/authRepository";
 import { addPlantToUserService, 
+    getAllPlantsAdminService, 
     getAllPlantsService, 
     getUserPlantByIdService, 
     getUserPlantsService, 
@@ -121,10 +122,13 @@ export const getPlantById = async (
             res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Plant ID is required"));
             return;
         }
-
+        if (!user.id) {
+            res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User ID not found"));
+            return;
+        }
         // const lang = (req.headers["accept-language"] ?? "en").toLowerCase(); // 👈
 
-        const data = await getPlantDetailsByIdService(plantId); // 👈
+        const data = await getPlantDetailsByIdService(plantId,user.id); // 👈
 
         res.status(HTTP_STATUS.OK).json(
             successResponse(data, "Plant details retrieved successfully")
@@ -482,4 +486,76 @@ export const importPlantsController: RequestHandler = async (req, res): Promise<
             res.status(500).json({ message: "Internal server error" });
         }
   }
+};
+
+/**
+ * Retrieves all plants for admin users with pagination and optional search.
+ *
+ * Access Control:
+ * - Requires authenticated user
+ * - Requires user role to be "Admin"
+ *
+ * Query Parameters:
+ * @param req.query.page   Page number for pagination (default: 1)
+ * @param req.query.limit  Number of items per page (default: 10)
+ * @param req.query.search Optional search keyword
+ *
+ * Responses:
+ * - 200: Plants retrieved successfully
+ * - 400: Validation failed
+ * - 401: Unauthorized or user not found
+ * - 403: Unauthorized role
+ * - 500: Internal server error
+ *
+ * @param req Express authenticated request object
+ * @param res Express response object
+ * @param next Express next middleware function
+ *
+ * @returns Promise<void>
+ */
+export const getAllPlantsAdmin = async (
+    req:AuthRequest,
+    res:Response,
+    next:NextFunction
+):Promise<void> => {
+    const userPayload = req.user as AuthUserPayload | undefined;
+    if (!userPayload?.userEmail) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+        return;
+    }
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+        return;
+    }
+    if (userPayload.role !== "Admin") {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized Role"));
+        return;
+    }
+
+    try {
+        const page   = parseInt(req.query.page as string) || 1;
+        const limit  = parseInt(req.query.limit as string) || 10;
+        // const search = (req.query.search as string)?.trim() || undefined;
+        const data = await getAllPlantsAdminService(page, limit);
+        res.status(HTTP_STATUS.OK).json(successResponse(
+            data,
+            "Plants retrieved successfully"
+        ));
+    }
+    catch (err) {
+        if (err instanceof ZodError) {
+            res 
+                .status(HTTP_STATUS.BAD_REQUEST)
+                .json(errorResponse("Validation failed", { issues: err.issues }));
+            return;
+        }
+
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(
+            errorResponse("Something went wrong", {
+                details: (err as Error).message,
+            })
+        );
+        next(err);
+    }
 };

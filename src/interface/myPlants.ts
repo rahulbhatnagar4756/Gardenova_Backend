@@ -90,6 +90,10 @@ export interface Plant {
     image_license: string;            // image_license text
 }
 
+export interface  AdminPlant extends Plant {
+  plant_id: number;
+}
+
 // ─── Paginated response wrapper (/allplants) ──────────────────────────────────
 export interface PaginatedPlants {
   currentPage: number;
@@ -168,17 +172,6 @@ export interface AddUserPlantInput {
   pruning_reminder_frequency: number;
   generic_care_reminder_frequency: number;
 }
-
-
-// export interface PaginatedUserPlants {
-//     currentPage: number;
-//     totalPages: number;
-//     totalCount: number;
-//     limit: number;
-//     plants: UserPlant[];
-// }
-
-
 
 export interface PlantRow {
   common_name?: string;
@@ -286,6 +279,7 @@ export interface Reminder{
 
 export interface PlantResponse{
   plant: PlantDetails;
+  AlreadyAdded: boolean;
   reminder: Reminder;
 }
 
