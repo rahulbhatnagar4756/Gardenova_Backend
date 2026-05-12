@@ -1,11 +1,11 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, getAllPlants, getAllUserPlants, getPlantById, getUserPlantById, updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, getAllPlants, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
-import { importAllPlantsHandler } from "./importAllPlnatController";
-import { importPlantCareHandler } from "./importPlantCareController";
-import { importPlantToxicToPetsHandler } from "./importPetToxicPlantController";
 import { reminderValidation } from "./myPlantValidation";
+import multer from "multer";
+import path from "path";
+import { importPlantsController } from "./myPlantController";
 const router = express.Router();
 /**
  * @swagger
@@ -160,11 +160,11 @@ router.get("/",auth, getAllPlants);
  *       - in: path
  *         name: id
  *         required: true
- *         description: Unique UUID of the plant
+ *         description: Unique ID of the plant
  *         schema:
  *           type: string
- *           format: uuid
- *           example: "550e8400-e29b-41d4-a716-446655440000"
+ *           format: id
+ *           example: "1"
  *     responses:
  *       200:
  *         description: Plant details retrieved successfully
@@ -858,9 +858,9 @@ router.get("/user/myplants", auth, getAllUserPlants);
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *           format: uuid
- *           example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *           type: number
+ *           format: id
+ *           example: "1"
  *         description: Unique identifier for the user's plant
  *     responses:
  *       200:
@@ -943,16 +943,79 @@ router.get("/user/myplants", auth, getAllUserPlants);
  */
 
 router.get("/user/plants/:id", auth, getUserPlantById);
+/**
+ * Multer disk storage configuration for plant CSV uploads.
+ *
+ * - Destination: `uploads/` directory (must exist on the server)
+ * - Filename: prefixed with `plants-`, suffixed with a unique timestamp + random number
+ *   to prevent collisions. Example: `plants-1715420000000-482910.csv`
+ */
+const storage = multer.diskStorage({
+  /**
+   * Sets the upload destination directory.
+   * @param _req - Express request (unused)
+   * @param _file - Uploaded file (unused)
+   * @param cb - Multer callback
+   */
+  destination(_req, _file, cb) {
+    cb(null, "uploads/");
+  },
+
+  /**
+   * Generates a unique filename for the uploaded CSV.
+   * @param _req - Express request (unused)
+   * @param file - Uploaded file object
+   * @param cb - Multer callback
+   */
+  filename(_req, file, cb) {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    cb(null, `plants-${unique}${path.extname(file.originalname)}`);
+  },
+});
 
 /**
+ * Multer upload middleware configured for plant CSV imports.
+ *
+ * Constraints:
+ * - **Max file size**: 500MB
+ * - **Allowed types**: `.csv` only — rejects all other extensions with a 400 error
+ * - **Storage**: disk (not memory) — safe for large files up to 300k rows
+ *
+ * Usage:
+ * ```ts
+ * router.post("/import", upload.single("file"), importPlantsController);
+ * ```
+ */
+const upload = multer({
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 },
+
+  /**
+
+   * Restricts uploads to CSV files only.
+   * @param _req - Express request (unused)
+   * @param file - Uploaded file object
+   * @param cb - Multer callback
+   * @returns {void} Calls cb with an error if the file is not a CSV, otherwise accepts the file.
+   */
+  fileFilter(_req, file, cb) {
+    if (path.extname(file.originalname).toLowerCase() !== ".csv") {
+      return cb(new Error("Only CSV files are accepted."));
+    }
+    cb(null, true);
+  },
+});
+/**
  * @swagger
- * /api/v1/allplants/importAllPlants:
+ * /api/v1/allplants/import:
  *   post:
- *     summary: Import all plants from an Excel file
+ *     summary: Bulk import plants from CSV
+ *     description: >
+ *       Uploads a CSV file and imports all rows into plantstable.
+ *       The request stays open until every row is inserted — no polling needed.
+ *       Expect the response to take 15–60 seconds for 300k rows.
  *     tags:
- *       - [My Plants] 
- *     security:
- *       - bearerAuth: []
+ *       - Plants Import
  *     requestBody:
  *       required: true
  *       content:
@@ -965,88 +1028,38 @@ router.get("/user/plants/:id", auth, getUserPlantById);
  *               file:
  *                 type: string
  *                 format: binary
- *                 description: Excel file containing plant data
+ *                 description: CSV file. First row must be headers.
  *     responses:
  *       200:
- *         description: Plants imported successfully
+ *         description: Import completed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 totalRows:
+ *                   type: integer
+ *                   example: 300000
+ *                 insertedRows:
+ *                   type: integer
+ *                   example: 298500
+ *                 skippedRows:
+ *                   type: integer
+ *                   example: 1200
+ *                 errorRows:
+ *                   type: integer
+ *                   example: 300
+ *                 durationMs:
+ *                   type: integer
+ *                   example: 18400
  *       400:
- *         description: Invalid file or data
- *       401:
- *         description: Unauthorized
+ *         description: No file or invalid file type
  *       500:
- *         description: Server error
+ *         description: Import failed
  */
-router.post("/importAllPlants", auth, ...importAllPlantsHandler);
-
-
-/**
- * @swagger
- * /api/v1/allplants/importPlantCareData:
- *   post:
- *     summary: Import all plants from an Excel file
- *     tags:
- *       - [My Plants] 
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             required:
- *               - file
- *             properties:
- *               file:
- *                 type: string
- *                 format: binary
- *                 description: Excel file containing plant data
- *     responses:
- *       200:
- *         description: Plants imported successfully
- *       400:
- *         description: Invalid file or data
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
- */
-router.post("/importPlantCareData", auth, ...importPlantCareHandler);
-
-
-
-/**
- * @swagger
- * /api/v1/allplants/importPlantToxicToPets:
- *   post:
- *     summary: Import all plants from an Excel file
- *     tags:
- *       - [My Plants] 
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             required:
- *               - file
- *             properties:
- *               file:
- *                 type: string
- *                 format: binary
- *                 description: Excel file containing plant data
- *     responses:
- *       200:
- *         description: Plants imported successfully
- *       400:
- *         description: Invalid file or data
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
- */
-router.post("/importPlantToxicToPets", auth, ...importPlantToxicToPetsHandler);
-
+router.post("/import", upload.single("file"), importPlantsController);
+ 
 export default router;

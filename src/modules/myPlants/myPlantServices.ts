@@ -11,6 +11,13 @@ import {
     UserPlant
 } from "../../interface/myPlants";
 import { PaginatedPlants } from "../../interface/plants";
+import { parse } from "@fast-csv/parse";
+import config from "../../core/config/env";
+import fs from "fs";
+import { Transform,TransformCallback } from "stream";
+import { pipeline } from "stream/promises";
+import pg from "pg";
+import copyFrom from "pg-copy-streams";
 
 /**
  * Retrieves paginated plant species from the database.
@@ -27,59 +34,51 @@ export const getAllPlantsService = async (
     limit: number,
     search?: string
 ): Promise<PaginatedPlants> => {
-    const pool = await getDB();
+    const pool = getDB();
     const offset = (page - 1) * limit;
-    const TABLE = "plantstable"; // ← replace with your real table
+    const TABLE = "plant_table_final";
 
     const searchValue = search?.trim() ?? "";
 
-    const commonNameExpr = `COALESCE(inat_common_name, common_name, trefle_common_name)`;
-
     // ── Search condition ───────────────────────────────────────────────────────
+    // Searches both common_name and scientific_name
     const searchCondition = search
         ? `AND (
-        unaccent(species_name)         ILIKE unaccent($2)
-        OR unaccent(inat_common_name)  ILIKE unaccent($2)
-
-        OR to_tsvector('simple', unaccent(COALESCE(species_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))
-        OR to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))
-
-        OR unaccent(species_name)        % unaccent($1)
-        OR unaccent(COALESCE(inat_common_name,'')) % unaccent($1)
-      )`
+            unaccent(common_name)      ILIKE unaccent($2)
+            OR unaccent(scientific_name) ILIKE unaccent($2)
+            OR to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+                 @@ plainto_tsquery('simple', unaccent($1))
+            OR to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+                 @@ plainto_tsquery('simple', unaccent($1))
+            OR unaccent(COALESCE(common_name, ''))      % unaccent($1)
+            OR unaccent(COALESCE(scientific_name, ''))  % unaccent($1)
+          )`
         : "";
 
     // ── Relevance score ────────────────────────────────────────────────────────
     const relevanceScore = search
         ? `CASE
-      WHEN unaccent(species_name)        ILIKE unaccent($2) THEN 300
-      WHEN unaccent(inat_common_name)    ILIKE unaccent($2) THEN 300
+            WHEN unaccent(common_name)      ILIKE unaccent($2) THEN 300
+            WHEN unaccent(scientific_name)  ILIKE unaccent($2) THEN 280
+            WHEN to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+                   @@ plainto_tsquery('simple', unaccent($1))  THEN 150
+            WHEN to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+                   @@ plainto_tsquery('simple', unaccent($1))  THEN 130
+            WHEN unaccent(COALESCE(common_name, ''))      % unaccent($1) THEN 80
+            WHEN unaccent(COALESCE(scientific_name, ''))  % unaccent($1) THEN 60
+            ELSE 0
+          END`
+        : `0::integer`;
 
-      WHEN to_tsvector('simple', unaccent(COALESCE(species_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
-      WHEN to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
-
-      WHEN unaccent(species_name)        % unaccent($1)     THEN 80
-      WHEN unaccent(COALESCE(inat_common_name,'')) % unaccent($1) THEN 80
-
-      ELSE 0
-    END`
-        : `0::integer`; // ← was "0", now explicitly cast so PG treats it as a value not a position
     const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
     // ── Total count ────────────────────────────────────────────────────────────
     const totalQuery = `
-    SELECT COUNT(*) FROM (
-      SELECT DISTINCT ON (species_id) species_id
-      FROM ${TABLE}
-      WHERE species_name IS NOT NULL AND species_name <> ''
-      ${searchCondition}
-      ORDER BY species_id
-    ) AS deduped;
-  `;
+        SELECT COUNT(*)
+        FROM ${TABLE}
+        WHERE id IS NOT NULL
+        ${searchCondition}
+    `;
 
     const totalResult = await pool.query(totalQuery, searchParams);
     const totalCount = Number(totalResult.rows[0].count);
@@ -93,37 +92,40 @@ export const getAllPlantsService = async (
         : [limit, offset];
 
     const dataQuery = `
-  SELECT *
-  FROM (
-    SELECT DISTINCT ON (species_id)
-      id,
-      species_name,
-      ${commonNameExpr}   AS common_name,
-      image_url,
-      ${relevanceScore}   AS relevance
-    FROM ${TABLE}
-    WHERE species_name IS NOT NULL AND species_name <> ''
-    ${searchCondition}
-    ORDER BY
-      species_id,
-      (${relevanceScore}) DESC,                              -- ← wrap in parens
-      (image_url IS NOT NULL AND image_url <> '') DESC
-  ) AS deduped
-  ORDER BY relevance DESC, species_name ASC
-  LIMIT  ${limitPh}
-  OFFSET ${offsetPh};
-`;
+        SELECT
+            id,
+            common_name,
+            scientific_name,
+            image_original_url,
+            family,
+            type,
+            cycle,
+            watering,
+            indoor,
+            medicinal,
+            edible_fruit,
+            ${relevanceScore} AS relevance
+        FROM ${TABLE}
+        WHERE id IS NOT NULL
+        ${searchCondition}
+        ORDER BY
+            (${relevanceScore}) DESC,
+            id ASC
+        LIMIT  ${limitPh}
+        OFFSET ${offsetPh}
+    `;
 
-    const plantsResult = await pool.query(dataQuery, params);
+    const result = await pool.query(dataQuery, params);
 
     return {
         currentPage: page,
         totalPages,
         totalCount,
         limit,
-        plants: plantsResult.rows,
+        plants: result.rows,
     };
 };
+
 
 
 
@@ -141,36 +143,73 @@ export const getPlantDetailsByIdService = async (
     plantId: string
 ): Promise<PlantResponse> => {
     try {
-        const pool = await getDB();
-        const TABLE = "plantstable"; // ← replace with your real table name
-        const speciesId = plantId;
+        const pool = getDB();
+        const TABLE = "plant_table_final";
 
-        // if (isNaN(speciesId)) throw new Error("Invalid plant ID");
+        const id = parseInt(plantId, 10);
+        if (isNaN(id)) throw new Error("Invalid plant ID — must be a number");
 
         const result = await pool.query(
-            `SELECT DISTINCT ON (species_id)
-          id,
-          species_id,
-          species_name,
-          genus_name,
-          family_name,
-          COALESCE(inat_common_name, common_name, trefle_common_name) AS common_name,
-          inat_common_name,
-          image_url,
-          plant_type,
-          growth_habit,
-          edible,
-          edible_part,
-          vegetable,
-          lat,
-          lon
-        FROM ${TABLE}
-        WHERE id = $1
-          
-        ORDER BY
-          species_id,
-          (image_url IS NOT NULL AND image_url <> '') DESC`,
-            [speciesId]
+            `SELECT
+                id,
+                common_name,
+                scientific_name,
+                other_name,
+                family,
+                genus,
+                species_epithet,
+                origin,
+                type,
+                cycle,
+                watering,
+                watering_benchmark_value,
+                watering_benchmark_unit,
+                sunlight,
+                soil,
+                hardiness_min,
+                hardiness_max,
+                dimension_type,
+                dimension_min_value,
+                dimension_max_value,
+                dimension_unit,
+                growth_rate,
+                maintenance,
+                care_level,
+                care_guides_url,
+                pruning_month,
+                propagation,
+                attracts,
+                pest_susceptibility,
+                plant_anatomy,
+                drought_tolerant,
+                salt_tolerant,
+                thorny,
+                invasive,
+                tropical,
+                indoor,
+                flowers,
+                flowering_season,
+                cones,
+                fruits,
+                edible_fruit,
+                harvest_season,
+                leaf,
+                edible_leaf,
+                seeds,
+                cuisine,
+                medicinal,
+                poisonous_to_humans,
+                poisonous_to_pets,
+                description,
+                image_original_url,
+                image_regular_url,
+                image_medium_url,
+                image_small_url,
+                image_thumbnail,
+                image_license
+            FROM ${TABLE}
+            WHERE id = $1`,
+            [id]
         );
 
         if (result.rows.length === 0) throw new Error("Plant not found");
@@ -385,45 +424,40 @@ export const getUserPlantsService = async (
 
     const fromClause = `
         FROM  user_plants up
-        JOIN  plantstable  pc ON pc.id = up.plant_id
+        JOIN  plant_table_final  pc ON pc.id = up.plant_id
         WHERE up.user_id = $1
     `;
 
-    const commonNameExpr = `COALESCE(inat_common_name, common_name, trefle_common_name)`;
+    const commonNameExpr = `COALESCE(scientific_name, common_name, other_name)`;
 
     // ── Search condition ───────────────────────────────────────────────────────
     const searchCondition = search
         ? `AND (
-        unaccent(species_name)         ILIKE unaccent($2)
-        OR unaccent(inat_common_name)  ILIKE unaccent($2)
-
-        OR to_tsvector('simple', unaccent(COALESCE(species_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))
-        OR to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))
-
-        OR unaccent(species_name)        % unaccent($1)
-        OR unaccent(COALESCE(inat_common_name,'')) % unaccent($1)
-      )`
+            unaccent(common_name)      ILIKE unaccent($2)
+            OR unaccent(scientific_name) ILIKE unaccent($2)
+            OR to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+                 @@ plainto_tsquery('simple', unaccent($1))
+            OR to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+                 @@ plainto_tsquery('simple', unaccent($1))
+            OR unaccent(COALESCE(common_name, ''))      % unaccent($1)
+            OR unaccent(COALESCE(scientific_name, ''))  % unaccent($1)
+          )`
         : "";
 
     // ── Relevance score ────────────────────────────────────────────────────────
     const relevanceScore = search
         ? `CASE
-      WHEN unaccent(species_name)        ILIKE unaccent($2) THEN 300
-      WHEN unaccent(inat_common_name)    ILIKE unaccent($2) THEN 300
-
-      WHEN to_tsvector('simple', unaccent(COALESCE(species_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
-      WHEN to_tsvector('simple', unaccent(COALESCE(inat_common_name,'')))
-             @@ plainto_tsquery('simple', unaccent($1))     THEN 150
-
-      WHEN unaccent(species_name)        % unaccent($1)     THEN 80
-      WHEN unaccent(COALESCE(inat_common_name,'')) % unaccent($1) THEN 80
-
-      ELSE 0
-    END`
-        : `0::integer`; // ← was "0", now explicitly cast so PG treats it as a value not a position
+            WHEN unaccent(common_name)      ILIKE unaccent($2) THEN 300
+            WHEN unaccent(scientific_name)  ILIKE unaccent($2) THEN 280
+            WHEN to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+                   @@ plainto_tsquery('simple', unaccent($1))  THEN 150
+            WHEN to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+                   @@ plainto_tsquery('simple', unaccent($1))  THEN 130
+            WHEN unaccent(COALESCE(common_name, ''))      % unaccent($1) THEN 80
+            WHEN unaccent(COALESCE(scientific_name, ''))  % unaccent($1) THEN 60
+            ELSE 0
+          END`
+        : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
     // const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
     // ✅ searchValue used consistently, not raw search
@@ -447,11 +481,17 @@ export const getUserPlantsService = async (
     const dataResult = await pool.query<UserPlant>(
         `SELECT
             up.id,
-            pc.id                          AS plant_id,
-            ${commonNameExpr}              AS common_name,
-            pc.family_name                 As family,
-            pc.genus_name                  AS genus,
-            pc.image_url,
+            pc.id                     AS plant_id,
+            ${commonNameExpr}         AS common_name,
+            pc.family                 As family,
+            pc.genus                  AS genus,
+            pc.scientific_name          AS scientific_name,
+            pc.other_name              AS other_name,
+            pc.medicinal                AS medicinal,
+            pc.edible_fruit            AS edible_fruit,
+            pc.flowers                 AS flowers,
+            pc.indoor                 AS indoor,
+            pc.image_original_url     AS image_original_url,
             up.health_status,
             up.watering_notification_enabled,
             up.watering_preferred_time,
@@ -524,66 +564,115 @@ export const getUserPlantByIdService = async (
     userId: string,
     userPlantId: string
 ): Promise<PlantDetailsResponse | null> => {
-    //   const TABLE = "plantstable";
     const pool = await getDB();
 
-    const userPlantQuery = await pool.query(
-        `SELECT * FROM user_plants WHERE user_id = $1 AND plant_id = $2`,
-        [userId, userPlantId]
-    )
-    if (userPlantQuery.rows.length === 0) return null;
+    const query = `
+        SELECT 
+            up.*,
+            p.*
+        FROM user_plants up
+        JOIN plant_table_final p ON up.plant_id = p.id
+        WHERE up.user_id = $1 AND up.plant_id = $2
+    `;
 
+    const result = await pool.query(query, [userId, userPlantId]);
 
-    const plantDetailsQuery = await pool.query(
-        `SELECT *
-         FROM plantstable
-         WHERE id = $1`,
-        [userPlantId]
-    );
-            
-    if (plantDetailsQuery.rows.length === 0) return null;
+    if (result.rows.length === 0) return null;
 
-    const userPlantDetails = plantDetailsQuery.rows[0];
-    const usercareDetails = userPlantQuery.rows[0];
-   
+    const row = result.rows[0];
 
+    // Map the combined row to the expected response shape
     return {
-        user_plant_id: userPlantDetails.plant_id,
+        user_plant_id: row.plant_id,   // or row.user_plant_id if that column exists
         plant: {
-            plant_id: userPlantDetails.plant_id,
-            common_name: userPlantDetails.common_name,
-            species_name: userPlantDetails.species_name,
-            genus_name: userPlantDetails.genus_name,
-            family_name: userPlantDetails.family_name,
-            image_url: userPlantDetails.image_url,
-            plant_type: userPlantDetails.plant_type,
-            growth_habit: userPlantDetails.growth_habit,
-            edible: userPlantDetails.edible,
-            edible_part: userPlantDetails.edible_part,
-            vegetable: userPlantDetails.vegetable,
+            plant_id: row.plant_id,
+            scientific_name: row.scientific_name,
+            common_name: row.common_name,
+            other_name: row.other_name,
+            family: row.family,
+            genus: row.genus,
+            plant_type: row.type,
+            growth_habit: row.growth_habit,
+            edible: row.edible,
+            edible_part: row.edible_part,
+            vegetable: row.vegetable,
+            species_epithet: row.species_epithet,
+            description: row.description,
+            author: row.authority,
+            subspecies: row.subspecies,
+            cultivar: row.cultivar,
+            variety: row.variety,          // ✅ fixed typo: was "varity"
+            origin: row.origin,
+            type: row.type,
+            cycle: row.cycle,
+            watering: row.watering,
+            watering_benchmark_value: row.watering_benchmark_value,
+            watering_benchmark_unit: row.watering_benchmark_unit,
+            sunlight: row.sunlight,
+            hardiness_min: row.hardiness_min,
+            hardiness_max: row.hardiness_max,
+            dimension_type: row.dimension_type,
+            dimension_min_value: row.dimension_min_value,
+            dimension_max_value: row.dimension_max_value,
+            dimension_unit: row.dimension_unit,
+            growth_rate: row.growth_rate,
+            maintenance: row.maintenance,
+            care_level: row.care_level,
+            soil: row.soil,
+            pruning_month: row.pruning_month,
+            propagation: row.propagation,
+            attracts: row.attracts,
+            pest_susceptibility: row.pest_susceptibility,
+            plant_anatomy: row.plant_anatomy,
+            drought_tolerant: row.drought_tolerant,
+            salt_tolerant: row.salt_tolerant,
+            thorny: row.thorny,            // ✅ fixed
+            invasive: row.invasive,
+            tropical: row.tropical,
+            indoor: row.indoor,
+            flowers: row.flowers,
+            flowering_season: row.flowering_season,
+            cones: row.cones,
+            fruits: row.fruits,
+            edible_fruit: row.edible_fruit,
+            harvest_season: row.harvest_season,
+            leaf: row.leaf,
+            edible_leaf: row.edible_leaf,
+            seeds: row.seeds,
+            cuisine: row.cuisine,
+            medicinal: row.medicinal,      // ✅ fixed
+            poisonous_to_humans: row.poisonous_to_humans,
+            poisonous_to_pets: row.poisonous_to_pets,
+            care_guides_url: row.care_guides_url,
+            image_original_url: row.image_original_url,
+            image_regular_url: row.image_regular_url,
+            image_medium_url: row.image_medium_url,
+            image_small_url: row.image_small_url,
+            image_thumbnail: row.image_thumbnail,
+            image_license: row.image_license,
         },
         reminder: {
-            watering_notification_enabled: usercareDetails.watering_notification_enabled,
-            watering_reminder_frequency: usercareDetails.watering_reminder_frequency,
-            watering_preferred_time: usercareDetails.watering_preferred_time,
-            next_watered_at: usercareDetails.next_watered_at,
-            last_watered_at: usercareDetails.last_watered_at,
+            watering_notification_enabled: row.watering_notification_enabled,
+            watering_reminder_frequency: row.watering_reminder_frequency,
+            watering_preferred_time: row.watering_preferred_time,
+            next_watered_at: row.next_watered_at,
+            last_watered_at: row.last_watered_at,
 
-            fertilizer_notification_enabled: usercareDetails.fertilizer_notification_enabled,
-            fertilizer_reminder_frequency: usercareDetails.fertilizer_reminder_frequency,
-            fertilizer_preferred_time: usercareDetails.fertilizer_preferred_time,
-            next_fertilized_at: usercareDetails.next_fertilized_at,
-            last_fertilized_at: usercareDetails.last_fertilized_at,
+            fertilizer_notification_enabled: row.fertilizer_notification_enabled,
+            fertilizer_reminder_frequency: row.fertilizer_reminder_frequency,
+            fertilizer_preferred_time: row.fertilizer_preferred_time,
+            next_fertilized_at: row.next_fertilized_at,
+            last_fertilized_at: row.last_fertilized_at,
 
-            puring_notification_enabled: usercareDetails.pruning_notification_enabled,
-            pruning_reminder_frequency: usercareDetails.pruning_reminder_frequency,
-            next_pruned_at: usercareDetails.next_pruned_at,
-            last_pruned_at: usercareDetails.last_pruned_at,
+            puring_notification_enabled: row.pruning_notification_enabled, // typo "puring" fixed to pruning? Keep original field name
+            pruning_reminder_frequency: row.pruning_reminder_frequency,
+            next_pruned_at: row.next_pruned_at,
+            last_pruned_at: row.last_pruned_at,
 
-            generic_notification_enabled: usercareDetails.generic_notification_enabled,
-            generic_care_reminder_frequency: usercareDetails.generic_care_reminder_frequency,
-            last_generic_care_at: usercareDetails.last_generic_care_at,
-            next_generic_care_at: usercareDetails.next_generic_care_at,
+            generic_notification_enabled: row.generic_notification_enabled,
+            generic_care_reminder_frequency: row.generic_care_reminder_frequency,
+            last_generic_care_at: row.last_generic_care_at,
+            next_generic_care_at: row.next_generic_care_at,
         },
     };
 };
@@ -976,4 +1065,256 @@ export function mapFlatToNested(flat: FlatUpdateUserPlantInput): UpdateUserPlant
     }
 
     return nested;
+}
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ImportResult {
+    totalRows: number;
+    insertedRows: number;
+    skippedRows: number;
+    errorRows: number;
+    durationMs: number;
+}
+
+/**
+ * Creates and returns a new PostgreSQL client instance.
+ *
+ * The client configuration is loaded from environment-based config values.
+ *
+ * @function createClient
+ * @returns {pg.Client} Configured PostgreSQL client instance.
+ */
+function createClient(): pg.Client {
+    return new pg.Client({
+        host: config.POSTGRE_HOST,
+        port: Number(config.POSTGRE_PORT),
+        database: config.POSTGRE_DATABASE,
+        user: config.POSTGRE_USER,
+        password: config.POSTGRE_PASSWORD,
+        ssl: false,
+    });
+}
+/**
+ * Escapes and formats a value for PostgreSQL COPY TSV import.
+ *
+ * Converts empty, undefined, or "null" values into PostgreSQL NULL (`\N`)
+ * and escapes special characters such as tabs, newlines, and backslashes.
+ *
+ * @function escapeCopy
+ * @param {string | undefined} val - Raw string value from CSV.
+ * @returns {string} Escaped TSV-safe string or PostgreSQL NULL marker.
+ */
+function escapeCopy(val: string | undefined): string {
+    if (!val || val.trim() === "" || val.trim().toLowerCase() === "null") return "\\N";
+    return val.trim()
+        .replace(/\\/g, "\\\\")
+        .replace(/\t/g, "\\t")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r");
+}
+
+/**
+ * Converts a string value into a PostgreSQL-compatible boolean string.
+ *
+ * Accepted truthy values:
+ * - "true", "1", "yes"
+ *
+ * Accepted falsy values:
+ * - "false", "0", "no"
+ *
+ * Invalid or empty values return PostgreSQL NULL (`\N`).
+ *
+ * @function toBoolCopy
+ * @param {string | undefined} val - Raw boolean-like string value.
+ * @returns {string} "true", "false", or PostgreSQL NULL marker.
+ */
+function toBoolCopy(val: string | undefined): string {
+    if (!val) return "\\N";
+    const v = val.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "yes") return "true";
+    if (v === "false" || v === "0" || v === "no") return "false";
+    return "\\N";
+}
+
+/**
+ * Converts a raw CSV row object into a PostgreSQL COPY-compatible TSV row.
+ *
+ * The column order must exactly match the PostgreSQL COPY statement.
+ * Returns `null` if the required `id` field is missing.
+ *
+ * @function rowToTsv
+ * @param {Record<string, string>} raw - Parsed CSV row object.
+ * @returns {string | null} TSV-formatted row string or null if invalid.
+ */
+function rowToTsv(raw: Record<string, string>): string | null {
+    const id = escapeCopy(raw["id"]);
+    if (id === "\\N") return null; // id is required
+
+    return [
+        id,                                          // id
+        escapeCopy(raw["common_name"]),              // common_name
+        escapeCopy(raw["scientific_name"]),          // scientific_name
+        escapeCopy(raw["other_name"]),               // other_name
+        escapeCopy(raw["family"]),                   // family
+        escapeCopy(raw["genus"]),                    // genus
+        escapeCopy(raw["species_epithet"]),          // species_epithet
+        escapeCopy(raw["hybrid"]),                   // hybrid
+        escapeCopy(raw["authority"]),                // authority
+        escapeCopy(raw["subspecies"]),               // subspecies
+        escapeCopy(raw["cultivar"]),                 // cultivar
+        escapeCopy(raw["variety"]),                  // variety
+        escapeCopy(raw["origin"]),                   // origin
+        escapeCopy(raw["type"]),                     // type
+        escapeCopy(raw["cycle"]),                    // cycle
+        escapeCopy(raw["watering"]),                 // watering
+        escapeCopy(raw["watering_benchmark_value"]), // watering_benchmark_value
+        escapeCopy(raw["watering_benchmark_unit"]),  // watering_benchmark_unit
+        escapeCopy(raw["sunlight"]),                 // sunlight
+        escapeCopy(raw["hardiness_min"]),            // hardiness_min
+        escapeCopy(raw["hardiness_max"]),            // hardiness_max
+        escapeCopy(raw["dimension_type"]),           // dimension_type
+        escapeCopy(raw["dimension_min_value"]),      // dimension_min_value
+        escapeCopy(raw["dimension_max_value"]),      // dimension_max_value
+        escapeCopy(raw["dimension_unit"]),           // dimension_unit
+        escapeCopy(raw["growth_rate"]),              // growth_rate
+        escapeCopy(raw["maintenance"]),              // maintenance
+        escapeCopy(raw["care_level"]),               // care_level
+        escapeCopy(raw["soil"]),                     // soil
+        escapeCopy(raw["pruning_month"]),            // pruning_month
+        escapeCopy(raw["propagation"]),              // propagation
+        escapeCopy(raw["attracts"]),                 // attracts
+        escapeCopy(raw["pest_susceptibility"]),      // pest_susceptibility
+        escapeCopy(raw["plant_anatomy"]),            // plant_anatomy
+        toBoolCopy(raw["drought_tolerant"]),         // drought_tolerant
+        toBoolCopy(raw["salt_tolerant"]),            // salt_tolerant
+        toBoolCopy(raw["thorny"]),                   // thorny
+        toBoolCopy(raw["invasive"]),                 // invasive
+        toBoolCopy(raw["tropical"]),                 // tropical
+        toBoolCopy(raw["indoor"]),                   // indoor
+        toBoolCopy(raw["flowers"]),                  // flowers
+        escapeCopy(raw["flowering_season"]),         // flowering_season
+        toBoolCopy(raw["cones"]),                    // cones
+        toBoolCopy(raw["fruits"]),                   // fruits
+        toBoolCopy(raw["edible_fruit"]),             // edible_fruit
+        escapeCopy(raw["harvest_season"]),           // harvest_season
+        toBoolCopy(raw["leaf"]),                     // leaf
+        toBoolCopy(raw["edible_leaf"]),              // edible_leaf
+        toBoolCopy(raw["seeds"]),                    // seeds
+        toBoolCopy(raw["cuisine"]),                  // cuisine
+        toBoolCopy(raw["medicinal"]),                // medicinal
+        toBoolCopy(raw["poisonous_to_humans"]),      // poisonous_to_humans
+        toBoolCopy(raw["poisonous_to_pets"]),        // poisonous_to_pets
+        escapeCopy(raw["description"]),              // description
+        escapeCopy(raw["care_guides_url"]),          // care_guides_url
+        escapeCopy(raw["image_original_url"]),       // image_original_url
+        escapeCopy(raw["image_regular_url"]),        // image_regular_url
+        escapeCopy(raw["image_medium_url"]),         // image_medium_url
+        escapeCopy(raw["image_small_url"]),          // image_small_url
+        escapeCopy(raw["image_thumbnail"]),          // image_thumbnail
+        escapeCopy(raw["image_license"]),            // image_license
+    ].join("\t") + "\n";
+}
+
+/**
+ * Converts a raw CSV row object into a PostgreSQL COPY-compatible TSV row.
+ *
+ * The column order must exactly match the PostgreSQL COPY statement.
+ * Returns `null` if the required `id` field is missing.
+ *
+ * @function rowToTsv
+ * @param {Record<string, string>} raw - Parsed CSV row object.
+ * @param {string} filePath - The file path of the CSV being imported (used for error logging).
+ * @returns {string | null} TSV-formatted row string or null if invalid.
+ */
+export async function importPlantsService(filePath: string): Promise<ImportResult> {
+    const startedAt = Date.now();
+    let totalRows = 0;
+    let errorRows = 0;
+    let client: pg.Client | null = null;
+
+    try {
+        client = createClient();
+        await client.connect();
+
+        await client.query(`DROP TABLE IF EXISTS plant_table_import`);
+
+        await client.query(`
+            CREATE TEMP TABLE plant_table_import
+                (LIKE plant_table_final INCLUDING DEFAULTS)
+        `);
+
+        const copyStream = client.query(
+            copyFrom.from(`
+                COPY plant_table_import (
+                    id, common_name, scientific_name, other_name,
+                    family, genus, species_epithet, hybrid, authority,
+                    subspecies, cultivar, variety, origin, type, cycle,
+                    watering, watering_benchmark_value, watering_benchmark_unit,
+                    sunlight, hardiness_min, hardiness_max,
+                    dimension_type, dimension_min_value, dimension_max_value, dimension_unit,
+                    growth_rate, maintenance, care_level, soil,
+                    pruning_month, propagation, attracts, pest_susceptibility, plant_anatomy,
+                    drought_tolerant, salt_tolerant, thorny, invasive, tropical, indoor,
+                    flowers, flowering_season, cones, fruits, edible_fruit, harvest_season,
+                    leaf, edible_leaf, seeds, cuisine, medicinal,
+                    poisonous_to_humans, poisonous_to_pets,
+                    description, care_guides_url,
+                    image_original_url, image_regular_url, image_medium_url,
+                    image_small_url, image_thumbnail, image_license
+                ) FROM STDIN WITH (FORMAT text, NULL '\\N')
+            `)
+        );
+
+        const rowTransform = new Transform({
+            writableObjectMode: true,
+            readableObjectMode: false,
+
+            /**
+             * Transforms a parsed CSV row object into a tab-separated line for COPY.
+             * @param raw - Parsed CSV row as key-value pairs
+             * @param _enc - Encoding (unused)
+             * @param cb - Stream transform callback
+             * @returns void
+             */
+            transform(raw: Record<string, string>, _enc: BufferEncoding, cb: TransformCallback): void {
+                totalRows++;
+                const line = rowToTsv(raw);
+                if (!line) {
+                    errorRows++;
+                    return cb();
+                }
+                cb(null, line);
+            },
+        });
+
+        await pipeline(
+            fs.createReadStream(filePath, { highWaterMark: 512 * 1024 }),
+            parse({ headers: true, trim: true, discardUnmappedColumns: true }),
+            rowTransform,
+            copyStream,
+        );
+
+        const result = await client.query(`
+            INSERT INTO plant_table_final
+                SELECT * FROM plant_table_import
+            ON CONFLICT (id) DO NOTHING
+        `);
+
+        const insertedRows = result.rowCount ?? 0;
+        const skippedRows = totalRows - errorRows - insertedRows;
+
+        return {
+            totalRows,
+            insertedRows,
+            skippedRows,
+            errorRows,
+            durationMs: Date.now() - startedAt,
+        };
+    } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        if (client) {
+            try { await client.query(`DROP TABLE IF EXISTS plant_table_import`); } catch { /* ignore */ }
+            try { await client.end(); } catch { /* ignore */ }
+        }
+    }
 }

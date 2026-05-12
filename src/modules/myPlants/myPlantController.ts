@@ -1,13 +1,21 @@
-import { NextFunction, Response } from "express";
+import { NextFunction, RequestHandler, Response } from "express";
 import { AuthRequest } from "../../interface/auth";
 import { AuthUserPayload } from "../../interface/user";
 import { errorResponse, successResponse } from "../../core/utils/responseFormatter";
 import { HTTP_STATUS } from "../../core/utils/constants";
 import { findUserByEmail } from "../auth/authRepository";
-import { addPlantToUserService, getAllPlantsService, getUserPlantByIdService, getUserPlantsService, mapFlatToNested, updateUserPlantService } from "./myPlantServices";
+import { addPlantToUserService, 
+    getAllPlantsService, 
+    getUserPlantByIdService, 
+    getUserPlantsService, 
+    importPlantsService,
+    mapFlatToNested,
+    updateUserPlantService, 
+ } from "./myPlantServices";
 import { ZodError } from "zod";
 import { getPlantDetailsByIdService } from "./myPlantServices";
 import { FlatUpdateUserPlantInput } from "../../interface/myPlants";
+
 
 /**
  * Retrieves a paginated list of all plants.
@@ -436,4 +444,42 @@ export const updateUserPlantController = async (
             res.status(500).json({ message: "Internal server error" });
         }
     }
+};
+/**
+ * Imports plant data from an uploaded CSV file.
+ *
+ * Expects a multipart/form-data request with a file field named `file`.
+ * The uploaded CSV is processed by the importPlantsService.
+ *
+ * @async
+ * @function importPlantsController
+ * @param {Request} req - Express request object containing uploaded file.
+ * @param {Response} res - Express response object.
+ * @returns {Promise<void>} Sends a JSON response with import result.
+ *
+ * @throws {500} Returns error response if import fails.
+ */
+export const importPlantsController: RequestHandler = async (req, res): Promise<void> => {
+  if (!req.file) {
+    res.status(400).json({
+      success: false,
+      message: "No file uploaded. Send a CSV via multipart/form-data field 'file'.",
+    });
+    return;
+  }
+ 
+  try {
+    const result = await importPlantsService(req.file.path); // blocks until done
+ 
+    res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (err) {
+    if (err instanceof Error) {
+            res.status(400).json({ message: err.message });
+        } else {
+            res.status(500).json({ message: "Internal server error" });
+        }
+  }
 };

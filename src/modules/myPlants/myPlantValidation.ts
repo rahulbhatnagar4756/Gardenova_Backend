@@ -1,7 +1,7 @@
 import Joi, { ObjectSchema } from "joi";
 
 export const reminderValidation: ObjectSchema = Joi.object({
-  plant_id: Joi.string()
+  plant_id: Joi.number()
     .required()
     .messages({
       "number.base": "Plant ID must be a number",

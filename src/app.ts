@@ -20,11 +20,8 @@ import subscriptionRoutes from "./modules/subscription/subscriptionRoutes";
 import externalLinksRoutes from "./modules/admin/externalLinks/externalLinksRoutes";
 import myPlantRoutes from "./modules/myPlants/myPlantRoute";
 import professionalRoutes from "./modules/professional/professionalRoutes";
-// import suppliersRoutes from "./modules/suppliers/suppliersRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
-// import translationMiddleware from "./core/middleware/translationMiddleware";
 import { connectDB } from "./core/config/db";
-// import { createAllPlantTables } from "./db/createAllPlantTables";
 
 // import { createLeadsTable } from "./db/createLeadSchemaTables";
 const app = express();
@@ -61,7 +58,7 @@ app.use(express.urlencoded({ extended: true }));
 // });
 // app.use(limiter);
 // User Authentication Routes
-// createAllPlantTables();
+// createPlantsTable();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);
