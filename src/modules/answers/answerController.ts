@@ -200,16 +200,16 @@ export const getRecommendedPlantsController = async (
     const { responseId } = req.params;
 
     if (!responseId) {
-      res.status(400).json({ message: "responseId is required" });
+      res.status(400).json(errorResponse("responseId is required"));
       return;
     }
 
     const client = await getDB();
 
-    // ── Fetch survey answers for this response ────────────────────────────────
+    // ── Fetch survey answers for this response ──────────────────────────────
     const result = await client.query<{
-      question_id: string;
-      answer_type: string;
+      question_id:    string;
+      answer_type:    string;
       selected_option: string;
       question_order: number;
     }>(
@@ -227,49 +227,72 @@ export const getRecommendedPlantsController = async (
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({ message: "No answers found for this responseId" });
+      res.status(404).json(
+        errorResponse("No survey answers found for this responseId")
+      );
       return;
     }
 
-    // ── Build answers array (0-indexed by question order) ─────────────────────
-    // All questions in this survey return a plain selectedOption string.
-    // (No address/JSON fields in the new question set.)
+    // ── Build answers array indexed 0–5 (question_order is 1-based) ─────────
     const answers: (IUserAnswer | null)[] = new Array(TOTAL_QUESTIONS).fill(null);
 
     for (const row of result.rows) {
-      const fieldIndex = row.question_order - 1; // convert 1-based order → 0-based index
+      const fieldIndex = row.question_order - 1; // 1-based → 0-based
 
       if (fieldIndex < 0 || fieldIndex >= TOTAL_QUESTIONS) {
-        // Guard against unexpected question orders
+        // Guard against unexpected question orders in the DB
         continue;
       }
 
       answers[fieldIndex] = {
-        questionId: row.question_id,
-        type: row.answer_type,
+        questionId:     row.question_id,
+        type:           row.answer_type,
         selectedOption: row.selected_option ?? "",
       };
     }
 
-    // ── Generate recommendations ───────────────────────────────────────────────
+    // ── Generate recommendations ─────────────────────────────────────────────
     const recommendedPlants = await getRecommendedPlants(answers);
 
-    // ── Shape the API response ─────────────────────────────────────────────────
+    // ── Shape the API response ───────────────────────────────────────────────
     const plantRecommendations = recommendedPlants.map((p) => ({
-      id: p.id,
-      speciesId: p.species_id,
-      speciesName: p.species_name,
-      genusName: p.genus_name,
-      familyName: p.family_name,
-      commonName: p.common_name,
-      image: p.image_url,
-      plantType: p.plant_type,
-      growthHabit: p.growth_habit,
-      edible: p.edible,
-      ediblePart: p.edible_part,
-      vegetable: p.vegetable,
-      whyRecommended: p.whyRecommended,
-      matchScore: p.matchScore,
+      id:                 p.id,
+      commonName:         p.commonName,
+      scientificName:     p.scientificName,
+      otherName:          p.otherName,
+      family:             p.family,
+      genus:              p.genus,
+      type:               p.type,
+      cycle:              p.cycle,
+      watering:           p.watering,
+      sunlight:           p.sunlight,
+      careLevel:          p.careLevel,
+      maintenance:        p.maintenance,
+      growthRate:         p.growthRate,
+      droughtTolerant:    p.droughtTolerant,
+      saltTolerant:       p.saltTolerant,
+      tropical:           p.tropical,
+      indoor:             p.indoor,
+      flowers:            p.flowers,
+      floweringSeason:    p.floweringSeason,
+      fruits:             p.fruits,
+      edibleFruit:        p.edibleFruit,
+      harvestSeason:      p.harvestSeason,
+      leaf:               p.leaf,
+      edibleLeaf:         p.edibleLeaf,
+      cuisine:            p.cuisine,
+      medicinal:          p.medicinal,
+      poisonousToHumans:  p.poisonousToHumans,
+      poisonousToPets:    p.poisonousToPets,
+      hardinessMin:       p.hardinessMin,
+      hardinessMax:       p.hardinessMax,
+      description:        p.description,
+      image:              p.image,           // image_regular_url — best for cards
+      imageMedium:        p.imageMedium,
+      imageSmall:         p.imageSmall,
+      imageThumbnail:     p.imageThumbnail,
+      matchScore:         p.matchScore,
+      whyRecommended:     p.whyRecommended,
     }));
 
     res.status(200).json(
@@ -279,6 +302,8 @@ export const getRecommendedPlantsController = async (
       )
     );
   } catch (err) {
+    console.error("[getRecommendedPlantsController]", err);
+
     res.status(500).json(
       errorResponse("Failed to fetch plant recommendations", {
         details: (err as Error).message,

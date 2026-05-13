@@ -445,7 +445,7 @@ export const getUserPlantsService = async (
         WHERE up.user_id = $1
     `;
 
-    const commonNameExpr = `COALESCE(scientific_name, common_name, other_name)`;
+    // const commonNameExpr = `COALESCE(scientific_name, common_name, other_name)`;
 
     // ── Search condition ───────────────────────────────────────────────────────
     const searchCondition = search
@@ -499,7 +499,7 @@ export const getUserPlantsService = async (
         `SELECT
             up.id,
             pc.id                     AS plant_id,
-            ${commonNameExpr}         AS common_name,
+            common_name               AS common_name,
             pc.family                 As family,
             pc.genus                  AS genus,
             pc.scientific_name          AS scientific_name,

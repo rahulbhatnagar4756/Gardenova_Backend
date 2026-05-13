@@ -171,13 +171,12 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
         name,
         email,
         password,
-        firebase_uid,
         role_id,
         phone_number,
         is_email_verified
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, name, email, firebase_uid, role_id, phone_number,
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, name, email, role_id, phone_number,
                 is_email_verified, created_at, updated_at;
     `;
 
@@ -185,7 +184,7 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
       parsedData.name,
       parsedData.email,
       hashedPassword ?? null,
-      parsedData.firebaseUid ?? null,
+      // parsedData.firebaseUid ?? null,
       parsedData.roleId,
       parsedData.phoneNumber ?? null,
       parsedData.isEmailVerified ?? false,

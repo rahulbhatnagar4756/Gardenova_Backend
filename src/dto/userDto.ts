@@ -25,10 +25,10 @@ export const createUserDto = z
       .max(255, "Password must be at most 255 characters")
       .optional(),
 
-    firebaseUid: z
-      .string()
-      .max(255, "Firebase UID must be at most 255 characters")
-      .optional(),
+    // firebaseUid: z
+    //   .string()
+    //   .max(255, "Firebase UID must be at most 255 characters")
+    //   .optional(),
 
     roleId: z.string().uuid("Role ID must be a valid UUID"),
 
@@ -45,7 +45,7 @@ export const createUserDto = z
 
     profilePicture: z.string().url("Invalid profile picture URL").optional(),
   })
-  .refine((data) => data.password || data.firebaseUid, {
+  .refine((data) => data.password,  { //|| data.firebaseUid,
     message: "Either password or firebaseUid must be provided",
     path: ["password"],
   });
@@ -64,7 +64,7 @@ export const updateUserDto = z.object({
     .trim()
     .optional(),
   password: z.string().min(6).max(255).optional(),
-  firebaseUid: z.string().max(255).optional(),
+  // firebaseUid: z.string().max(255).optional(),
   phoneNumber: z
     .string()
     .max(20)
