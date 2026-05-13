@@ -279,6 +279,11 @@ export interface Reminder{
 
 export interface PlantResponse{
   plant: PlantDetails;
+  care: {
+    watering: string | null;
+    sunlight: string | null;
+    pruning:  string | null;
+} | null;
   AlreadyAdded: boolean;
   reminder: Reminder;
 }
@@ -383,5 +388,10 @@ export interface ReminderforUserPlant{
 export type PlantDetailsResponse = {
     user_plant_id?: number;     
     plant: Plant;
+    care: {
+    watering: string | null;
+    sunlight: string | null;
+    pruning:  string | null;
+} | null;
     reminder: ReminderforUserPlant;
 };

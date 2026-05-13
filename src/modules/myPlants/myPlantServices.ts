@@ -148,80 +148,93 @@ export const getPlantDetailsByIdService = async (
         const id = parseInt(plantId, 10);
         if (isNaN(id)) throw new Error("Invalid plant ID — must be a number");
 
-        const result = await pool.query(
-            `SELECT
-                id,
-                common_name,
-                scientific_name,
-                other_name,
-                family,
-                genus,
-                species_epithet,
-                origin,
-                type,
-                cycle,
-                watering,
-                watering_benchmark_value,
-                watering_benchmark_unit,
-                sunlight,
-                soil,
-                hardiness_min,
-                hardiness_max,
-                dimension_type,
-                dimension_min_value,
-                dimension_max_value,
-                dimension_unit,
-                growth_rate,
-                maintenance,
-                care_level,
-                care_guides_url,
-                pruning_month,
-                propagation,
-                attracts,
-                pest_susceptibility,
-                plant_anatomy,
-                drought_tolerant,
-                salt_tolerant,
-                thorny,
-                invasive,
-                tropical,
-                indoor,
-                flowers,
-                flowering_season,
-                cones,
-                fruits,
-                edible_fruit,
-                harvest_season,
-                leaf,
-                edible_leaf,
-                seeds,
-                cuisine,
-                medicinal,
-                poisonous_to_humans,
-                poisonous_to_pets,
-                description,
-                image_original_url,
-                image_regular_url,
-                image_medium_url,
-                image_small_url,
-                image_thumbnail,
-                image_license
-            FROM ${TABLE}
-            WHERE id = $1`,
-            [id]
-        );
+        const [plantResult, userPlantResult, careResult] = await Promise.all([
+            pool.query(
+                `SELECT
+                    id,
+                    common_name,
+                    scientific_name,
+                    other_name,
+                    family,
+                    genus,
+                    species_epithet,
+                    origin,
+                    type,
+                    cycle,
+                    watering,
+                    watering_benchmark_value,
+                    watering_benchmark_unit,
+                    sunlight,
+                    soil,
+                    hardiness_min,
+                    hardiness_max,
+                    dimension_type,
+                    dimension_min_value,
+                    dimension_max_value,
+                    dimension_unit,
+                    growth_rate,
+                    maintenance,
+                    care_level,
+                    care_guides_url,
+                    pruning_month,
+                    propagation,
+                    attracts,
+                    pest_susceptibility,
+                    plant_anatomy,
+                    drought_tolerant,
+                    salt_tolerant,
+                    thorny,
+                    invasive,
+                    tropical,
+                    indoor,
+                    flowers,
+                    flowering_season,
+                    cones,
+                    fruits,
+                    edible_fruit,
+                    harvest_season,
+                    leaf,
+                    edible_leaf,
+                    seeds,
+                    cuisine,
+                    medicinal,
+                    poisonous_to_humans,
+                    poisonous_to_pets,
+                    description,
+                    image_original_url,
+                    image_regular_url,
+                    image_medium_url,
+                    image_small_url,
+                    image_thumbnail,
+                    image_license
+                FROM ${TABLE}
+                WHERE id = $1`,
+                [id]
+            ),
+            pool.query(
+                `SELECT * FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
+                [id, userId]
+            ),
+            pool.query(
+                `SELECT watering, sunlight, pruning FROM plant_care_table WHERE plant_id = $1`,
+                [id]
+            ),
+        ]);
 
-        const userPlantResult = await pool.query(
-            `SELECT * FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
-            [id, userId]
-        );
+        if (plantResult.rows.length === 0) throw new Error("Plant not found");
 
         const userPlant = userPlantResult.rows[0];
-
-        if (result.rows.length === 0) throw new Error("Plant not found");
+        const careData = careResult.rows[0] ?? null;
 
         return {
-            plant: result.rows[0],
+            plant: plantResult.rows[0],
+            care: careData
+                ? {
+                      watering: careData.watering ?? null,
+                      sunlight: careData.sunlight ?? null,
+                      pruning:  careData.pruning  ?? null,
+                  }
+                : null,
             AlreadyAdded: !!userPlant,
             reminder: {
                 watering_notification_enabled: false,
@@ -450,30 +463,32 @@ export const getUserPlantsService = async (
     // ── Search condition ───────────────────────────────────────────────────────
     const searchCondition = search
         ? `AND (
-            unaccent(common_name)      ILIKE unaccent($2)
-            OR unaccent(scientific_name) ILIKE unaccent($2)
-            OR to_tsvector('simple', unaccent(COALESCE(common_name, '')))
-                 @@ plainto_tsquery('simple', unaccent($1))
-            OR to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
-                 @@ plainto_tsquery('simple', unaccent($1))
-            OR unaccent(COALESCE(common_name, ''))      % unaccent($1)
-            OR unaccent(COALESCE(scientific_name, ''))  % unaccent($1)
-          )`
-        : "";
+      unaccent(COALESCE(pc.common_name::text, ''::text)) ILIKE unaccent($2)
+      OR unaccent(COALESCE(pc.scientific_name::text, ''::text)) ILIKE unaccent($2)
 
+      OR to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, ''::text)))
+           @@ plainto_tsquery('simple', unaccent($1))
+
+      OR to_tsvector('simple', unaccent(COALESCE(pc.scientific_name::text, ''::text)))
+           @@ plainto_tsquery('simple', unaccent($1))
+
+      OR unaccent(COALESCE(pc.common_name::text, ''::text)) % unaccent($1)
+      OR unaccent(COALESCE(pc.scientific_name::text, ''::text)) % unaccent($1)
+    )`
+        : "";
     // ── Relevance score ────────────────────────────────────────────────────────
     const relevanceScore = search
         ? `CASE
-            WHEN unaccent(common_name)      ILIKE unaccent($2) THEN 300
-            WHEN unaccent(scientific_name)  ILIKE unaccent($2) THEN 280
-            WHEN to_tsvector('simple', unaccent(COALESCE(common_name, '')))
-                   @@ plainto_tsquery('simple', unaccent($1))  THEN 150
-            WHEN to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
-                   @@ plainto_tsquery('simple', unaccent($1))  THEN 130
-            WHEN unaccent(COALESCE(common_name, ''))      % unaccent($1) THEN 80
-            WHEN unaccent(COALESCE(scientific_name, ''))  % unaccent($1) THEN 60
-            ELSE 0
-          END`
+      WHEN unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($2) THEN 300
+      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($2) THEN 280
+      WHEN to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, '')))
+           @@ plainto_tsquery('simple', unaccent($1)) THEN 150
+      WHEN to_tsvector('simple', unaccent(COALESCE(pc.scientific_name::text, '')))
+           @@ plainto_tsquery('simple', unaccent($1)) THEN 130
+      WHEN unaccent(COALESCE(pc.common_name::text, '')) % unaccent($1) THEN 80
+      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($1) THEN 60
+      ELSE 0
+    END`
         : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
     // const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
@@ -498,8 +513,8 @@ export const getUserPlantsService = async (
     const dataResult = await pool.query<UserPlant>(
         `SELECT
             up.id,
-            pc.id                     AS plant_id,
-            common_name               AS common_name,
+            pc.id                        AS plant_id,
+            pc.common_name               AS common_name,
             pc.family                 As family,
             pc.genus                  AS genus,
             pc.scientific_name          AS scientific_name,
@@ -586,23 +601,23 @@ export const getUserPlantByIdService = async (
     const query = `
         SELECT 
             up.*,
-            p.*
+            p.*,
+            pc.watering   AS care_watering,
+            pc.sunlight   AS care_sunlight,
+            pc.pruning    AS care_pruning
         FROM user_plants up
         JOIN plant_table_final p ON up.plant_id = p.id
+        LEFT JOIN plant_care_table pc ON pc.plant_id = p.id
         WHERE up.user_id = $1 AND up.plant_id = $2
     `;
 
     const result = await pool.query(query, [userId, userPlantId]);
     if (result.rows.length === 0) return null;
 
-
-
-
     const row = result.rows[0];
 
-    // Map the combined row to the expected response shape
     return {
-        user_plant_id: row.plant_id,   // or row.user_plant_id if that column exists
+        user_plant_id: row.plant_id,
         plant: {
             plant_id: row.plant_id,
             scientific_name: row.scientific_name,
@@ -620,7 +635,7 @@ export const getUserPlantByIdService = async (
             author: row.authority,
             subspecies: row.subspecies,
             cultivar: row.cultivar,
-            variety: row.variety,          // ✅ fixed typo: was "varity"
+            variety: row.variety,
             origin: row.origin,
             type: row.type,
             cycle: row.cycle,
@@ -645,7 +660,7 @@ export const getUserPlantByIdService = async (
             plant_anatomy: row.plant_anatomy,
             drought_tolerant: row.drought_tolerant,
             salt_tolerant: row.salt_tolerant,
-            thorny: row.thorny,            // ✅ fixed
+            thorny: row.thorny,
             invasive: row.invasive,
             tropical: row.tropical,
             indoor: row.indoor,
@@ -659,7 +674,7 @@ export const getUserPlantByIdService = async (
             edible_leaf: row.edible_leaf,
             seeds: row.seeds,
             cuisine: row.cuisine,
-            medicinal: row.medicinal,      // ✅ fixed
+            medicinal: row.medicinal,
             poisonous_to_humans: row.poisonous_to_humans,
             poisonous_to_pets: row.poisonous_to_pets,
             care_guides_url: row.care_guides_url,
@@ -669,6 +684,11 @@ export const getUserPlantByIdService = async (
             image_small_url: row.image_small_url,
             image_thumbnail: row.image_thumbnail,
             image_license: row.image_license,
+        },
+        care: {
+            watering: row.care_watering ?? null,
+            sunlight: row.care_sunlight ?? null,
+            pruning:  row.care_pruning  ?? null,
         },
         reminder: {
             watering_notification_enabled: row.watering_notification_enabled,
@@ -683,7 +703,7 @@ export const getUserPlantByIdService = async (
             next_fertilized_at: row.next_fertilized_at,
             last_fertilized_at: row.last_fertilized_at,
 
-            puring_notification_enabled: row.pruning_notification_enabled, // typo "puring" fixed to pruning? Keep original field name
+            puring_notification_enabled: row.pruning_notification_enabled,
             pruning_reminder_frequency: row.pruning_reminder_frequency,
             next_pruned_at: row.next_pruned_at,
             last_pruned_at: row.last_pruned_at,
@@ -695,7 +715,6 @@ export const getUserPlantByIdService = async (
         },
     };
 };
-
 const CARE_TYPES_WITH_PREFERRED_TIME = new Set(["watering", "fertilizer"]);
 
 /**
@@ -1364,7 +1383,7 @@ export async function importPlantsService(filePath: string): Promise<ImportResul
 export const getAllPlantsAdminService = async (
     page: number,
     limit: number,
-   
+
 ): Promise<AdminPlant[]> => {
     const pool = await getDB();
     const offset = (page - 1) * limit;

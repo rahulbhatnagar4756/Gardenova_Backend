@@ -284,7 +284,7 @@ export const updateUserProfile = async (
       return;
     }
 
-    const client = getDB();
+    const client = await getDB();
 
     const { rows: existingProfileRows } = await client.query(
       `SELECT id FROM userprofiles WHERE user_id = $1`,
