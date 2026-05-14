@@ -712,7 +712,7 @@ export const getUserPlantByIdService = async (
             image_medium_url: row.image_medium_url,
             image_small_url: row.image_small_url,
             image_thumbnail: row.image_thumbnail,
-            local_image_path: toImageUrl(row.local_image_path),
+            image_url: toImageUrl(row.local_image_path),
             image_license: row.image_license,
         },
         care: {
@@ -1532,7 +1532,7 @@ export const getAllPlantsAdminService = async (
         image_small_url: row.image_small_url,
         image_thumbnail: row.image_thumbnail,
         image_license: row.image_license,
-        local_image_path:toImageUrl(row.local_image_path),
+        image_url:toImageUrl(row.local_image_path),
     }));
 
     return {

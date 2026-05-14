@@ -88,7 +88,7 @@ export interface Plant {
     image_small_url: string;          // image_small_url text
     image_thumbnail: string;          // image_thumbnail text
     image_license: string;            // image_license text
-    local_image_path: string | null;  // local_image_path text (nullable)
+    image_url: string | null;  // local_image_path text (nullable)
 }
 
 export interface  AdminPlant extends Plant {

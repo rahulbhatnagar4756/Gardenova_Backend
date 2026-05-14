@@ -157,6 +157,7 @@ export interface IPlantRecommendation {
  
   /** image_thumbnail — smallest, use for lists / grids */
   imageThumbnail: string | null;
+  image_url: string | null;
  
   /** Computed score from the quiz (higher = better match) */
   matchScore: number;

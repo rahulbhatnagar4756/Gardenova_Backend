@@ -5,6 +5,7 @@
 import { getDB } from "../../core/config/db";
 import { IPlantRecommendation } from "../../interface/answer";
 import { IUserAnswer } from "./answerController";
+import env from "../../core/config/env";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FIELD INDEX  (matches question_order 1–6 from the survey)
@@ -756,6 +757,23 @@ function buildWhyRecommended(
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN SERVICE FUNCTION
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Converts a local image file path into a public image URL.
+ *
+ * Example:
+ * Input:  "/uploads/plant_00001.jpg"
+ * Output: "https://your-domain.com/plant-images/plant_00001.jpg"
+ *
+ * @param {string | null} localPath - Local filesystem path of the image.
+ * @returns {string | null} Public image URL or null if no path is provided.
+ */
+const toImageUrl = (localPath: string | null): string | null => {
+    if (!localPath) return null;
+    const filename = localPath.split("/").pop();   // "plant_00001.jpg"
+    return `${env.APPDEV_URL}/plant-images/${filename}`;
+};
+
+
 
 /**
  * Generates scored plant recommendations from the `plants` table
@@ -881,6 +899,7 @@ export const getRecommendedPlants = async (
       image_medium_url,
       image_small_url,
       image_thumbnail,
+      local_image_path,
       ${scoreExpr} AS match_score
     FROM ${TABLE}
     WHERE scientific_name IS NOT NULL
@@ -919,7 +938,7 @@ export const getRecommendedPlants = async (
           poisonous_to_humans, poisonous_to_pets,
           hardiness_min, hardiness_max, description,
           image_original_url, image_regular_url, image_medium_url,
-          image_small_url, image_thumbnail,
+          image_small_url, image_thumbnail,local_image_path,
           0 AS match_score
         FROM ${TABLE}
         WHERE scientific_name IS NOT NULL
@@ -976,6 +995,7 @@ export const getRecommendedPlants = async (
     imageMedium:        (plant.image_medium_url      as string)  ?? null,
     imageSmall:         (plant.image_small_url       as string)  ?? null,
     imageThumbnail:     (plant.image_thumbnail       as string)  ?? null,
+    image_url:         toImageUrl(plant.local_image_path       as string)  ?? null,
     matchScore:         (plant.match_score           as number)  ?? 0,
     whyRecommended:      buildWhyRecommended(plant, labels),
   }));

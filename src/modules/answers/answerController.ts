@@ -291,6 +291,7 @@ export const getRecommendedPlantsController = async (
       imageMedium:        p.imageMedium,
       imageSmall:         p.imageSmall,
       imageThumbnail:     p.imageThumbnail,
+      image_url:         p.image_url,       // new field for local image URL
       matchScore:         p.matchScore,
       whyRecommended:     p.whyRecommended,
     }));
