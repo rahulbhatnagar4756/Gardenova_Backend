@@ -19,8 +19,25 @@ import { Transform, TransformCallback } from "stream";
 import { pipeline } from "stream/promises";
 import pg from "pg";
 import copyFrom from "pg-copy-streams";
+import env from "../../core/config/env";
 
 /**
+ * Converts a local image file path into a public image URL.
+ *
+ * Example:
+ * Input:  "/uploads/plant_00001.jpg"
+ * Output: "https://your-domain.com/plant-images/plant_00001.jpg"
+ *
+ * @param {string | null} localPath - Local filesystem path of the image.
+ * @returns {string | null} Public image URL or null if no path is provided.
+ */
+const toImageUrl = (localPath: string | null): string | null => {
+    if (!localPath) return null;
+    const filename = localPath.split("/").pop();   // "plant_00001.jpg"
+    return `${env.APPDEV_URL}/plant-images/${filename}`;
+};
+/**
+ * 
  * Retrieves paginated plant species from the database.
  *
  * @param {number} page - Current page number.
@@ -98,6 +115,7 @@ export const getAllPlantsService = async (
             common_name,
             scientific_name,
             image_original_url,
+            local_image_path,
             family,
             type,
             cycle,
@@ -117,13 +135,17 @@ export const getAllPlantsService = async (
     `;
 
     const result = await pool.query(dataQuery, params);
+    const plants = result.rows.map((row) => ({
+        ...row,
+        image_url: toImageUrl(row.local_image_path),  // ← new clean URL field
+    }));
 
     return {
         currentPage: page,
         totalPages,
         totalCount,
         limit,
-        plants: result.rows,
+        plants,
     };
 };
 
@@ -154,6 +176,7 @@ export const getPlantDetailsByIdService = async (
                     id,
                     common_name,
                     scientific_name,
+                    local_image_path,
                     other_name,
                     family,
                     genus,
@@ -222,18 +245,19 @@ export const getPlantDetailsByIdService = async (
         ]);
 
         if (plantResult.rows.length === 0) throw new Error("Plant not found");
-
+        const plant = plantResult.rows[0];
+        plant.image_url = toImageUrl(plant.local_image_path)
         const userPlant = userPlantResult.rows[0];
         const careData = careResult.rows[0] ?? null;
 
         return {
-            plant: plantResult.rows[0],
+            plant,
             care: careData
                 ? {
-                      watering: careData.watering ?? null,
-                      sunlight: careData.sunlight ?? null,
-                      pruning:  careData.pruning  ?? null,
-                  }
+                    watering: careData.watering ?? null,
+                    sunlight: careData.sunlight ?? null,
+                    pruning: careData.pruning ?? null,
+                }
                 : null,
             AlreadyAdded: !!userPlant,
             reminder: {
@@ -462,7 +486,7 @@ export const getUserPlantsService = async (
 
     // ── Search condition ───────────────────────────────────────────────────────
     const searchCondition = isSearch
-    ? `AND (
+        ? `AND (
       unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($3)
       OR unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($3)
 
@@ -475,10 +499,10 @@ export const getUserPlantsService = async (
       OR unaccent(COALESCE(pc.common_name::text, '')) % unaccent($2)
       OR unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($2)
     )`
-    : "";
+        : "";
 
-const relevanceScore = isSearch
-    ? `CASE
+    const relevanceScore = isSearch
+        ? `CASE
       WHEN unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($3) THEN 300
       WHEN unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($3) THEN 280
       WHEN to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, '')))
@@ -489,7 +513,7 @@ const relevanceScore = isSearch
       WHEN unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($2) THEN 60
       ELSE 0
     END`
-    : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
+        : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
     // const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
     // ✅ searchValue used consistently, not raw search
@@ -524,6 +548,7 @@ const relevanceScore = isSearch
             pc.flowers                 AS flowers,
             pc.indoor                 AS indoor,
             pc.image_original_url     AS image_original_url,
+            pc.local_image_path          AS local_image_path,
             up.health_status,
             up.watering_notification_enabled,
             up.watering_preferred_time,
@@ -554,13 +579,17 @@ const relevanceScore = isSearch
          OFFSET $${offsetIdx}`,
         [...baseParams, safeLimit, offset]
     );
+    const plants = dataResult.rows.map((row) => ({
+    ...row,
+    image_url: toImageUrl(row.local_image_path),
+}));
 
     return {
         currentPage: safePage,
         totalPages,
         totalCount,
         limit: safeLimit,
-        plants: dataResult.rows,
+        plants,
     };
 };
 
@@ -683,12 +712,13 @@ export const getUserPlantByIdService = async (
             image_medium_url: row.image_medium_url,
             image_small_url: row.image_small_url,
             image_thumbnail: row.image_thumbnail,
+            local_image_path: toImageUrl(row.local_image_path),
             image_license: row.image_license,
         },
         care: {
             watering: row.care_watering ?? null,
             sunlight: row.care_sunlight ?? null,
-            pruning:  row.care_pruning  ?? null,
+            pruning: row.care_pruning ?? null,
         },
         reminder: {
             watering_notification_enabled: row.watering_notification_enabled,
@@ -1502,6 +1532,7 @@ export const getAllPlantsAdminService = async (
         image_small_url: row.image_small_url,
         image_thumbnail: row.image_thumbnail,
         image_license: row.image_license,
+        local_image_path:toImageUrl(row.local_image_path),
     }));
 
     return {

@@ -34,6 +34,8 @@ connectDB().catch((error) => {
 });
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/plant-images', express.static(path.join(process.cwd(), 'plant_images')));
+
 
 // Middleware
 const corsOptions = {
