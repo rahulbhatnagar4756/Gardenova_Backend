@@ -395,3 +395,10 @@ export type PlantDetailsResponse = {
 } | null;
     reminder: ReminderforUserPlant;
 };
+
+export interface PaginatedPlantsResponse {
+    data: AdminPlant[];
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+}

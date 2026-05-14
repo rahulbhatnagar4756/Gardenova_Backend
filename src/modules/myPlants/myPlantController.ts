@@ -535,7 +535,7 @@ export const getAllPlantsAdmin = async (
 
     try {
         const page   = parseInt(req.query.page as string) || 1;
-        const limit  = parseInt(req.query.limit as string) || 10;
+        const limit  = parseInt(req.query.limit as string) || 5;
         // const search = (req.query.search as string)?.trim() || undefined;
         const data = await getAllPlantsAdminService(page, limit);
         res.status(HTTP_STATUS.OK).json(successResponse(

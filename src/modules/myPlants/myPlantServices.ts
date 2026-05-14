@@ -461,35 +461,35 @@ export const getUserPlantsService = async (
     // const commonNameExpr = `COALESCE(scientific_name, common_name, other_name)`;
 
     // ── Search condition ───────────────────────────────────────────────────────
-    const searchCondition = search
-        ? `AND (
-      unaccent(COALESCE(pc.common_name::text, ''::text)) ILIKE unaccent($2)
-      OR unaccent(COALESCE(pc.scientific_name::text, ''::text)) ILIKE unaccent($2)
+    const searchCondition = isSearch
+    ? `AND (
+      unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($3)
+      OR unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($3)
 
-      OR to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, ''::text)))
-           @@ plainto_tsquery('simple', unaccent($1))
+      OR to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, '')))
+           @@ plainto_tsquery('simple', unaccent($2))
 
-      OR to_tsvector('simple', unaccent(COALESCE(pc.scientific_name::text, ''::text)))
-           @@ plainto_tsquery('simple', unaccent($1))
+      OR to_tsvector('simple', unaccent(COALESCE(pc.scientific_name::text, '')))
+           @@ plainto_tsquery('simple', unaccent($2))
 
-      OR unaccent(COALESCE(pc.common_name::text, ''::text)) % unaccent($1)
-      OR unaccent(COALESCE(pc.scientific_name::text, ''::text)) % unaccent($1)
+      OR unaccent(COALESCE(pc.common_name::text, '')) % unaccent($2)
+      OR unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($2)
     )`
-        : "";
-    // ── Relevance score ────────────────────────────────────────────────────────
-    const relevanceScore = search
-        ? `CASE
-      WHEN unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($2) THEN 300
-      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($2) THEN 280
+    : "";
+
+const relevanceScore = isSearch
+    ? `CASE
+      WHEN unaccent(COALESCE(pc.common_name::text, '')) ILIKE unaccent($3) THEN 300
+      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) ILIKE unaccent($3) THEN 280
       WHEN to_tsvector('simple', unaccent(COALESCE(pc.common_name::text, '')))
-           @@ plainto_tsquery('simple', unaccent($1)) THEN 150
+           @@ plainto_tsquery('simple', unaccent($2)) THEN 150
       WHEN to_tsvector('simple', unaccent(COALESCE(pc.scientific_name::text, '')))
-           @@ plainto_tsquery('simple', unaccent($1)) THEN 130
-      WHEN unaccent(COALESCE(pc.common_name::text, '')) % unaccent($1) THEN 80
-      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($1) THEN 60
+           @@ plainto_tsquery('simple', unaccent($2)) THEN 130
+      WHEN unaccent(COALESCE(pc.common_name::text, '')) % unaccent($2) THEN 80
+      WHEN unaccent(COALESCE(pc.scientific_name::text, '')) % unaccent($2) THEN 60
       ELSE 0
     END`
-        : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
+    : `0::integer`;// ← was "0", now explicitly cast so PG treats it as a value not a position
     // const searchParams = search ? [searchValue, `${searchValue}%`] : [];
 
     // ✅ searchValue used consistently, not raw search
@@ -1380,22 +1380,62 @@ export async function importPlantsService(filePath: string): Promise<ImportResul
  *
  * @throws Error Throws database/query execution errors
  */
+interface PaginatedPlantsResponse {
+    data: AdminPlant[];
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+}
+/**
+ * Retrieves paginated plant records for admin users.
+ *
+ * Supports:
+ * - Pagination
+ * - Optional search filtering
+ *
+ * Database:
+ * - Reads data from `plant_table_final`
+ *
+ * Pagination:
+ * - `page` starts from 1
+ * - `limit` defines number of records per page
+ * - `offset` is calculated internally
+ *
+ * @param page Current page number
+ * @param limit Number of records per page
+ * @param search Optional search keyword for filtering plants
+ *
+ * @returns Promise resolving to an array of admin plant records
+ *
+ * @throws Error Throws database/query execution errors
+ */
 export const getAllPlantsAdminService = async (
     page: number,
     limit: number,
-
-): Promise<AdminPlant[]> => {
+): Promise<PaginatedPlantsResponse> => {
     const pool = await getDB();
     const offset = (page - 1) * limit;
 
+    // Get total count
+    const countQuery = `
+        SELECT COUNT(*) AS total
+        FROM plant_table_final
+    `;
+
+    const countResult = await pool.query(countQuery);
+    const totalItems = parseInt(countResult.rows[0].total, 10);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    // Get paginated data
     const query = `
         SELECT *
         FROM plant_table_final     
         LIMIT $1 OFFSET $2
     `;
+
     const result = await pool.query(query, [limit, offset]);
 
-    return result.rows.map((row) => ({
+    const plants: AdminPlant[] = result.rows.map((row) => ({
         plant_id: row.id,
         scientific_name: row.scientific_name,
         common_name: row.common_name,
@@ -1463,5 +1503,12 @@ export const getAllPlantsAdminService = async (
         image_thumbnail: row.image_thumbnail,
         image_license: row.image_license,
     }));
+
+    return {
+        data: plants,
+        currentPage: page,
+        totalPages,
+        totalItems,
+    };
 };
 
