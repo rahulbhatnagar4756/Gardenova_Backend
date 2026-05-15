@@ -52,10 +52,7 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
         return;
     } catch (error) {
         console.error("Error generating landscape design:", error);
-        res.status(500).json({
-            success: false,
-            message: "An error occurred while generating landscape design",
-        });
+        
         next(error);
     }
 };

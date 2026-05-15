@@ -35,6 +35,7 @@ connectDB().catch((error) => {
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/plant-images', express.static(path.join(process.cwd(), 'plant_images')));
+app.use('/disease_images', express.static(path.join(process.cwd(), 'disease_images')));
 
 
 // Middleware

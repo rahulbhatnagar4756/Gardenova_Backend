@@ -37,6 +37,26 @@ const toImageUrl = (localPath: string | null): string | null => {
     return `${env.APPDEV_URL}/plant-images/${filename}`;
 };
 /**
+ * Converts a local file path into a publicly accessible URL
+ * for disease image assets.
+ *
+ * This helper extracts the filename from a full or relative
+ * path and appends it to the configured base server URL.
+ *
+ * Example:
+ * "/uploads/disease_images/plant_00001.jpg"
+ * → "https://your-domain.com/disease_images/plant_00001.jpg"
+ *
+ * @param localPath - Local filesystem path or stored relative path
+ *
+ * @returns Public URL string if path exists, otherwise null
+ */
+const diseaseUrl = (localPath: string | null): string | null => {
+    if (!localPath) return null;
+    const filename = localPath.split("/").pop();   // "plant_00001.jpg"
+    return `${env.APPDEV_URL}/disease_images/${filename}`;
+};
+/**
  * 
  * Retrieves paginated plant species from the database.
  *
@@ -170,7 +190,7 @@ export const getPlantDetailsByIdService = async (
         const id = parseInt(plantId, 10);
         if (isNaN(id)) throw new Error("Invalid plant ID — must be a number");
 
-        const [plantResult, userPlantResult, careResult] = await Promise.all([
+        const [plantResult, userPlantResult, careResult,diseasecare] = await Promise.all([
             pool.query(
                 `SELECT
                     id,
@@ -232,16 +252,20 @@ export const getPlantDetailsByIdService = async (
                     image_license
                 FROM ${TABLE}
                 WHERE id = $1`,
-                [id]
+                [plantId]
             ),
             pool.query(
                 `SELECT * FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
-                [id, userId]
+                [plantId, userId]
             ),
             pool.query(
                 `SELECT watering, sunlight, pruning FROM plant_care_table WHERE plant_id = $1`,
-                [id]
+                [plantId]
             ),
+            pool.query(
+                `select * from plant_diseases where id = $1`,
+                [plantId]
+            )
         ]);
 
         if (plantResult.rows.length === 0) throw new Error("Plant not found");
@@ -249,6 +273,7 @@ export const getPlantDetailsByIdService = async (
         plant.image_url = toImageUrl(plant.local_image_path)
         const userPlant = userPlantResult.rows[0];
         const careData = careResult.rows[0] ?? null;
+        const diseaseData = diseasecare.rows[0] ?? null;
 
         return {
             plant,
@@ -259,6 +284,13 @@ export const getPlantDetailsByIdService = async (
                     pruning: careData.pruning ?? null,
                 }
                 : null,
+                disease: diseaseData?{
+                    host: diseaseData.host,
+                    description: diseaseData.description,
+                    solution: diseaseData.solution,
+                    local_image_disease_path: diseaseUrl(diseaseData.local_image_path),
+                }:null,
+
             AlreadyAdded: !!userPlant,
             reminder: {
                 watering_notification_enabled: false,
@@ -631,12 +663,14 @@ export const getUserPlantByIdService = async (
         SELECT 
             up.*,
             p.*,
+            pd.*,
             pc.watering   AS care_watering,
             pc.sunlight   AS care_sunlight,
             pc.pruning    AS care_pruning
         FROM user_plants up
         JOIN plant_table_final p ON up.plant_id = p.id
         LEFT JOIN plant_care_table pc ON pc.plant_id = p.id
+        left join plant_diseases pd on pd.id = p.id
         WHERE up.user_id = $1 AND up.plant_id = $2
     `;
 
@@ -719,6 +753,13 @@ export const getUserPlantByIdService = async (
             watering: row.care_watering ?? null,
             sunlight: row.care_sunlight ?? null,
             pruning: row.care_pruning ?? null,
+        },
+        disease:{
+            host: row.host,
+            description: row.description,
+            solution: row.solution,
+            local_image_disease_path: diseaseUrl(row.local_image_path),
+
         },
         reminder: {
             watering_notification_enabled: row.watering_notification_enabled,

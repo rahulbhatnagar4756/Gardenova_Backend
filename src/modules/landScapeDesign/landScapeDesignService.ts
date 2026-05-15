@@ -1,35 +1,48 @@
-import sharp from 'sharp';
-// import { getSignedFileUrl, uploadBufferToS3 } from '../../core/services/s3UploadService';
-import { buildImagePrompt, callGroqForPlanning, callInpainting, callVisionForSceneDescription, uploadBufferLocal } from './landScapeDesignRepo';
-// const BASE_URL = process.env.APPDEV_URL || 'http://localhost:3000';
-const BASE_URL = process.env.APPDEV_URL 
-export interface DesignResult {
-  originalUrl:    string;   // saved input image
-  gardenUrl:      string;   // AI-generated garden image
-  // maskUrl:        string;   // segmentation mask
-  description:    string;   // scene analysis
-}
+import {
+  buildImagePrompt,
+  callGroqForPlanning,
+  callInpainting,
+  callSegmentationAPI,
+  callVisionForSceneDescription,
+  DesignResult,
+  detectSpaceType,
+  uploadBufferLocal
+} from './landScapeDesignRepo';
+// const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! });
+ 
+// const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
+const BASE_URL = process.env.APPDEV_URL || 'http://localhost:3000';
+// const WAVESPEED_API_KEY = process.env.WAVESPEED_API_KEY!;
+// const SAM_ENDPOINT = process.env.WAVESPEED_SAM_URL!;
 /**
- * Processes an uploaded image and generates a garden design based on user preferences.
+ * Orchestrates the full AI design pipeline for a single image.
  *
- * Pipeline steps:
- * 1. Decodes and preprocesses the base64 image (resize + compress)
- * 2. Stores the processed image locally
- * 3. Calls segmentation API to generate a mask for editable regions
- * 4. Uses vision model to describe the scene
- * 5. Generates a garden plan using LLM (based on description + preferences)
- * 6. Performs inpainting to create the final garden design image
+ * Pipeline stages:
+ * 1. Preprocess input image (resize, normalize, compress)
+ * 2. Save original processed image locally
+ * 3. Detect architectural space type (indoor/outdoor classification)
+ * 4. Generate segmentation mask (floor/region detection)
+ * 5. Generate structured scene description using vision LLM
+ * 6. Create transformation plan using Groq LLM
+ * 7. Convert plan into an inpainting prompt
+ * 8. Generate final edited image using mask-guided inpainting
  *
- * @param {Object} data - Input data object
- * @param {string} data.image_base64 - Base64 encoded image (with or without data URI prefix)
- * @param {Record<string, any>} [data.prefs] - Optional user preferences (e.g., style, space_type)
+ * The system ensures:
+ * - Deterministic preprocessing (fixed resolution 1024px max)
+ * - Robust fallback behavior in segmentation pipeline
+ * - Strict grounding of design decisions in vision output
+ * - Mask-based editing (not full image regeneration)
  *
- * @returns {Promise<DesignResult>} Resolves with:
- *  - originalUrl {string}: URL of the uploaded original image
- *  - gardenUrl {string}: URL of the generated garden design image
- *  - description {string}: AI-generated description of the input scene
- *
- * @throws Will throw an error if any processing step fails (image processing, API calls, or upload)
+ * @param data - Input payload containing:
+ *   - image_base64: input image (base64 or data URI)
+ *   - prefs: optional user design preferences
+ * @param data.image_base64 - The input image to be processed, provided as a base64 string or data URI.
+ * @param data.prefs - Optional user preferences that may influence design decisions (e.g., style, budget).
+ * @returns A structured `DesignResult` containing:
+ * - originalUrl: stored preprocessed input image
+ * - gardenUrl: final inpainted result image
+ * - description: vision model scene analysis
+ * - detectedSpace: classified space metadata
  */
 export const processDesign = async (
   data: { image_base64: string; prefs?: Record<string, string> }
@@ -37,7 +50,10 @@ export const processDesign = async (
 
   const { image_base64, prefs } = data;
 
-  const matches   = image_base64.match(/^data:(.+);base64,(.+)$/);
+  // ── Preprocess ────────────────────────────────────────────────────────────
+  const sharp = (await import('sharp')).default;
+
+  const matches = image_base64.match(/^data:(.+);base64,(.+)$/);
   const rawBuffer = matches?.[2]
     ? Buffer.from(matches[2], 'base64')
     : Buffer.from(image_base64, 'base64');
@@ -48,26 +64,46 @@ export const processDesign = async (
     .toBuffer();
 
   const processedBase64 = `data:image/jpeg;base64,${processedBuffer.toString('base64')}`;
-  // console.log(`[1/6] Preprocessed: ${processedBuffer.length} bytes`);
 
-  const fileName    = `design-${Date.now()}`;
-  const fileKey     = await uploadBufferLocal(processedBuffer, `${fileName}.jpg`, 'design-uploads');
+  const fileName = `design-${Date.now()}`;
+  const fileKey = await uploadBufferLocal(processedBuffer, `${fileName}.jpg`, 'design-uploads');
   const originalUrl = `${BASE_URL}/uploads/${fileKey}`;
-  // console.log(`[2/6] Saved: ${originalUrl}`);
+  // console.log(`[1/6] Preprocessed & saved: ${originalUrl}`);
 
-  // const spaceType = prefs?.space_type ?? 'generic';
-  // const { mask_url, mask_base64 } = await callSegmentationAPI(processedBase64, spaceType);
-  // // console.log(`[3/6] Mask: ${mask_url}`);
+  // ── Step 1: Detect space ──────────────────────────────────────────────────
+  const detectedSpace = await detectSpaceType(processedBuffer);
+  // console.log(`[2/6] Space: ${detectedSpace.spaceType} (${detectedSpace.category}, ${detectedSpace.confidence}) — ${detectedSpace.reasoning}`);
 
-  const description = await callVisionForSceneDescription(processedBuffer, "image/jpeg");
+  // ── Step 2: Segment (get mask) ────────────────────────────────────────────
+  const { mask_base64 } = await callSegmentationAPI(processedBase64, detectedSpace.spaceType);
+  // console.log(`[3/6] Mask generated`);
+
+// ← ADD THIS DEBUG BLOCK
+// const maskMatches = mask_base64.match(/^data:(.+);base64,(.+)$/);
+// const maskBuffer = Buffer.from(maskMatches?.[2] ?? mask_base64, 'base64');
+// const maskDebugPath = await uploadBufferLocal(maskBuffer, `debug-mask-${Date.now()}.png`, 'design-uploads');
+// console.log(`[DEBUG] Mask saved: ${BASE_URL}/uploads/${maskDebugPath}`);
+
+  // ── Step 3: Describe the scene ────────────────────────────────────────────
+  const description = await callVisionForSceneDescription(processedBuffer, 'image/jpeg');
   // console.log(`[4/6] Description:\n${description}`);
 
-  const plan = await callGroqForPlanning(description, prefs);
+  // ── Step 4: Plan the transformation ──────────────────────────────────────
+  const plan = await callGroqForPlanning(description, detectedSpace, prefs);
   // console.log(`[5/6] Plan: ${plan.style} — ${plan.summary}`);
 
-  const imagePrompt = buildImagePrompt(plan, description);
-  const gardenUrl   = await callInpainting(processedBase64, imagePrompt, fileName);
-  // console.log(`[6/6] Garden image: ${gardenUrl}`);
+  // ── Step 5: Build editing prompt ──────────────────────────────────────────
+  const imagePrompt = buildImagePrompt(plan, description, detectedSpace);
+  // console.log(`[6/6] Prompt: ${imagePrompt}`);
 
-  return { originalUrl, gardenUrl, description };
+  // ── Step 6: Inpaint masked region only ────────────────────────────────────
+  const resultUrl = await callInpainting(processedBase64, mask_base64, imagePrompt, fileName);
+  // console.log(`[✅] Done: ${resultUrl}`);
+
+  return {
+    originalUrl,
+    gardenUrl: resultUrl,
+    description,
+    detectedSpace,
+  };
 };

@@ -286,6 +286,12 @@ export interface PlantResponse{
     sunlight: string | null;
     pruning:  string | null;
 } | null;
+disease: {
+  host: string | null;
+  description: string | null;
+  solution: string | null;
+  local_image_disease_path: string | null;
+} | null;
   AlreadyAdded: boolean;
   reminder: Reminder;
 }
@@ -394,6 +400,12 @@ export type PlantDetailsResponse = {
     watering: string | null;
     sunlight: string | null;
     pruning:  string | null;
+} | null;
+disease: {
+  host: string | null;
+  description: string | null;
+  solution: string | null;
+  local_image_disease_path: string | null;
 } | null;
     reminder: ReminderforUserPlant;
 };
