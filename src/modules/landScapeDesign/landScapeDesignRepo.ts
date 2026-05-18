@@ -1223,15 +1223,14 @@ Build FROM the described baseline — do not assume anything else exists.
 export function buildImagePrompt(
   plan: DesignPlan,
   sceneDescription: string,
-  // detectedSpace: DetectedSpace
+  detectedSpace: DetectedSpace
 ): string {
 
   const isAfternoon = sceneDescription.toLowerCase().includes('afternoon');
   const lightingCondition = isAfternoon
-    ? 'warm golden hour afternoon lighting with soft shadows'
-    : 'natural soft daylight with balanced exposure';
+    ? 'warm golden-hour light with long soft shadows'
+    : 'natural diffused daylight with balanced exposure';
 
-  // Extract structured plan elements
   const plants = plan.steps
     .filter(s => s.category === 'Softscape')
     .map(s => s.details.split('.')[0])
@@ -1257,121 +1256,69 @@ export function buildImagePrompt(
     .map(s => s.action)
     .join(', ');
 
-  return `
-Transform this space into a sophisticated, lush ${plan.style} garden using advanced spatial planting and landscape design principles.
+  // Build optional plan sections only if data exists
+  const planSections = [
+    plants    && `Softscape: ${plants}`,
+    hardscape && `Hardscape: ${hardscape}`,
+    lighting  && `Lighting: ${lighting}`,
+    water     && `Water features: ${water}`,
+    pathways  && `Pathways: ${pathways}`,
+  ].filter(Boolean).join('\n');
 
-SCENE CONTEXT:
+  return `
+Photorealistic landscape design render. Transform this ${detectedSpace.spaceType} into a lush, 
+well-designed garden environment while preserving every structural element exactly as-is.
+
+SCENE:
 ${sceneDescription}
 
-ABSOLUTE STRUCTURAL CONSTRAINTS:
-- DO NOT alter architecture, walls, flooring, railings, furniture, or layout.
-- DO NOT change perspective, geometry, or proportions.
-- Preserve all existing structural elements exactly as-is.
-- Only enhance by adding greenery, planters, and soft landscape elements.
+DESIGN PLAN TO IMPLEMENT:
+${planSections}
 
-🚨 DESIGN ELEMENTS TO APPLY (STRICTLY FOLLOW):
+STRUCTURAL PRESERVATION (NON-NEGOTIABLE):
+Preserve all existing architecture — walls, flooring, ceiling, railings, stairs, furniture, 
+windows, doors, and structural geometry — with zero modification. Same camera angle, same 
+perspective, same proportions. Only ADD garden elements on top of the existing scene.
 
-Plants & greenery:
-${plants || 'Use natural mixed greenery suitable for the space.'}
+GREENERY & PLANTING:
+Introduce a rich variety of plants scaled appropriately to the space:
+- Tall specimen plants or small trees anchoring corners and walls
+- Medium shrubs and ornamental grasses along edges and boundaries  
+- Compact flowering plants in clusters for color and foreground interest
+- Climbing or trailing plants softening vertical surfaces and railings where natural
+- A visible mix of foliage textures: broad-leaf, fine-leaf, and flowering varieties
+- Vibrant blooms (reds, yellows, pinks, purples) clearly visible against green foliage
+- All plants housed in appropriate containers: ceramic pots, concrete planters, 
+  rectangular planter boxes, or raised garden beds — matching the space's aesthetic
 
-Hardscape additions:
-${hardscape || 'Minimal natural materials only if needed.'}
+SPATIAL COMPOSITION:
+- Foreground: detailed small pots and low plants creating depth
+- Midground: open usable space balanced with medium plantings
+- Background: taller plants, vertical climbers, and wall-hugging greenery
+- Avoid rigid symmetry; use organic, asymmetrical groupings
+- Maintain breathing space — do not overcrowd
 
-Pathways & circulation:
-${pathways || 'Maintain existing walking flow without adding new paths.'}
-
-Lighting:
-${lighting || 'No artificial lighting changes unless subtle.'}
-
-Water features:
-${water || 'None'}
-
----
-
-🚨 MANDATORY GREENERY INSERTION (CRITICAL — MUST FOLLOW):
-
-- The space MUST contain clearly visible plants. It must NOT remain empty.
-- Add a minimum of 6–12 plants across the scene.
-
-- You MUST include:
-  • flowering plants with visible blooms (red, yellow, pink, or purple flowers)
-  • leafy green plants
-  • at least 2–3 medium-sized potted plants
-  • smaller decorative pots grouped naturally
-
-- ALL plants must be placed in:
-  • realistic pots, planters, or containers
-  • visible and clearly distinguishable (not hidden or tiny)
-
-- Flowering plants MUST be visually noticeable (bright blooms, not just green leaves).
-
----
-
-DESIGN STRATEGY (PROFESSIONAL LANDSCAPE APPROACH):
-
-1. VERTICAL LAYERS (HEIGHT UTILIZATION):
-- Introduce climbing plants (ivy, jasmine, bougainvillea, etc.) on available vertical structures.
-- Add wall-mounted planters or vertical garden panels where suitable.
-- Use trailing plants to create natural cascading effects.
-
-2. FOCAL POINT CREATION:
-- Identify a natural focal area (e.g., corner, structure, entrance).
-- Enhance it using layered plants (tall + medium + low height).
-- Ensure flowering plants are part of the focal composition.
-
-3. FLOOR & GROUND TREATMENT:
-- Preserve original flooring visibility.
-- Add greenery only along edges and corners.
-- Place asymmetrical clusters of pots (small → medium → large).
-- Maintain clear functional walking paths.
-
-4. EDGE & BOUNDARY SOFTENING:
-- Add planter boxes along edges, railings, or boundaries.
-- Use cascading plants to soften hard lines.
-- Maintain airflow and openness.
-
-5. MICRO-ZONE CREATION:
-- Subtly divide into:
-  • Relaxation zone
-  • Green focal zone
-  • Transition zone
-
-6. NATURAL COMPOSITION PRINCIPLES:
-- Avoid rigid symmetry
-- Create layered depth (foreground / midground / background)
-- Balance greenery with empty space
-
-PLANT SELECTION LOGIC:
-- Mix textures (broad, fine, trailing)
-- Use varied heights
-- Include flowering species such as marigold, petunia, bougainvillea, or similar visible bloom plants
-- Keep species realistic and climate-appropriate
+HARDSCAPE & FEATURES:
+Integrate naturally with the existing structure:
+${hardscape ? `- Hardscape elements: ${hardscape}` : '- Keep existing pathways, surfaces, and borders clean and intact'}
+${water     ? `- Water feature: ${water}` : ''}
+${pathways  ? `- Pathways: ${pathways}` : ''}
 
 LIGHTING & ATMOSPHERE:
-- ${lightingCondition}
-- realistic shadows and highlights
-- natural light interaction with plants and surfaces
+${lightingCondition}. Realistic interaction between light, shadow, and plant foliage. 
+${lighting ? `Lighting elements: ${lighting}.` : 'Soft ambient garden lighting where appropriate.'}
+Warm, inviting atmosphere that feels lived-in and natural.
 
 RENDER QUALITY:
-- ultra photorealistic
-- highly detailed textures
-- realistic depth and lighting
-- 4K resolution
+Ultra-photorealistic. Highly detailed plant textures and pot surfaces. Accurate depth of field. 
+Natural color grading. 4K resolution. The result must look like a professional landscape 
+photography shot — not a render, not a painting, not a composite.
 
-🚨 FINAL SCENE REQUIREMENT (VERY IMPORTANT):
-
-The final image MUST clearly show:
-- multiple visible potted plants
-- clearly visible flowering plants with colorful blooms
-- layered greenery across the space
-- no empty or bare areas
-
-If flowering plants or pots are not clearly visible, the result is incorrect.
-
-FINAL INTENT:
-Follow the provided design elements strictly and apply them naturally into the existing space. 
-The result must feel like a real, professionally designed garden — elegant, balanced, and believable — without altering the original structure.
-`;
+INTENT:
+The final scene must feel like a professionally landscaped garden that has organically grown 
+into this space — abundant with life, color, and texture, while the original structure remains 
+completely intact and recognizable.
+`.trim();
 }
 /**
  * Performs mask-guided inpainting using WaveSpeed `flux-fill-dev`.
@@ -1444,7 +1391,7 @@ export async function callInpainting(
       prompt: anchoredPrompt,
       negative_prompt: negativePrompt,
       num_inference_steps: 28,
-      guidance_scale: 8.0,   // ← lowered: lets model respect original image more
+      guidance_scale: 9.5,   // ← lowered: lets model respect original image more
       strength: 0.75,
       num_images: 2,
       output_format: 'jpeg',

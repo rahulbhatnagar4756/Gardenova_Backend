@@ -93,7 +93,7 @@ export const processDesign = async (
   // console.log(`[5/6] Plan: ${plan.style} — ${plan.summary}`);
 
   // ── Step 5: Build editing prompt ──────────────────────────────────────────
-  const imagePrompt = buildImagePrompt(plan, description);
+  const imagePrompt = buildImagePrompt(plan, description, detectedSpace);
   // console.log(`[6/6] Prompt: ${imagePrompt}`);
 
   // ── Step 6: Inpaint masked region only ────────────────────────────────────

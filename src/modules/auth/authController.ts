@@ -43,6 +43,7 @@ import { uploadBufferToS3 } from "../../core/services/s3UploadService";
 import { AuthRequest } from "../../interface/auth";
 import { AppError } from "../../interface";
 import { handleProfessionalLogin } from "../professional/professionalRepositry";
+import { getDB } from "../../core/config/db";
 
 /**
  * Registers a new user in the system.
@@ -250,7 +251,7 @@ export const login = async (
         .json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
       return;
     }
-
+    const client = getDB();
     // Fetch role from roles table
     const role = await getRoleById(user.role_id);
 
@@ -315,6 +316,14 @@ export const login = async (
       }
 
       const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
+      
+      
+      const response_id = await client.query(
+        "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [user.id]
+      );
+
+
 
       res.status(HTTP_STATUS.OK).json(
         successResponse(
@@ -323,6 +332,7 @@ export const login = async (
             role: role.name,
             accountStatus: professionalStatus.accountStatus,
             statusMessage: professionalStatus.message,
+            responseId: response_id.rows[0]?.response_id || null,
           },
           MESSAGES.LOGIN_SUCCESS
         )
@@ -332,12 +342,17 @@ export const login = async (
 
     // ─── 6. Standard user login ────────────────────────────────────────────
     const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
+     const response_id = await client.query(
+        "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [user.id]
+      );
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(
         {
           token,
           role: role.name,
+          responseId: response_id.rows[0]?.response_id || null,
         },
         MESSAGES.LOGIN_SUCCESS
       )
