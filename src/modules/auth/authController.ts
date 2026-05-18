@@ -44,6 +44,8 @@ import { AuthRequest } from "../../interface/auth";
 import { AppError } from "../../interface";
 import { handleProfessionalLogin } from "../professional/professionalRepositry";
 import { getDB } from "../../core/config/db";
+import fs from "fs";
+import path from "path";
 
 /**
  * Registers a new user in the system.
@@ -316,8 +318,8 @@ export const login = async (
       }
 
       const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
-      
-      
+
+
       const response_id = await client.query(
         "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
         [user.id]
@@ -342,10 +344,10 @@ export const login = async (
 
     // ─── 6. Standard user login ────────────────────────────────────────────
     const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
-     const response_id = await client.query(
-        "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-        [user.id]
-      );
+    const response_id = await client.query(
+      "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [user.id]
+    );
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(
@@ -892,11 +894,14 @@ export const googleAuth = async (
       //  Download image
       const buffer = await downloadImageAsBuffer(picture!);
       // Upload image
-      const uploadedFileKey = await uploadBufferToS3(
-        buffer,
-        `${Date.now()}.jpg`,
-        "Users/ProfileImages"
-      );
+      const uploadsDir = path.join(process.cwd(), "Uploads/users/ProfileImages");
+      fs.mkdirSync(uploadsDir, { recursive: true }); // create folders if not exist
+
+      const fileName = `${Date.now()}.jpg`;
+      const filePath = path.join(uploadsDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+
+      const uploadedFileKey = `Uploads/users/ProfileImages/${fileName}`;
       // Save S3 key to DB
       await createUserProfileWithImage(userData?.id!, uploadedFileKey);
       // Bind updated user data to user
@@ -1061,11 +1066,14 @@ export const facebookAuth = async (
       // Download Facebook picture
       const buffer = await downloadImageAsBuffer(picture!);
       // Upload image
-      const uploadedFileKey = await uploadBufferToS3(
-        buffer,
-        `${Date.now()}.jpg`,
-        "Users/ProfileImages"
-      );
+      const uploadsDir = path.join(process.cwd(), "Uploads/users/ProfileImages");
+      fs.mkdirSync(uploadsDir, { recursive: true }); // create folders if not exist
+
+      const fileName = `${Date.now()}.jpg`;
+      const filePath = path.join(uploadsDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+
+      const uploadedFileKey = `Uploads/users/ProfileImages/${fileName}`;
 
       // Save profile image
       await createUserProfileWithImage(userData.id!, uploadedFileKey);
