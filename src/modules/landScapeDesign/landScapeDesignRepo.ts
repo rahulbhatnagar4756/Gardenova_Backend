@@ -1283,22 +1283,68 @@ Architecture must remain EXACTLY identical (pixel-preserved).
 ONLY ADD garden elements layered on top.
 
 --------------------------------------------------
-🌿 GROUND TRANSFORMATION — GRASS BED (MANDATORY)
+🚫 SURROUNDING PROTECTION (CRITICAL)
 --------------------------------------------------
-- Convert entire visible floor into dense natural grass lawn
-- Grass must show:
-  - tonal variation (light + dark patches)
-  - slight irregular growth
-  - realistic blade texture (NOT flat or carpet-like)
-- Blend edges naturally into walls and structures
-- Integrate stepping stones if applicable
+- DO NOT change or reinterpret surroundings in ANY way
+- Do NOT add, remove, or alter background buildings, sky, or external environment
+- Do NOT extend or shrink the visible space
+- Only work strictly WITHIN the existing visible boundaries
 
-❗ Flat green surfaces are NOT acceptable
+❗ Any modification outside the original space is strictly forbidden
+
+--------------------------------------------------
+🌸 FLOWER DENSITY BOOST (CRITICAL)
+--------------------------------------------------
+- Flower presence must be HIGH and clearly visible
+- At least 40–60% of plants must include flowering species
+
+- Distribute flowers across:
+  - ground level clusters
+  - mid-height shrubs
+  - trailing plants on railings
+
+- Use bold contrasting colors:
+  pink, magenta, yellow, orange, red, purple
+
+- Flowers must appear:
+  - dense
+  - vibrant
+  - naturally spread (not isolated)
+
+❗ Green-only foliage is NOT acceptable — flowers must dominate visually
+
+
+--------------------------------------------------
+🌿 GROUND TRANSFORMATION — PREMIUM TRIMMED LAWN (MANDATORY)
+--------------------------------------------------
+- Convert entire visible floor into a perfectly maintained natural grass lawn
+
+- Grass must appear:
+  - evenly trimmed to a consistent height
+  - dense and well-maintained
+  - soft and lush with fine blade detail
+  - clean and professionally landscaped
+
+- Subtle realism is still required:
+  - slight tonal variation (light and dark greens)
+  - natural sunlight variation across surface
+  - very minor imperfections ONLY (not messy or overgrown)
+
+- Strictly avoid:
+  ❌ irregular growth
+  ❌ patchy or wild grass
+  ❌ dry or uneven areas
+  ❌ artificial turf or plastic-like texture
+
+- Lawn must feel like a high-end residential garden (manicured, premium quality)
+
+- Blend edges cleanly into walls and structures
+- Maintain neat boundaries around all edges
 
 --------------------------------------------------
 🔥 DENSITY ENFORCEMENT (CRITICAL RULE)
 --------------------------------------------------
-- Increase plant presence by MINIMUM 3x compared to original
+- Increase plant and flower presence by MINIMUM 4x, with strong floral dominance
 - Empty or unused spaces are NOT allowed
 - Every edge, corner, and boundary must contain greenery-mandatory
 - The space must feel surrounded by plants, not empty with plants
@@ -1326,17 +1372,6 @@ ONLY ADD garden elements layered on top.
 - Plants must spill outward and downward naturally
 - Add base shrubs or grasses at railing level
 - This area must appear lush, overflowing, and continuous
-
---------------------------------------------------
-🪴 FLOOR PLANTING — CLUSTERED (NOT RANDOM)
---------------------------------------------------
-- Use grouped plant clusters (2–5 pots per cluster)
-- NO single isolated pots
-- Mix:
-  - small trees
-  - medium shrubs
-  - low fillers
-- Placement must feel organic and natural
 
 --------------------------------------------------
 🌼 COLOR & FLOWER DISTRIBUTION
@@ -1385,6 +1420,36 @@ ${lightingCondition}
 - Slight imperfections for realism
 - Depth of field with subtle foreground softness
 - Professional architectural photography look
+
+--------------------------------------------------
+🪨 PATHWAY INTEGRATION (MANDATORY)
+--------------------------------------------------
+- Introduce a natural stepping stone pathway across the grass
+- Stones must:
+  - be irregular in shape
+  - be slightly embedded into grass
+  - follow a logical walking path (not random placement)
+
+- Spacing must feel natural and walkable
+- Grass should slightly overlap stone edges for realism
+
+❗ Path must enhance composition, not dominate the scene
+
+--------------------------------------------------
+🌿 MID-HEIGHT PLANT ENFORCEMENT (VERY IMPORTANT)
+--------------------------------------------------
+- Add a strong layer of medium-height plants (2–4 feet tall)
+- Use shrubs, bushy plants, and compact ornamental plants
+- These must fill the MIDGROUND space visually
+
+- Avoid over-reliance on:
+  ❌ only grass (too flat)
+  ❌ only tall climbers (too vertical)
+
+- Ensure smooth transition:
+  low plants → medium shrubs → tall vertical greens
+
+❗ Mid-height density is mandatory for realistic depth
 
 --------------------------------------------------
 ✅ FINAL VALIDATION (STRICT)
@@ -1442,7 +1507,7 @@ export async function callInpainting(
   prompt: string,
   fileName: string
 ): Promise<string> {
-  const ENDPOINT = 'https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-kontext-pro';
+  const ENDPOINT = 'https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-kontext-max';
 
   const rawImageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
   const rawMaskBase64 = maskBase64.replace(/^data:image\/\w+;base64,/, '');
@@ -1473,10 +1538,10 @@ export async function callInpainting(
       // mask_image: rawMaskBase64,
       prompt: anchoredPrompt,
       negative_prompt: negativePrompt,
-      num_inference_steps: 33,
-      guidance_scale: 5.5,   // ← lowered: lets model respect original image more
+      num_inference_steps: 40,
+      guidance_scale: 15,   // ← lowered: lets model respect original image more
       // strength: 0.75,
-      num_images: 1,
+      num_images: 4,
       output_format: 'jpeg',
       seed: -1,
     }),
