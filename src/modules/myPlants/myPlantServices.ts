@@ -758,7 +758,7 @@ export const getUserPlantByIdService = async (
             host: row.host,
             description: row.description,
             solution: row.solution,
-            local_image_disease_path: diseaseUrl(row.local_image_path),
+            local_image_disease_path: diseaseUrl(row.local_disease_image_path),
 
         },
         reminder: {

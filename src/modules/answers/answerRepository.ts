@@ -19,7 +19,7 @@ export enum FieldIndex {
   climate    = 4,
   experience = 5,
 }
-
+ 
 export const TOTAL_QUESTIONS = 6;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,8 +43,9 @@ const WEIGHTS = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ScoringProfile {
-  sql:   string; // raw SQL CASE WHEN fragment (no params — safe values only)
-  label: string; // human-readable label for whyRecommended
+  sql:    string;  // raw SQL CASE WHEN fragment (no params — safe values only)
+  label:  string;  // human-readable label for whyRecommended
+  where?: string;  // optional hard WHERE filter — e.g. "indoor = TRUE"
 }
 
 /**
@@ -88,7 +89,20 @@ interface ScoringProfile {
 function buildSpaceScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.space_type;
-
+ 
+  // ── Indoor Space — hard filter: only plants marked indoor = TRUE ─────────
+  if (v.includes("indoor") || v.includes("window") || v.includes("shelf") || v.includes("living")) {
+    return {
+      sql: `CASE
+        WHEN (indoor = TRUE)                                                          THEN ${w}
+        WHEN (type ILIKE '%herb%'   OR type ILIKE '%shrub%')                         THEN ${Math.floor(w * 0.5)}
+        ELSE ${Math.floor(w * 0.1)} END`,
+      label: "indoor space",
+      where: `indoor = TRUE`,  // ← HARD FILTER: outdoor-only plants excluded
+    };
+  }
+ 
+  // ── Balcony / Terrace / Pots ─────────────────────────────────────────────
   if (v.includes("balcony") || v.includes("terrace") || v.includes("pot")) {
     return {
       sql: `CASE
@@ -97,19 +111,11 @@ function buildSpaceScore(selectedOption: string): ScoringProfile {
         WHEN (type ILIKE '%vine%'   OR type ILIKE '%climber%')                       THEN ${Math.floor(w * 0.6)}
         ELSE ${Math.floor(w * 0.2)} END`,
       label: "balcony or terrace",
+      // No hard filter — balcony can have outdoor plants in pots
     };
   }
-
-  if (v.includes("indoor") || v.includes("window") || v.includes("shelf") || v.includes("living")) {
-    return {
-      sql: `CASE
-        WHEN (indoor = TRUE)                                                          THEN ${w}
-        WHEN (type ILIKE '%herb%'   OR type ILIKE '%shrub%')                         THEN ${Math.floor(w * 0.5)}
-        ELSE ${Math.floor(w * 0.1)} END`,
-      label: "indoor space",
-    };
-  }
-
+ 
+  // ── Corporate / Office Outdoor ───────────────────────────────────────────
   if (v.includes("corporate") || v.includes("office")) {
     return {
       sql: `CASE
@@ -118,10 +124,11 @@ function buildSpaceScore(selectedOption: string): ScoringProfile {
         WHEN (type ILIKE '%grass%'  OR type ILIKE '%ornamental%')                    THEN ${Math.floor(w * 0.5)}
         ELSE ${Math.floor(w * 0.2)} END`,
       label: "corporate outdoor area",
+      where: `(indoor = FALSE OR indoor IS NULL)`,  // corporate = outdoor only
     };
   }
-
-  // home garden — default
+ 
+  // ── Home Garden — default ────────────────────────────────────────────────
   return {
     sql: `CASE
       WHEN (type ILIKE '%tree%'   OR type ILIKE '%shrub%')                           THEN ${w}
@@ -129,6 +136,7 @@ function buildSpaceScore(selectedOption: string): ScoringProfile {
       WHEN (type ILIKE '%vine%'   OR type ILIKE '%climber%')                         THEN ${Math.floor(w * 0.6)}
       ELSE ${Math.floor(w * 0.4)} END`,
     label: "home garden",
+    where: `(indoor = FALSE OR indoor IS NULL)`,  // home garden = outdoor only
   };
 }
 
@@ -178,7 +186,7 @@ function buildSpaceScore(selectedOption: string): ScoringProfile {
 function buildSunlightScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.sunlight;
-
+ 
   if (v.includes("full") || v.includes("6+") || v.includes("direct")) {
     return {
       sql: `CASE
@@ -188,7 +196,7 @@ function buildSunlightScore(selectedOption: string): ScoringProfile {
       label: "full sun (6+ hours)",
     };
   }
-
+ 
   if (v.includes("partial") || v.includes("3") || v.includes("some shade")) {
     return {
       sql: `CASE
@@ -199,7 +207,7 @@ function buildSunlightScore(selectedOption: string): ScoringProfile {
       label: "partial sun / light shade",
     };
   }
-
+ 
   if (v.includes("shade") || v.includes("less than 3") || v.includes("mostly")) {
     return {
       sql: `CASE
@@ -210,7 +218,7 @@ function buildSunlightScore(selectedOption: string): ScoringProfile {
       label: "mostly shade / low light",
     };
   }
-
+ 
   if (v.includes("artificial") || v.includes("no natural")) {
     return {
       sql: `CASE
@@ -220,7 +228,7 @@ function buildSunlightScore(selectedOption: string): ScoringProfile {
       label: "artificial / grow-light",
     };
   }
-
+ 
   return { sql: `${Math.floor(w * 0.4)}`, label: "moderate light" };
 }
 
@@ -272,7 +280,7 @@ function buildSunlightScore(selectedOption: string): ScoringProfile {
 function buildGoalScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.goal;
-
+ 
   if (v.includes("food") || v.includes("vegetable") || v.includes("edible") || v.includes("herb")) {
     return {
       sql: `CASE
@@ -284,7 +292,7 @@ function buildGoalScore(selectedOption: string): ScoringProfile {
       label: "grow food",
     };
   }
-
+ 
   if (v.includes("bloom") || v.includes("flower") || v.includes("color")) {
     return {
       sql: `CASE
@@ -295,7 +303,7 @@ function buildGoalScore(selectedOption: string): ScoringProfile {
       label: "beautiful blooms",
     };
   }
-
+ 
   if (v.includes("green") || v.includes("foliage") || v.includes("calm") || v.includes("privacy")) {
     return {
       sql: `CASE
@@ -306,7 +314,7 @@ function buildGoalScore(selectedOption: string): ScoringProfile {
       label: "lush greenery",
     };
   }
-
+ 
   if (v.includes("low") || v.includes("minimal") || v.includes("easy") || v.includes("effort")) {
     return {
       sql: `CASE
@@ -318,7 +326,7 @@ function buildGoalScore(selectedOption: string): ScoringProfile {
       label: "low-maintenance",
     };
   }
-
+ 
   return { sql: `${Math.floor(w * 0.2)}`, label: "general gardening" };
 }
 /**
@@ -368,7 +376,7 @@ function buildGoalScore(selectedOption: string): ScoringProfile {
 function buildWateringScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.watering;
-
+ 
   if (v.includes("daily")) {
     return {
       sql: `CASE
@@ -379,7 +387,7 @@ function buildWateringScore(selectedOption: string): ScoringProfile {
       label: "daily watering — water-loving plants",
     };
   }
-
+ 
   if (v.includes("2") || v.includes("3") || v.includes("few") || v.includes("twice")) {
     return {
       sql: `CASE
@@ -390,7 +398,7 @@ function buildWateringScore(selectedOption: string): ScoringProfile {
       label: "moderate watering — every 2–3 days",
     };
   }
-
+ 
   if (v.includes("week") || v.includes("weekend") || v.includes("occasional")) {
     return {
       sql: `CASE
@@ -402,7 +410,7 @@ function buildWateringScore(selectedOption: string): ScoringProfile {
       label: "weekly watering",
     };
   }
-
+ 
   if (v.includes("rare") || v.includes("forget") || v.includes("travel")) {
     return {
       sql: `CASE
@@ -414,7 +422,7 @@ function buildWateringScore(selectedOption: string): ScoringProfile {
       label: "drought-tolerant / low-water plants",
     };
   }
-
+ 
   return { sql: `${Math.floor(w * 0.3)}`, label: "moderate watering" };
 }
 
@@ -485,7 +493,7 @@ const H_MAX = `NULLIF(hardiness_max, '')::INTEGER`;
 function buildClimateScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.climate;
-
+ 
   if (v.includes("tropical") || v.includes("humid")) {
     return {
       sql: `CASE
@@ -496,7 +504,7 @@ function buildClimateScore(selectedOption: string): ScoringProfile {
       label: "tropical / humid",
     };
   }
-
+ 
   if (v.includes("dry") || v.includes("arid")) {
     return {
       sql: `CASE
@@ -508,7 +516,7 @@ function buildClimateScore(selectedOption: string): ScoringProfile {
       label: "dry / arid",
     };
   }
-
+ 
   if (v.includes("cold") || v.includes("season")) {
     return {
       sql: `CASE
@@ -519,7 +527,7 @@ function buildClimateScore(selectedOption: string): ScoringProfile {
       label: "cold / seasonal",
     };
   }
-
+ 
   // temperate / mild — default
   return {
     sql: `CASE
@@ -530,6 +538,7 @@ function buildClimateScore(selectedOption: string): ScoringProfile {
     label: "temperate / mild",
   };
 }
+ 
 
 /**
  * Builds a scoring profile based on the user's gardening experience level.
@@ -576,7 +585,7 @@ function buildClimateScore(selectedOption: string): ScoringProfile {
 function buildExperienceScore(selectedOption: string): ScoringProfile {
   const v = selectedOption.toLowerCase();
   const w = WEIGHTS.experience;
-
+ 
   if (v.includes("beginner") || v.includes("never") || v.includes("total")) {
     return {
       sql: `CASE
@@ -588,7 +597,7 @@ function buildExperienceScore(selectedOption: string): ScoringProfile {
       label: "beginner-friendly",
     };
   }
-
+ 
   if (v.includes("casual") || v.includes("mixed") || v.includes("tried")) {
     return {
       sql: `CASE
@@ -598,10 +607,11 @@ function buildExperienceScore(selectedOption: string): ScoringProfile {
       label: "intermediate gardener",
     };
   }
-
+ 
   // experienced — flat full bonus, all plants welcome
   return { sql: `${w}`, label: "all plants suitable" };
 }
+ 
 
 /**
  * Generates a human-readable explanation of why a given plant
@@ -671,16 +681,16 @@ function buildWhyRecommended(
   }
 ): string[] {
   const why: string[] = [];
-
+ 
   // ── Goal ───────────────────────────────────────────────────────────────────
   if (labels.goalLabel) {
     switch (labels.goalLabel) {
       case "grow food": {
         const traits = [
-          plant.edible_fruit ? "edible fruit"       : null,
-          plant.edible_leaf  ? "edible leaves"      : null,
-          plant.cuisine      ? "used in cuisine"    : null,
-          plant.medicinal    ? "medicinal uses"     : null,
+          plant.edible_fruit ? "edible fruit"    : null,
+          plant.edible_leaf  ? "edible leaves"   : null,
+          plant.cuisine      ? "used in cuisine" : null,
+          plant.medicinal    ? "medicinal uses"  : null,
         ].filter(Boolean).join(" · ");
         why.push(`Great for growing food — ${traits || "edible plant"}`);
         break;
@@ -700,14 +710,16 @@ function buildWhyRecommended(
       case "low-maintenance":
         why.push(
           `Low-maintenance` +
-          (plant.care_level ? ` — care level: ${plant.care_level}` : " — thrives with minimal intervention")
+          (plant.care_level
+            ? ` — care level: ${plant.care_level}`
+            : " — thrives with minimal intervention")
         );
         break;
       default:
         why.push("Matches your gardening goal");
     }
   }
-
+ 
   // ── Space ──────────────────────────────────────────────────────────────────
   if (labels.spaceLabel) {
     why.push(
@@ -715,12 +727,12 @@ function buildWhyRecommended(
       (plant.type ? ` — grows as a ${(plant.type as string).toLowerCase()}` : "")
     );
   }
-
+ 
   // ── Climate ────────────────────────────────────────────────────────────────
   if (labels.climateLabel) {
     const climateParts = [
-      plant.tropical         ? "tropical-adapted"                                         : null,
-      plant.drought_tolerant ? "drought-tolerant"                                         : null,
+      plant.tropical         ? "tropical-adapted"                                       : null,
+      plant.drought_tolerant ? "drought-tolerant"                                       : null,
       // eslint-disable-next-line eqeqeq
       plant.hardiness_min != null
         ? `hardiness zones ${plant.hardiness_min}–${plant.hardiness_max}`
@@ -731,17 +743,17 @@ function buildWhyRecommended(
       (climateParts ? ` — ${climateParts}` : "")
     );
   }
-
+ 
   // ── Watering ───────────────────────────────────────────────────────────────
   if (labels.wateringLabel) {
     why.push(`Matches your watering schedule — ${labels.wateringLabel}`);
   }
-
+ 
   // ── Sunlight ───────────────────────────────────────────────────────────────
   if (labels.sunlightLabel) {
     why.push(`Suited for ${labels.sunlightLabel}`);
   }
-
+ 
   // ── Experience ─────────────────────────────────────────────────────────────
   if (labels.experienceLabel && labels.experienceLabel !== "all plants suitable") {
     why.push(
@@ -749,10 +761,12 @@ function buildWhyRecommended(
       " — a good match for your experience level"
     );
   }
-
+ 
   if (why.length === 0) why.push("Matches your plant preferences");
   return why;
 }
+ 
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN SERVICE FUNCTION
@@ -768,9 +782,9 @@ function buildWhyRecommended(
  * @returns {string | null} Public image URL or null if no path is provided.
  */
 const toImageUrl = (localPath: string | null): string | null => {
-    if (!localPath) return null;
-    const filename = localPath.split("/").pop();   // "plant_00001.jpg"
-    return `${env.APPDEV_URL}/plant-images/${filename}`;
+  if (!localPath) return null;
+  const filename = localPath.split("/").pop();
+  return `${env.APPDEV_URL}/plant-images/${filename}`;
 };
 
 
@@ -793,74 +807,87 @@ export const getRecommendedPlants = async (
   const client      = await getDB();
   const LIMIT       = 10;
   const MIN_RESULTS =  5;
-  const TABLE       = "plant_table_final"; // ← replace with your actual table name
-
+  const TABLE       = "plant_table_final";
+ 
   const scoreFragments: string[] = [];
+  const whereFragments: string[] = []; // ← hard filters applied to WHERE clause
   const labels: Parameters<typeof buildWhyRecommended>[1] = {};
-
-  // ── Q1: Space Type ──────────────────────────────────────────────────────────
+ 
+  // ── Q1: Space Type ─────────────────────────────────────────────────────────
   const spaceAns = answers[FieldIndex.space_type];
   if (spaceAns?.selectedOption?.trim()) {
     const p = buildSpaceScore(spaceAns.selectedOption);
     labels.spaceLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where); // ← inject hard filter if present
   }
-
-  // ── Q2: Sunlight ────────────────────────────────────────────────────────────
+ 
+  // ── Q2: Sunlight ───────────────────────────────────────────────────────────
   const sunlightAns = answers[FieldIndex.sunlight];
   if (sunlightAns?.selectedOption?.trim()) {
     const p = buildSunlightScore(sunlightAns.selectedOption);
     labels.sunlightLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where);
   }
-
-  // ── Q3: Goal ────────────────────────────────────────────────────────────────
+ 
+  // ── Q3: Goal ───────────────────────────────────────────────────────────────
   const goalAns = answers[FieldIndex.goal];
   if (goalAns?.selectedOption?.trim()) {
     const p = buildGoalScore(goalAns.selectedOption);
     labels.goalLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where);
   }
-
-  // ── Q4: Watering ────────────────────────────────────────────────────────────
+ 
+  // ── Q4: Watering ───────────────────────────────────────────────────────────
   const wateringAns = answers[FieldIndex.watering];
   if (wateringAns?.selectedOption?.trim()) {
     const p = buildWateringScore(wateringAns.selectedOption);
     labels.wateringLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where);
   }
-
-  // ── Q5: Climate ─────────────────────────────────────────────────────────────
+ 
+  // ── Q5: Climate ────────────────────────────────────────────────────────────
   const climateAns = answers[FieldIndex.climate];
   if (climateAns?.selectedOption?.trim()) {
     const p = buildClimateScore(climateAns.selectedOption);
     labels.climateLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where);
   }
-
-  // ── Q6: Experience ──────────────────────────────────────────────────────────
+ 
+  // ── Q6: Experience ─────────────────────────────────────────────────────────
   const expAns = answers[FieldIndex.experience];
   if (expAns?.selectedOption?.trim()) {
     const p = buildExperienceScore(expAns.selectedOption);
     labels.experienceLabel = p.label;
     scoreFragments.push(p.sql);
+    if (p.where) whereFragments.push(p.where);
   }
-
-  // ── Universal quality bonuses ───────────────────────────────────────────────
+ 
+  // ── Universal quality bonuses ──────────────────────────────────────────────
   scoreFragments.push(
     `CASE WHEN (image_regular_url IS NOT NULL AND image_regular_url <> '') THEN ${WEIGHTS.has_image} ELSE 0 END`
   );
   scoreFragments.push(
     `CASE WHEN (common_name IS NOT NULL AND common_name <> '') THEN ${WEIGHTS.has_common_name} ELSE 0 END`
   );
-
-  // ── Compose total score expression ──────────────────────────────────────────
+ 
+  // ── Compose total score expression ─────────────────────────────────────────
   const scoreExpr = scoreFragments.length > 0
     ? `(\n      ${scoreFragments.join("\n      + ")}\n    )`
     : "0";
-
-  // ── Main query ──────────────────────────────────────────────────────────────
-  // RANDOM() in the final ORDER BY adds variety when scores are tied.
+ 
+  // ── Compose extra WHERE clause from hard filters ───────────────────────────
+  // All hard filters are joined with AND so every constraint must be satisfied.
+  const extraWhere = whereFragments.length > 0
+    ? `AND (${whereFragments.join(" AND ")})`
+    : "";
+ 
+  // ── Main query ─────────────────────────────────────────────────────────────
+  // RANDOM() in the ORDER BY adds variety when scores are tied.
   const mainQuery = `
     SELECT
       id,
@@ -904,30 +931,33 @@ export const getRecommendedPlants = async (
     FROM ${TABLE}
     WHERE scientific_name IS NOT NULL
       AND scientific_name <> ''
+      ${extraWhere}
     ORDER BY match_score DESC, RANDOM()
     LIMIT $1;
   `;
-
+ 
   let rows: Record<string, unknown>[] = [];
-
+ 
   try {
     const result = await client.query(mainQuery, [LIMIT]);
     rows = result.rows;
   } catch (err) {
     console.error("[getRecommendedPlants] Main query failed:", err);
   }
-
+ 
   // ── Fallback: fill remaining slots with photo-documented plants ─────────────
+  // The same extraWhere is applied here so the fallback also respects
+  // indoor / outdoor hard filters.
   if (rows.length < MIN_RESULTS) {
     try {
       const needed      = LIMIT - rows.length;
       const existingIds = [...new Set(rows.map((r) => r.id as number))];
-
+ 
       const excludeClause =
         existingIds.length > 0
           ? `AND id NOT IN (${existingIds.map((_, i) => `$${i + 2}`).join(", ")})`
           : "";
-
+ 
       const fallbackQuery = `
         SELECT
           id, common_name, scientific_name, other_name, family, genus,
@@ -938,65 +968,66 @@ export const getRecommendedPlants = async (
           poisonous_to_humans, poisonous_to_pets,
           hardiness_min, hardiness_max, description,
           image_original_url, image_regular_url, image_medium_url,
-          image_small_url, image_thumbnail,local_image_path,
+          image_small_url, image_thumbnail, local_image_path,
           0 AS match_score
         FROM ${TABLE}
         WHERE scientific_name IS NOT NULL
           AND scientific_name <> ''
           AND image_regular_url IS NOT NULL
           AND image_regular_url <> ''
+          ${extraWhere}
           ${excludeClause}
         ORDER BY RANDOM()
         LIMIT $1;
       `;
-
+ 
       const fbResult = await client.query(fallbackQuery, [needed, ...existingIds]);
       rows = [...rows, ...fbResult.rows];
     } catch (err) {
       console.error("[getRecommendedPlants] Fallback query failed:", err);
     }
   }
-
-  // ── Map raw rows → typed output ─────────────────────────────────────────────
+ 
+  // ── Map raw rows → typed output ────────────────────────────────────────────
   return rows.slice(0, LIMIT).map((plant) => ({
-    id:                  plant.id                   as number,
-    commonName:         (plant.common_name           as string)  ?? null,
-    scientificName:      plant.scientific_name       as string,
-    otherName:          (plant.other_name            as string)  ?? null,
-    family:             (plant.family                as string)  ?? null,
-    genus:              (plant.genus                 as string)  ?? null,
-    type:               (plant.type                  as string)  ?? null,
-    cycle:              (plant.cycle                 as string)  ?? null,
-    watering:           (plant.watering              as string)  ?? null,
-    sunlight:           (plant.sunlight              as string)  ?? null,
-    careLevel:          (plant.care_level            as string)  ?? null,
-    maintenance:        (plant.maintenance           as string)  ?? null,
-    growthRate:         (plant.growth_rate           as string)  ?? null,
-    droughtTolerant:    (plant.drought_tolerant      as boolean) ?? null,
-    saltTolerant:       (plant.salt_tolerant         as boolean) ?? null,
-    tropical:           (plant.tropical              as boolean) ?? null,
-    indoor:             (plant.indoor                as boolean) ?? null,
-    flowers:            (plant.flowers               as boolean) ?? null,
-    floweringSeason:    (plant.flowering_season      as string)  ?? null,
-    fruits:             (plant.fruits                as boolean) ?? null,
-    edibleFruit:        (plant.edible_fruit          as boolean) ?? null,
-    harvestSeason:      (plant.harvest_season        as string)  ?? null,
-    leaf:               (plant.leaf                  as boolean) ?? null,
-    edibleLeaf:         (plant.edible_leaf           as boolean) ?? null,
-    cuisine:            (plant.cuisine               as boolean) ?? null,
-    medicinal:          (plant.medicinal             as boolean) ?? null,
-    poisonousToHumans:  (plant.poisonous_to_humans   as boolean) ?? null,
-    poisonousToPets:    (plant.poisonous_to_pets     as boolean) ?? null,
-    hardinessMin:       (plant.hardiness_min         as number)  ?? null,
-    hardinessMax:       (plant.hardiness_max         as number)  ?? null,
-    description:        (plant.description           as string)  ?? null,
-    imageOriginal:      (plant.image_original_url    as string)  ?? null,
-    image:              (plant.image_regular_url     as string)  ?? null,
-    imageMedium:        (plant.image_medium_url      as string)  ?? null,
-    imageSmall:         (plant.image_small_url       as string)  ?? null,
-    imageThumbnail:     (plant.image_thumbnail       as string)  ?? null,
-    image_url:         toImageUrl(plant.local_image_path       as string)  ?? null,
-    matchScore:         (plant.match_score           as number)  ?? 0,
-    whyRecommended:      buildWhyRecommended(plant, labels),
+    id:                 plant.id                  as number,
+    commonName:        (plant.common_name          as string)  ?? null,
+    scientificName:     plant.scientific_name      as string,
+    otherName:         (plant.other_name           as string)  ?? null,
+    family:            (plant.family               as string)  ?? null,
+    genus:             (plant.genus                as string)  ?? null,
+    type:              (plant.type                 as string)  ?? null,
+    cycle:             (plant.cycle                as string)  ?? null,
+    watering:          (plant.watering             as string)  ?? null,
+    sunlight:          (plant.sunlight             as string)  ?? null,
+    careLevel:         (plant.care_level           as string)  ?? null,
+    maintenance:       (plant.maintenance          as string)  ?? null,
+    growthRate:        (plant.growth_rate          as string)  ?? null,
+    droughtTolerant:   (plant.drought_tolerant     as boolean) ?? null,
+    saltTolerant:      (plant.salt_tolerant        as boolean) ?? null,
+    tropical:          (plant.tropical             as boolean) ?? null,
+    indoor:            (plant.indoor               as boolean) ?? null,
+    flowers:           (plant.flowers              as boolean) ?? null,
+    floweringSeason:   (plant.flowering_season     as string)  ?? null,
+    fruits:            (plant.fruits               as boolean) ?? null,
+    edibleFruit:       (plant.edible_fruit         as boolean) ?? null,
+    harvestSeason:     (plant.harvest_season       as string)  ?? null,
+    leaf:              (plant.leaf                 as boolean) ?? null,
+    edibleLeaf:        (plant.edible_leaf          as boolean) ?? null,
+    cuisine:           (plant.cuisine              as boolean) ?? null,
+    medicinal:         (plant.medicinal            as boolean) ?? null,
+    poisonousToHumans: (plant.poisonous_to_humans  as boolean) ?? null,
+    poisonousToPets:   (plant.poisonous_to_pets    as boolean) ?? null,
+    hardinessMin:      (plant.hardiness_min        as number)  ?? null,
+    hardinessMax:      (plant.hardiness_max        as number)  ?? null,
+    description:       (plant.description          as string)  ?? null,
+    imageOriginal:     (plant.image_original_url   as string)  ?? null,
+    image:             (plant.image_regular_url    as string)  ?? null,
+    imageMedium:       (plant.image_medium_url     as string)  ?? null,
+    imageSmall:        (plant.image_small_url      as string)  ?? null,
+    imageThumbnail:    (plant.image_thumbnail      as string)  ?? null,
+    image_url:          toImageUrl(plant.local_image_path as string) ?? null,
+    matchScore:        (plant.match_score          as number)  ?? 0,
+    whyRecommended:     buildWhyRecommended(plant, labels),
   }));
 };

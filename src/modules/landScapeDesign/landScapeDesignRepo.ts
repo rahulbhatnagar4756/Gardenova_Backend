@@ -1251,73 +1251,156 @@ export function buildImagePrompt(
     .map(s => s.action)
     .join(', ');
 
-  const pathways = plan.steps
-    .filter(s => s.category === 'Hardscape' && /path|walkway/i.test(s.action))
-    .map(s => s.action)
-    .join(', ');
-
-  // Build optional plan sections only if data exists
   const planSections = [
     plants    && `Softscape: ${plants}`,
     hardscape && `Hardscape: ${hardscape}`,
     lighting  && `Lighting: ${lighting}`,
     water     && `Water features: ${water}`,
-    pathways  && `Pathways: ${pathways}`,
   ].filter(Boolean).join('\n');
 
   return `
-Photorealistic landscape design render. Transform this ${detectedSpace.spaceType} into a lush, 
-well-designed garden environment while preserving every structural element exactly as-is.
+Ultra-photorealistic architectural garden transformation of an existing ${detectedSpace.spaceType}.
 
-SCENE:
+Transform this space into a visually rich, dense, and immersive premium garden environment.
+The final result must feel like a fully developed, mature garden — NOT a minimally decorated space.
+
+--------------------------------------------------
+SCENE CONTEXT
+--------------------------------------------------
 ${sceneDescription}
 
-DESIGN PLAN TO IMPLEMENT:
-${planSections}
+--------------------------------------------------
+⚠️ STRUCTURAL PRESERVATION — ABSOLUTE
+--------------------------------------------------
+DO NOT modify, remove, move, redesign, or reinterpret:
+- Walls, textures, paint
+- Windows, doors, glass
+- Railings, staircase, pergola, structures
+- Floor levels or geometry
+- Camera angle or perspective
 
-STRUCTURAL PRESERVATION (NON-NEGOTIABLE):
-Preserve all existing architecture — walls, flooring, ceiling, railings, stairs, furniture, 
-windows, doors, and structural geometry — with zero modification. Same camera angle, same 
-perspective, same proportions. Only ADD garden elements on top of the existing scene.
+Architecture must remain EXACTLY identical (pixel-preserved).
+ONLY ADD garden elements layered on top.
 
-GREENERY & PLANTING:
-Introduce a rich variety of plants scaled appropriately to the space:
-- Tall specimen plants or small trees anchoring corners and walls
-- Medium shrubs and ornamental grasses along edges and boundaries  
-- Compact flowering plants in clusters for color and foreground interest
-- Climbing or trailing plants softening vertical surfaces and railings where natural
-- A visible mix of foliage textures: broad-leaf, fine-leaf, and flowering varieties
-- Vibrant blooms (reds, yellows, pinks, purples) clearly visible against green foliage
-- All plants housed in appropriate containers: ceramic pots, concrete planters, 
-  rectangular planter boxes, or raised garden beds — matching the space's aesthetic
+--------------------------------------------------
+🌿 GROUND TRANSFORMATION — GRASS BED (MANDATORY)
+--------------------------------------------------
+- Convert entire visible floor into dense natural grass lawn
+- Grass must show:
+  - tonal variation (light + dark patches)
+  - slight irregular growth
+  - realistic blade texture (NOT flat or carpet-like)
+- Blend edges naturally into walls and structures
+- Integrate stepping stones if applicable
 
-SPATIAL COMPOSITION:
-- Foreground: detailed small pots and low plants creating depth
-- Midground: open usable space balanced with medium plantings
-- Background: taller plants, vertical climbers, and wall-hugging greenery
-- Avoid rigid symmetry; use organic, asymmetrical groupings
-- Maintain breathing space — do not overcrowd
+❗ Flat green surfaces are NOT acceptable
 
-HARDSCAPE & FEATURES:
-Integrate naturally with the existing structure:
-${hardscape ? `- Hardscape elements: ${hardscape}` : '- Keep existing pathways, surfaces, and borders clean and intact'}
-${water     ? `- Water feature: ${water}` : ''}
-${pathways  ? `- Pathways: ${pathways}` : ''}
+--------------------------------------------------
+🔥 DENSITY ENFORCEMENT (CRITICAL RULE)
+--------------------------------------------------
+- Increase plant presence by MINIMUM 3x compared to original
+- Empty or unused spaces are NOT allowed
+- Every edge, corner, and boundary must contain greenery-mandatory
+- The space must feel surrounded by plants, not empty with plants
 
-LIGHTING & ATMOSPHERE:
-${lightingCondition}. Realistic interaction between light, shadow, and plant foliage. 
-${lighting ? `Lighting elements: ${lighting}.` : 'Soft ambient garden lighting where appropriate.'}
-Warm, inviting atmosphere that feels lived-in and natural.
+--------------------------------------------------
+🌺 EDGE & BOUNDARY ACTIVATION (VERY IMPORTANT)
+--------------------------------------------------
+- All wall edges must have continuous planting strips
+- Corners must include dense plant clusters
+- No bare perimeter lines should remain visible
 
-RENDER QUALITY:
-Ultra-photorealistic. Highly detailed plant textures and pot surfaces. Accurate depth of field. 
-Natural color grading. 4K resolution. The result must look like a professional landscape 
-photography shot — not a render, not a painting, not a composite.
+--------------------------------------------------
+🌿 VERTICAL GREENERY (MANDATORY)
+--------------------------------------------------
+- All large walls MUST include climbers or vertical planting-mandatory
+- Use ivy, jasmine, creepers, or flowering vines
+- Coverage must be clearly visible (not sparse)
 
-INTENT:
-The final scene must feel like a professionally landscaped garden that has organically grown 
-into this space — abundant with life, color, and texture, while the original structure remains 
-completely intact and recognizable.
+❗ Bare walls are NOT allowed
+
+--------------------------------------------------
+🌺 RAILING / PERIMETER ZONE
+--------------------------------------------------
+- Fully cover railings with cascading flowering plants
+- Plants must spill outward and downward naturally
+- Add base shrubs or grasses at railing level
+- This area must appear lush, overflowing, and continuous
+
+--------------------------------------------------
+🪴 FLOOR PLANTING — CLUSTERED (NOT RANDOM)
+--------------------------------------------------
+- Use grouped plant clusters (2–5 pots per cluster)
+- NO single isolated pots
+- Mix:
+  - small trees
+  - medium shrubs
+  - low fillers
+- Placement must feel organic and natural
+
+--------------------------------------------------
+🌼 COLOR & FLOWER DISTRIBUTION
+--------------------------------------------------
+- Strong visible flowering presence (NOT only foliage)
+- Include contrasting colors:
+  - pink / magenta
+  - yellow
+  - red or purple
+- Flowers must be clearly visible across the scene
+
+--------------------------------------------------
+🎯 FOCAL ELEMENT (REQUIRED)
+--------------------------------------------------
+Include at least ONE visual anchor:
+- seating area OR
+- feature planter OR
+- small deck OR
+- garden feature
+
+Scene must not feel empty or directionless
+
+--------------------------------------------------
+🌿 DEPTH & LAYERING (MANDATORY)
+--------------------------------------------------
+- Foreground: grass + low plants
+- Midground: shrubs + clusters
+- Background: climbers + vertical greenery
+
+❗ Flat composition is NOT acceptable
+
+--------------------------------------------------
+🌞 LIGHTING & REALISM
+--------------------------------------------------
+${lightingCondition}
+
+- Natural sunlight with soft realistic shadows
+- Slight warmth
+- Light interacting with leaves (subtle highlights)
+
+--------------------------------------------------
+📸 RENDER QUALITY
+--------------------------------------------------
+- Ultra photorealistic (NO CGI look)
+- Real textures (grass, soil, leaves)
+- Slight imperfections for realism
+- Depth of field with subtle foreground softness
+- Professional architectural photography look
+
+--------------------------------------------------
+✅ FINAL VALIDATION (STRICT)
+--------------------------------------------------
+Reject output if:
+- Grass looks flat or artificial
+- Any wall is bare
+- Edges are empty
+- Plants look sparse
+- No focal point exists
+
+Accept ONLY if:
+- Space feels dense, lush, and immersive
+- Plant coverage is visually dominant
+- Garden feels mature and established
+- Architecture is perfectly preserved
 `.trim();
 }
 /**
@@ -1387,13 +1470,13 @@ export async function callInpainting(
     },
     body: JSON.stringify({
       image: rawImageBase64,
-      mask_image: rawMaskBase64,
+      // mask_image: rawMaskBase64,
       prompt: anchoredPrompt,
       negative_prompt: negativePrompt,
-      num_inference_steps: 28,
-      guidance_scale: 9.5,   // ← lowered: lets model respect original image more
-      strength: 0.75,
-      num_images: 2,
+      num_inference_steps: 33,
+      guidance_scale: 5.5,   // ← lowered: lets model respect original image more
+      // strength: 0.75,
+      num_images: 1,
       output_format: 'jpeg',
       seed: -1,
     }),
