@@ -83,9 +83,21 @@ export const getCurrentUserProfile = async (
 
     const userProfile: IUserProfileRow | null = profileRows[0] ?? null;
 
+    const answerResponse = await client.query(
+      `
+    SELECT response_id
+    FROM survey_answers
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `,
+      [user.id]
+    );
+    const responseId = answerResponse.rows[0]?.response_id ?? null;
+
     // Build the base URL from the incoming request (e.g. http://localhost:3000)
     // const baseUrl = `${req.protocol}://${req.get("host")}`;
-      const baseUrl = env.APPDEV_URL || `${req.protocol}://${req.get("host")}`;
+    const baseUrl = env.APPDEV_URL || `${req.protocol}://${req.get("host")}`;
 
     const fullProfile: IFullUserProfile = {
       name: user.name ?? null,
@@ -113,6 +125,7 @@ export const getCurrentUserProfile = async (
       },
       occupation: userProfile?.occupation ?? null,
       company: userProfile?.company ?? null,
+      responseId: responseId,
     };
 
     res
@@ -123,10 +136,10 @@ export const getCurrentUserProfile = async (
       err instanceof Error
         ? (err as CustomError)
         : ({
-            name: "UnknownError",
-            message:
-              typeof err === "string" ? err : "An unknown error occurred",
-          } as CustomError);
+          name: "UnknownError",
+          message:
+            typeof err === "string" ? err : "An unknown error occurred",
+        } as CustomError);
 
     await error("Profile retrieval error", {
       email: userPayload?.userEmail,
@@ -405,9 +418,9 @@ export const updateUserProfile = async (
       err instanceof Error
         ? (err as CustomError)
         : ({
-            name: "UnknownError",
-            message: "An unknown error occurred",
-          } as CustomError);
+          name: "UnknownError",
+          message: "An unknown error occurred",
+        } as CustomError);
 
     await error("Profile updation error", {
       email: userPayload?.userEmail,
@@ -641,7 +654,7 @@ export const softDeleteUserProfile = async (
         action: "softDeleteUserProfile",
         req,
       });
-        res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User profile not found"));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User profile not found"));
 
     }
     if (checkProfileResult.rows[0]?.isdeleted) {

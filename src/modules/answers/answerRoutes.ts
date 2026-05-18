@@ -7,6 +7,7 @@ import {
   // getRecommendedPartnersController,
 } from "./answerController";
 
+import auth from "../../core/middleware/authMiddleware";
 const router: Router = express.Router();
 /**
  * @swagger
@@ -194,7 +195,7 @@ const router: Router = express.Router();
  *         description: No answers found for this responseId
  */
 
-router.post("", validateRequest(answerValidation), submitAnswer);
+router.post("", auth,validateRequest(answerValidation), submitAnswer);
 router.get("/plants/:responseId", getRecommendedPlantsController);
 // router.get("/partners/:responseId", getRecommendedPartnersController);
 

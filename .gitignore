@@ -3,4 +3,4 @@ uploads
 /dist
 .env
 # Firebase keys
-src/core/config/*.json                      
+src/core/config/*.json    

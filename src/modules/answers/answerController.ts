@@ -9,6 +9,9 @@ import {
   getRecommendedPlants,
 } from "./answerRepository";
 import { getDB } from "../../core/config/db";
+import { AuthUserPayload } from "../../interface/user";
+import { AuthRequest } from "../../interface/auth";
+import { findUserByEmail } from "../auth/authRepository";
 // import { createSurveyResponse } from "./answerModel";
 
 /**
@@ -74,12 +77,35 @@ const surveyAnswersDto = z.array(
  * @returns Promise<void>
  */
 export const submitAnswer = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
     const { answers } = req.body;
+    const userPayload = req.user as AuthUserPayload | undefined;
+
+    if (!userPayload || !userPayload.userEmail) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
+    }
+
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+      return;
+    }
+
+    if (!user.id) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid user ID"));
+      return;
+    }
+
+
+    if (!user.id) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized - user ID missing"));
+      return;
+    }
 
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
       res.status(HTTP_STATUS.BAD_REQUEST).json({ message: "No answers provided" });
@@ -89,7 +115,7 @@ export const submitAnswer = async (
     // Validate the incoming payload shape before touching the DB
     const parsed = surveyAnswersDto.parse(answers);
 
-    const { responseId } = await createSurveyResponse(parsed);
+    const { responseId } = await createSurveyResponse(parsed, user.id);
 
     res
       .status(HTTP_STATUS.CREATED)
@@ -120,12 +146,14 @@ export const submitAnswer = async (
  * transaction. Uses UNNEST for efficient batch insertion.
  *
  * @param answers - Validated answer items from the request body.
+ * @param user_id - ID of the authenticated user submitting the answers.
  * @returns The generated responseId (UUID).
  * @throws ZodError if answer mapping produces invalid data.
  * @throws Error on any DB failure (transaction is rolled back automatically).
  */
 export async function createSurveyResponse(
-  answers: ISurveyAnswerItem[]
+  answers: ISurveyAnswerItem[],
+  user_id: string
 ): Promise<{ responseId: string }> {
   const pool = await getDB();
 
@@ -164,9 +192,20 @@ export async function createSurveyResponse(
       const selectedOptions = parsedAnswers.map((a) => a.selectedOption);
 
       await pool.query(
-        `INSERT INTO survey_answers (response_id, question_id, answer_type, selected_option)
-         SELECT $1, * FROM UNNEST($2::uuid[], $3::integer[], $4::text[]);`,
-        [responseId, questionIds, answerTypes, selectedOptions]
+        `INSERT INTO survey_answers 
+   (response_id, question_id, answer_type, selected_option, user_id)
+   SELECT 
+     $1,
+     q.question_id,
+     q.answer_type,
+     q.selected_option,
+     $5
+   FROM UNNEST(
+     $2::uuid[],
+     $3::integer[],
+     $4::text[]
+   ) AS q(question_id, answer_type, selected_option);`,
+        [responseId, questionIds, answerTypes, selectedOptions, user_id]
       );
     }
 
@@ -208,8 +247,8 @@ export const getRecommendedPlantsController = async (
 
     // ── Fetch survey answers for this response ──────────────────────────────
     const result = await client.query<{
-      question_id:    string;
-      answer_type:    string;
+      question_id: string;
+      answer_type: string;
       selected_option: string;
       question_order: number;
     }>(
@@ -245,8 +284,8 @@ export const getRecommendedPlantsController = async (
       }
 
       answers[fieldIndex] = {
-        questionId:     row.question_id,
-        type:           row.answer_type,
+        questionId: row.question_id,
+        type: row.answer_type,
         selectedOption: row.selected_option ?? "",
       };
     }
@@ -256,44 +295,44 @@ export const getRecommendedPlantsController = async (
 
     // ── Shape the API response ───────────────────────────────────────────────
     const plantRecommendations = recommendedPlants.map((p) => ({
-      id:                 p.id,
-      commonName:         p.commonName,
-      scientificName:     p.scientificName,
-      otherName:          p.otherName,
-      family:             p.family,
-      genus:              p.genus,
-      type:               p.type,
-      cycle:              p.cycle,
-      watering:           p.watering,
-      sunlight:           p.sunlight,
-      careLevel:          p.careLevel,
-      maintenance:        p.maintenance,
-      growthRate:         p.growthRate,
-      droughtTolerant:    p.droughtTolerant,
-      saltTolerant:       p.saltTolerant,
-      tropical:           p.tropical,
-      indoor:             p.indoor,
-      flowers:            p.flowers,
-      floweringSeason:    p.floweringSeason,
-      fruits:             p.fruits,
-      edibleFruit:        p.edibleFruit,
-      harvestSeason:      p.harvestSeason,
-      leaf:               p.leaf,
-      edibleLeaf:         p.edibleLeaf,
-      cuisine:            p.cuisine,
-      medicinal:          p.medicinal,
-      poisonousToHumans:  p.poisonousToHumans,
-      poisonousToPets:    p.poisonousToPets,
-      hardinessMin:       p.hardinessMin,
-      hardinessMax:       p.hardinessMax,
-      description:        p.description,
-      image:              p.image,           // image_regular_url — best for cards
-      imageMedium:        p.imageMedium,
-      imageSmall:         p.imageSmall,
-      imageThumbnail:     p.imageThumbnail,
-      image_url:         p.image_url,       // new field for local image URL
-      matchScore:         p.matchScore,
-      whyRecommended:     p.whyRecommended,
+      id: p.id,
+      commonName: p.commonName,
+      scientificName: p.scientificName,
+      otherName: p.otherName,
+      family: p.family,
+      genus: p.genus,
+      type: p.type,
+      cycle: p.cycle,
+      watering: p.watering,
+      sunlight: p.sunlight,
+      careLevel: p.careLevel,
+      maintenance: p.maintenance,
+      growthRate: p.growthRate,
+      droughtTolerant: p.droughtTolerant,
+      saltTolerant: p.saltTolerant,
+      tropical: p.tropical,
+      indoor: p.indoor,
+      flowers: p.flowers,
+      floweringSeason: p.floweringSeason,
+      fruits: p.fruits,
+      edibleFruit: p.edibleFruit,
+      harvestSeason: p.harvestSeason,
+      leaf: p.leaf,
+      edibleLeaf: p.edibleLeaf,
+      cuisine: p.cuisine,
+      medicinal: p.medicinal,
+      poisonousToHumans: p.poisonousToHumans,
+      poisonousToPets: p.poisonousToPets,
+      hardinessMin: p.hardinessMin,
+      hardinessMax: p.hardinessMax,
+      description: p.description,
+      image: p.image,           // image_regular_url — best for cards
+      imageMedium: p.imageMedium,
+      imageSmall: p.imageSmall,
+      imageThumbnail: p.imageThumbnail,
+      image_url: p.image_url,       // new field for local image URL
+      matchScore: p.matchScore,
+      whyRecommended: p.whyRecommended,
     }));
 
     res.status(200).json(

@@ -14,6 +14,173 @@ const BASE_URL = process.env.APPDEV_URL || 'http://localhost:3000';
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
+const REPLICATE_API_KEY = requireEnv('REPLICATE_API_KEY');
+
+// meta/sam-2 on Replicate — pinned version for stability
+const REPLICATE_SAM2_URL    = 'https://api.replicate.com/v1/predictions';
+// const REPLICATE_SAM2_VERSION = 'cbd95fb76192174268b6b303aeeb7a736e8dab0cbc38177f09db79b2299da30b';
+
+const REQUEST_TIMEOUT_MS = 60_000;  // wait up to 60s (Prefer: wait header)
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ReplicatePrediction {
+  id: string;
+  status: string;           // 'starting' | 'processing' | 'succeeded' | 'failed'
+  output?: string | string[];// mask image URL(s)
+  error?: string;
+  urls?: {
+    get: string;
+    cancel: string;
+  };
+}
+
+export interface SegmentationResult {
+  task_id: string;
+  mask_url: string | null;
+  mask_buffer: Buffer;
+  mask_base64: string;
+}
+
+/**
+ * Retrieves a required environment variable from `process.env`.
+ *
+ * @param key - The name of the environment variable to retrieve.
+ * @returns The environment variable value as a string.
+ * @throws {Error} Throws if the environment variable is missing or empty.
+ *
+ * @example
+ * const apiKey = requireEnv("API_KEY");
+ */
+function requireEnv(key: string): string {
+  const val = process.env[key];
+  if (!val) throw new Error(`Missing required environment variable: ${key}`);
+  return val;
+}
+
+/**
+ * Determines whether a space type is categorized as indoor or outdoor.
+ *
+ * @param spaceType - The type of space to classify.
+ * @returns `"outdoor"` if the space type is considered outdoor; otherwise `"indoor"`.
+ *
+ * @example
+ * getSpaceCategory('balcony'); // "outdoor"
+ * getSpaceCategory('bedroom'); // "indoor"
+ */
+function getSpaceCategory(spaceType: SpaceType): 'indoor' | 'outdoor' {
+  const outdoorTypes: SpaceType[] = [
+    'balcony', 'terrace', 'yard', 'rooftop',
+    'patio', 'garden', 'generic_outdoor',
+  ];
+  return outdoorTypes.includes(spaceType) ? 'outdoor' : 'indoor';
+}
+/**
+ * Calculates the percentage of pixels whose value exceeds a given threshold.
+ *
+ * Commonly used for estimating the proportion of "white" pixels
+ * in grayscale or single-channel image data.
+ *
+ * @param pixelData - Array of pixel intensity values.
+ * @param threshold - Minimum value required for a pixel to be counted as white. Defaults to `128`.
+ * @returns The percentage of pixels above the threshold, from `0` to `100`.
+ *
+ * @example
+ * calcWhitePercent(new Uint8Array([0, 255, 200, 100]));
+ * // 50
+ */
+function calcWhitePercent(pixelData: Uint8Array, threshold = 128): number {
+  let white = 0;
+  for (let i = 0; i < pixelData.length; i++) {
+    if (pixelData[i]! > threshold) white++;
+  }
+  return (white / pixelData.length) * 100;
+}
+/**
+ * Calculates a reference floor point within a space image.
+ *
+ * The point is positioned horizontally at the center of the image and
+ * vertically near the bottom. Outdoor spaces use a slightly higher
+ * floor position than indoor spaces.
+ *
+ * @param width - Width of the image or canvas.
+ * @param height - Height of the image or canvas.
+ * @param spaceType - Type of space used to determine indoor/outdoor placement.
+ * @returns An object containing the `{ x, y }` floor coordinates.
+ *
+ * @example
+ * getFloorPoint(1024, 768, 'balcony');
+ * // { x: 512, y: 614 }
+ */
+function getFloorPoint(
+  width: number,
+  height: number,
+  spaceType: SpaceType,
+): { x: number; y: number } {
+  const outdoor = getSpaceCategory(spaceType) === 'outdoor';
+  return {
+    x: Math.floor(width / 2),
+    y: Math.floor(height * (outdoor ? 0.80 : 0.88)),
+  };
+}
+
+/**
+ * Downloads a mask image from a given URL and returns it as a Buffer.
+ *
+ * The request is automatically aborted if it exceeds `DOWNLOAD_TIMEOUT_MS`.
+ *
+ * @param url - Direct URL to the mask image resource
+ * @returns A `Buffer` containing the downloaded image data
+ *
+ * @throws {Error} Throws if the network request fails or returns a non-OK response
+ *
+ * @example
+ * const maskBuffer = await downloadMask("https://example.com/mask.png");
+ */
+async function downloadMask(url: string): Promise<Buffer> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(`Mask download failed [${res.status}]: ${url}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+// ─── Roboflow SAM2 ────────────────────────────────────────────────────────────
+
+/**
+ * Step 1 — embed the image and get an image_id back.
+ * Roboflow caches the embedding so the subsequent infer call is fast.
+ */
+// async function embedImage(rawBase64: string): Promise<string> {
+//   const response = await fetch(
+//     `${SAM2_EMBED_URL}?api_key=${ROBOFLOW_API_KEY}`,
+//     {
+//       method:  'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body:    JSON.stringify({ image: { type: 'base64', value: rawBase64 } }),
+//       signal:  AbortSignal.timeout(MASK_DOWNLOAD_TIMEOUT_MS),
+//     },
+//   );
+
+//   if (!response.ok) {
+//     const err = await response.text();
+//     throw new Error(`SAM2 embed failed [${response.status}]: ${err}`);
+//   }
+
+//   const data = (await response.json()) as RoboflowEmbedResponse;
+//   if (!data.image_id) {
+//     throw new Error(`SAM2 embed returned no image_id: ${JSON.stringify(data)}`);
+//   }
+
+//   return data.image_id;
+// }
+
+
+
+
+
+
 
 export type SpaceCategory = 'indoor' | 'outdoor';
 
@@ -37,7 +204,7 @@ export interface PlanStep {
   step: number;
   category:
   // outdoor
-  | 'Hardscape' | 'Softscape' | 'Water Feature' | 'Lighting' | 'Maintenance'
+  | 'Hardscape' | 'Softscape' | 'Water Feature' | 'Lighting' | 'Maintenance' | 'Pathways' | 'seating' | 'planters' | 'decor' | 'otherwise'
   // indoor
   | 'Furniture' | 'Decor' | 'Storage' | 'Textiles' | 'Paint & Finish' | 'Tech';
   action: string;
@@ -111,42 +278,42 @@ const SPACE_CONFIG: Record<SpaceCategory, {
     decorRule: 'Name specific furniture pieces with real material descriptions (e.g. "oak veneer sideboard", "linen sofa"). Specify exact dimensions and placement position in the room.',
   },
 };
-const SAM_ENDPOINT   = process.env.WAVESPEED_SAM_URL    ?? '';
+// const SAM_ENDPOINT = process.env.WAVESPEED_SAM_URL ?? '';
 const WAVESPEED_API_KEY = process.env.WAVESPEED_API_KEY ?? '';
- 
-const MAX_POLL_ATTEMPTS = 30;
-const POLL_INTERVAL_MS  = 2_000;
-const MASK_DOWNLOAD_TIMEOUT_MS = 15_000;
- 
+
+// const MAX_POLL_ATTEMPTS = 30;
+// const POLL_INTERVAL_MS = 2_000;
+// const MASK_DOWNLOAD_TIMEOUT_MS = 15_000;
+
 // SAM segmentation prompts — must be ≤ 32 chars (WaveSpeed hard limit)
-const SEGMENTATION_PROMPTS: Record<SpaceType, string> = {
-  // outdoor – focus on the ground only
-  balcony:         'balcony floor',
-  terrace:         'terrace ground',
-  yard:            'lawn area',
-  rooftop:         'rooftop floor surface',
-  patio:           'patio stones',
-  garden:          'garden soil',
-  // indoor – floor only (no walls)
-  bedroom:         'bedroom floor',
-  living_room:     'living room floor',
-  kitchen:         'kitchen floor',
-  bathroom:        'bathroom floor',
-  dining_room:     'dining room floor',
-  office:          'office floor',
-  hallway:         'hallway floor',
-  basement:        'basement floor',
-  // fallback
-  generic_indoor:  'floor surface',
-  generic_outdoor: 'ground surface',
-};
- 
+// const SEGMENTATION_PROMPTS: Record<SpaceType, string> = {
+//   // outdoor – focus on the ground only
+//   balcony: 'balcony floor',
+//   terrace: 'terrace ground',
+//   yard: 'lawn area',
+//   rooftop: 'rooftop floor surface',
+//   patio: 'patio stones',
+//   garden: 'garden soil',
+//   // indoor – floor only (no walls)
+//   bedroom: 'bedroom floor',
+//   living_room: 'living room floor',
+//   kitchen: 'kitchen floor',
+//   bathroom: 'bathroom floor',
+//   dining_room: 'dining room floor',
+//   office: 'office floor',
+//   hallway: 'hallway floor',
+//   basement: 'basement floor',
+//   // fallback
+//   generic_indoor: 'floor surface',
+//   generic_outdoor: 'ground surface',
+// };
+
 // ─── Types ────────────────────────────────────────────────────────────────────
- type JobStatus =
+type JobStatus =
   | 'created'
   | 'processing'
   | 'completed'
-  | 'failed'; 
+  | 'failed';
 interface WaveSpeedSubmitResponse {
   code: number;
   message: string;
@@ -168,10 +335,10 @@ interface WaveSpeedPollResponse {
     error?: string;
   };
 }
- 
+
 export interface SegmentationResult {
-  task_id:     string;
-  mask_url:    string | null;
+  task_id: string;
+  mask_url: string | null;
   mask_buffer: Buffer;
   mask_base64: string;
 }
@@ -189,44 +356,38 @@ export interface SegmentationResult {
  * - `'outdoor'` if the space belongs to an outdoor category.
  * - `'indoor'` otherwise.
  */
-function getSpaceCategory(spaceType: SpaceType): 'indoor' | 'outdoor' {
-  const outdoorTypes: SpaceType[] = [
-    'balcony', 'terrace', 'yard', 'rooftop',
-    'patio', 'garden', 'generic_outdoor',
-  ];
-  return outdoorTypes.includes(spaceType) ? 'outdoor' : 'indoor';
-}
- /**
- * Calculates the percentage of pixels whose intensity
- * is greater than the provided threshold.
- *
- * Useful for estimating mask coverage or determining
- * how much of an image is considered "white" or active.
- *
- * The function iterates through raw grayscale pixel data
- * and counts pixels brighter than the threshold value.
- *
- * @param pixelData - Raw pixel buffer containing grayscale values (0–255).
- * @param threshold - Brightness threshold used to classify a pixel as white.
- * Defaults to `200`.
- *
- * @returns Percentage of pixels above the threshold (0–100).
- */
-function calcWhitePercent(
-  pixelData: Buffer,
-  threshold = 200,
-): number {
 
-  let white = 0;
+/**
+* Calculates the percentage of pixels whose intensity
+* is greater than the provided threshold.
+*
+* Useful for estimating mask coverage or determining
+* how much of an image is considered "white" or active.
+*
+* The function iterates through raw grayscale pixel data
+* and counts pixels brighter than the threshold value.
+*
+* @param pixelData - Raw pixel buffer containing grayscale values (0–255).
+* @param threshold - Brightness threshold used to classify a pixel as white.
+* Defaults to `200`.
+*
+* @returns Percentage of pixels above the threshold (0–100).
+*/
+// function calcWhitePercent(
+//   pixelData: Buffer,
+//   threshold = 200,
+// ): number {
 
-  for (let i = 0; i < pixelData.length; i++) {
-    if (pixelData[i]! > threshold) {
-      white++;
-    }
-  }
+//   let white = 0;
 
-  return (white / pixelData.length) * 100;
-}
+//   for (let i = 0; i < pixelData.length; i++) {
+//     if (pixelData[i]! > threshold) {
+//       white++;
+//     }
+//   }
+
+//   return (white / pixelData.length) * 100;
+// }
 /**
  * Downloads a generated segmentation mask from a remote URL.
  *
@@ -243,14 +404,14 @@ function calcWhitePercent(
  * - the server responds with a non-2xx status,
  * - or the download times out.
  */
-async function downloadMask(url: string): Promise<Buffer> {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(MASK_DOWNLOAD_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`Mask download failed [${res.status}]: ${url}`);
-  return Buffer.from(await res.arrayBuffer());
-}
- 
+// async function downloadMask(url: string): Promise<Buffer> {
+//   const res = await fetch(url, {
+//     signal: AbortSignal.timeout(MASK_DOWNLOAD_TIMEOUT_MS),
+//   });
+//   if (!res.ok) throw new Error(`Mask download failed [${res.status}]: ${url}`);
+//   return Buffer.from(await res.arrayBuffer());
+// }
+
 /**
  * Extracts the generated segmentation mask from a WaveSpeed SAM response
  * and downloads it as a Buffer.
@@ -265,111 +426,310 @@ async function downloadMask(url: string): Promise<Buffer> {
  * @throws Error
  * Throws if the outputs array is missing or empty.
  */
-async function extractMaskFromResponse(
-  data: WaveSpeedSubmitResponse['data'] | WaveSpeedPollResponse['data']
-): Promise<Buffer> {
-  const maskUrl = data.outputs?.[0];
-  if (!maskUrl) throw new Error('SAM completed but outputs array is empty');
-  return downloadMask(maskUrl);
-}
- 
+
+// async function extractMaskFromResponse(
+//   data: WaveSpeedSubmitResponse['data'] | WaveSpeedPollResponse['data']
+// ): Promise<Buffer> {
+//   const maskUrl = data.outputs?.[0];
+//   if (!maskUrl) throw new Error('SAM completed but outputs array is empty');
+//   return downloadMask(maskUrl);
+// }
+
 // ─── Core SAM call ───────────────────────────────────────────────────────────
 /**
- * Calls WaveSpeed SAM segmentation API and returns the generated mask image as a Buffer.
+ * Calls the SAM2 segmentation service to generate a mask from an input image.
  *
  * This function:
- * 1. Submits an image + prompt to the SAM endpoint
- * 2. Handles immediate completion/failure responses
- * 3. Polls the job status until completion or failure
- * 4. Downloads and returns the final segmentation mask image
+ * - Computes foreground/background prompt points based on image geometry
+ * - Submits a segmentation request to the Replicate SAM2 model
+ * - Handles both synchronous ("Prefer: wait") and fallback polling flows
  *
- * @param imageBase64WithPrefix - Full image data URI (e.g. "data:image/png;base64,...")
- * @param spaceType - Type of space used to select segmentation prompt
+ * @param rawBase64 - Base64-encoded image data (without data URI prefix)
+ * @param spaceType - Type of space used to compute prompt points
+ * @param width - Image width in pixels
+ * @param height - Image height in pixels
+ * @returns A `Buffer` containing the generated segmentation mask
  *
- * @returns A Buffer containing the downloaded segmentation mask image (PNG)
+ * @throws {Error} Throws if the API request fails or segmentation cannot be completed
  *
- * @throws Error
- * Throws if:
- * - Submission request fails
- * - API returns a non-200 response
- * - Task fails during processing
- * - Polling request fails
- * - Task times out after max attempts
+ * @example
+ * const mask = await callSAM2Segmentation(base64Image, 'balcony', 1024, 768);
  */
-async function callSAMSegmentation(
-  imageBase64WithPrefix: string, // full "data:image/…;base64,…" string
+async function callSAM2Segmentation(
+  rawBase64: string,
   spaceType: SpaceType,
+  width: number,
+  height: number,
 ): Promise<Buffer> {
- 
-  const prompt = SEGMENTATION_PROMPTS[spaceType];
- 
-  // ── Submit ────────────────────────────────────────────────────────────────
-  const submitResponse = await fetch(SAM_ENDPOINT, {
+
+  const floor = getFloorPoint(width, height, spaceType);
+  const bgX = Math.floor(width / 2);
+  const bgY = Math.floor(height * 0.08);
+
+  // console.log(
+  //   `[SAM2] spaceType=${spaceType} | ` +
+  //   `floor=(${floor.x},${floor.y}) | bg=(${bgX},${bgY}) | ` +
+  //   `size=${width}x${height}`
+  // );
+
+  // ── Submit prediction ─────────────────────────────────────────────────────
+  const submitRes = await fetch(REPLICATE_SAM2_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${WAVESPEED_API_KEY}`,
+      'Authorization': `Bearer ${REPLICATE_API_KEY}`,
       'Content-Type': 'application/json',
+      'Prefer': 'wait',          // synchronous response — no polling needed
     },
     body: JSON.stringify({
-      image: imageBase64WithPrefix, // WaveSpeed expects the full data URI
-      prompt,
-      output_format: 'png',
+      version: 'cbd95fb76192174268b6b303aeeb7a736e8dab0cbc38177f09db79b2299da30b', // ← meta/sam-2 latest
+      input: {
+        image: `data:image/jpeg;base64,${rawBase64}`,
+        point_coords: JSON.stringify([[floor.x, floor.y], [bgX, bgY]]),
+        point_labels: '1, 0',
+        multimask_output: false,
+      },
     }),
-  });
- 
-  if (!submitResponse.ok) {
-    const body = await submitResponse.text();
-    throw new Error(`SAM submit failed [${submitResponse.status}]: ${body}`);
-  }
- 
-  const submitData = (await submitResponse.json()) as WaveSpeedSubmitResponse;
-  if (submitData.code !== 200) {
-    throw new Error(`WaveSpeed SAM error: ${submitData.message}`);
-  }
- 
-  // ── Fast-path: task already completed on submit ───────────────────────────
-  if (submitData.data.status === 'completed') {
-    return extractMaskFromResponse(submitData.data);
-  }
- 
-  if (submitData.data.status === 'failed') {
-    throw new Error(`SAM failed immediately: ${submitData.data.error ?? 'Unknown'}`);
-  }
 
-  // ── Poll ──────────────────────────────────────────────────────────────────
-  const pollUrl  = submitData.data.urls.get;
-  let status: JobStatus = submitData.data.status;
-  // let   attempts = 0;
-  
- 
-  for (let attempts = 0; attempts < MAX_POLL_ATTEMPTS; attempts++) {
-  await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-
-  const pollResponse = await fetch(pollUrl, {
-    headers: { 'Authorization': `Bearer ${WAVESPEED_API_KEY}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
-  if (!pollResponse.ok) {
-    const err = await pollResponse.text();
-    throw new Error(`SAM poll failed [${pollResponse.status}]: ${err}`);
+  if (!submitRes.ok) {
+    const err = await submitRes.text();
+    throw new Error(`SAM2 submit failed [${submitRes.status}]: ${err}`);
   }
 
-  const pollData = (await pollResponse.json()) as WaveSpeedPollResponse;
-  status = pollData.data.status;  // ✅ TypeScript sees JobStatus here, no narrowing
+  const prediction = (await submitRes.json()) as ReplicatePrediction;
 
-  if (status === 'failed') {
-    throw new Error(`SAM task failed: ${pollData.data.error ?? 'Unknown'}`);
+  // ── Fast-path: already succeeded (Prefer: wait worked) ───────────────────
+  if (prediction.status === 'succeeded') {
+    return getMaskFromOutput(prediction.output);
   }
 
-  if (status === 'completed') {
-    return extractMaskFromResponse(pollData.data);
+  if (prediction.status === 'failed') {
+    throw new Error(`SAM2 failed immediately: ${prediction.error ?? 'Unknown'}`);
   }
+
+  // ── Fallback polling (if Prefer: wait timed out on Replicate's side) ─────
+  const pollUrl = prediction.urls?.get;
+  if (!pollUrl) {
+    throw new Error('SAM2 prediction has no poll URL and is not yet complete');
+  }
+
+  return pollUntilDone(pollUrl);
+}
+/**
+ * Polls the SAM2 prediction endpoint until the segmentation result is ready.
+ *
+ * This function repeatedly queries the provided polling URL until:
+ * - The prediction succeeds (returns a mask Buffer), or
+ * - The prediction fails, or
+ * - The maximum number of attempts is reached
+ *
+ * @param pollUrl - The Replicate prediction polling URL
+ * @returns A `Buffer` containing the generated segmentation mask
+ *
+ * @throws {Error} Throws if polling fails, the prediction fails, or a timeout occurs
+ *
+ * @example
+ * const mask = await pollUntilDone(pollUrl);
+ */
+async function pollUntilDone(pollUrl: string): Promise<Buffer> {
+  const MAX_ATTEMPTS = 30;
+  const POLL_INTERVAL = 2_000;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+    const pollRes = await fetch(pollUrl, {
+      headers: { 'Authorization': `Bearer ${REPLICATE_API_KEY}` },
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    });
+
+    if (!pollRes.ok) {
+      const err = await pollRes.text();
+      throw new Error(`SAM2 poll failed [${pollRes.status}]: ${err}`);
+    }
+
+    const data = (await pollRes.json()) as ReplicatePrediction;
+
+    if (data.status === 'failed') {
+      throw new Error(`SAM2 prediction failed: ${data.error ?? 'Unknown'}`);
+    }
+
+    if (data.status === 'succeeded') {
+      return getMaskFromOutput(data.output);
+    }
+  }
+
+  throw new Error(
+    `SAM2 timed out after ${MAX_ATTEMPTS * (POLL_INTERVAL / 1000)}s`
+  );
 }
 
-throw new Error(`SAM timed out after ${MAX_POLL_ATTEMPTS * (POLL_INTERVAL_MS / 1000)}s`);
- 
-  throw new Error('SAM ended with unexpected status');
+/**
+ * Extracts and downloads the segmentation mask from SAM2 model output.
+ *
+ * The Replicate SAM2 API may return either:
+ * - A single mask URL (string), or
+ * - An array of mask URLs (string[])
+ *
+ * This function normalizes the output and downloads the first available mask.
+ *
+ * @param output - The SAM2 model output containing one or more mask URLs
+ * @returns A `Buffer` containing the downloaded mask image
+ *
+ * @throws {Error} Throws if the output is missing or empty
+ *
+ * @example
+ * const mask = await getMaskFromOutput(prediction.output);
+ */
+async function getMaskFromOutput(
+  output: string | string[] | undefined
+): Promise<Buffer> {
+  // Replicate SAM2 returns an array of mask URLs
+  const maskUrl = Array.isArray(output) ? output[0] : output;
+
+  if (!maskUrl) {
+    throw new Error('SAM2 succeeded but output is empty');
+  }
+
+  return downloadMask(maskUrl);
 }
+/**
+ * Validates a segmentation mask by analyzing pixel coverage in both alpha
+ * and grayscale channels.
+ *
+ * The function computes the percentage of "white" pixels (above default
+ * threshold) and uses the higher value between:
+ * - Alpha channel coverage
+ * - Grayscale intensity coverage
+ *
+ * A mask is considered valid if it covers a reasonable portion of the image
+ * (between 5% and 90%).
+ *
+ * @param maskBuffer - Raw image buffer of the segmentation mask
+ * @returns An object containing:
+ *  - `valid`: whether the mask passes coverage thresholds
+ *  - `whitePercent`: estimated percentage of white/active pixels
+ *
+ * @example
+ * const result = await validateMask(maskBuffer);
+ * if (result.valid) {
+ *   console.log(result.whitePercent);
+ * }
+ */
+async function validateMask(
+  maskBuffer: Buffer,
+): Promise<{ valid: boolean; whitePercent: number }> {
+  const sharp = (await import('sharp')).default;
+
+  // Check alpha channel
+  const { data: rgbaData, info } = await sharp(maskBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const alphaData = new Uint8Array(info.width * info.height);
+  for (let i = 0; i < alphaData.length; i++) {
+    alphaData[i] = rgbaData[i * 4 + 3]!;
+  }
+  const alphaPercent = calcWhitePercent(alphaData);
+
+  // Check grayscale channel
+  const { data: grayData } = await sharp(maskBuffer)
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const grayPercent = calcWhitePercent(new Uint8Array(grayData));
+
+  const whitePercent = Math.max(alphaPercent, grayPercent);
+
+  // console.log(
+  //   `[MASK] alpha=${alphaPercent.toFixed(1)}% | ` +
+  //   `gray=${grayPercent.toFixed(1)}% | ` +
+  //   `effective=${whitePercent.toFixed(1)}%`
+  // );
+
+  // Accept masks covering 5–90% of the image
+  return {
+    valid: whitePercent >= 5 && whitePercent < 90,
+    whitePercent,
+  };
+}
+/**
+ * Builds a simple fallback segmentation mask when SAM2 fails or returns
+ * an invalid result.
+ *
+ * The mask is a generated SVG where:
+ * - The entire image is black (background)
+ * - The lower portion is white (floor region)
+ *
+ * Floor height is adjusted based on whether the space is indoor or outdoor.
+ *
+ * @param width - Width of the target image
+ * @param height - Height of the target image
+ * @param spaceType - Type of space used to adjust floor ratio
+ * @returns A `Buffer` containing a PNG mask image
+ *
+ * @example
+ * const mask = await buildFallbackMask(1024, 768, 'garden');
+ */
+async function buildFallbackMask(
+  width: number,
+  height: number,
+  spaceType: SpaceType,
+): Promise<Buffer> {
+  const sharp = (await import('sharp')).default;
+
+  const outdoor = getSpaceCategory(spaceType) === 'outdoor';
+  const floorRatio = outdoor ? 0.5 : 0.3;
+  const floorH = Math.floor(height * floorRatio);
+  const floorY = height - floorH;
+
+  const svgMask = `
+    <svg xmlns="http://www.w3.org/2000/svg"
+         width="${width}" height="${height}"
+         viewBox="0 0 ${width} ${height}">
+      <rect x="0" y="0"         width="${width}" height="${height}" fill="black" />
+      <rect x="0" y="${floorY}" width="${width}" height="${floorH}"  fill="white" />
+    </svg>`;
+
+  return sharp(Buffer.from(svgMask)).png().toBuffer();
+}
+
+
+
+// async function callSAM2Segmentation(
+//   rawBase64: string,
+//   spaceType: SpaceType,
+//   width: number,
+//   height: number,
+// ): Promise<Buffer> {
+
+//   const imageId = await embedImage(rawBase64);
+
+//   const [floorX, floorY] = getFloorPoint(width, height, spaceType);
+
+//   // Background exclusion: top-center = ceiling (indoor) or sky (outdoor)
+//   const bgX = Math.floor(width  / 2);
+//   const bgY  = Math.floor(height * 0.08);
+
+//   const pointCoords: [number, number][] = [
+//     [floorX, floorY], // foreground — floor
+//     [bgX,    bgY],    // background — ceiling / sky
+//   ];
+//   const pointLabels = [1, 0]; // 1 = include, 0 = exclude
+
+//   console.log(
+//     `[SAM2] spaceType=${spaceType} | ` +
+//     `floor=(${floorX},${floorY}) | bg=(${bgX},${bgY}) | ` +
+//     `imageSize=${width}x${height}`
+//   );
+
+//   return inferMask(rawBase64, imageId, pointCoords, pointLabels);
+// }
+
 /**
  * Saves a Buffer to the local filesystem under the configured upload directory.
  *
@@ -398,6 +758,8 @@ export async function uploadBufferLocal(
   await fs.writeFile(filePath, buffer);
   return path.posix.join(folder, fileName);
 }
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // detectSpaceType
@@ -484,32 +846,10 @@ export async function detectSpaceType(imageBuffer: Buffer): Promise<DetectedSpac
  * @remarks
  * Uses `sharp` to rasterize an SVG-based mask.
  */
-async function buildFallbackMask(
-  width: number,
-  height: number,
-  spaceType: SpaceType,
-): Promise<Buffer> {
-  const sharp = (await import('sharp')).default;
- 
-  const category   = getSpaceCategory(spaceType);
-  const floorRatio = category === 'outdoor' ? 0.5 : 0.3;
-  const floorH     = Math.floor(height * floorRatio);
-  const floorY     = height - floorH;
- 
-  // xmlns + viewBox are required for sharp to parse SVG correctly
-  const svgMask = `
-    <svg xmlns="http://www.w3.org/2000/svg"
-         width="${width}" height="${height}"
-         viewBox="0 0 ${width} ${height}">
-      <rect x="0" y="0"      width="${width}" height="${height}" fill="black" />
-      <rect x="0" y="${floorY}" width="${width}" height="${floorH}"  fill="white" />
-    </svg>`;
- 
-  return sharp(Buffer.from(svgMask)).png().toBuffer();
-}
- 
+
+
 // ─── Public API ───────────────────────────────────────────────────────────────
- 
+
 /**
  * Primary segmentation pipeline entry point.
  *
@@ -538,68 +878,58 @@ export async function callSegmentationAPI(
   imageBase64: string,
   spaceType: SpaceType = 'generic_indoor',
 ): Promise<SegmentationResult> {
- 
+
   const sharp = (await import('sharp')).default;
- 
-  // Normalise: strip prefix for sharp; keep full URI for SAM API
-  const rawBase64    = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const dataUri      = imageBase64.startsWith('data:')
-    ? imageBase64
-    : `data:image/jpeg;base64,${rawBase64}`;
- 
-  const inputBuffer  = Buffer.from(rawBase64, 'base64');
-  const metadata     = await sharp(inputBuffer).metadata();
-  const width        = metadata.width  ?? 1024;
-  const height       = metadata.height ?? 1024;
- 
+
+  // Normalise: strip prefix for sharp & Replicate; both want raw base64
+  const rawBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const inputBuffer = Buffer.from(rawBase64, 'base64');
+
+  const metadata = await sharp(inputBuffer).metadata();
+  const width = metadata.width ?? 1024;
+  const height = metadata.height ?? 1024;
+
   let mask_buffer: Buffer;
+  /* eslint-disable @typescript-eslint/no-unused-vars */
   let usedSAM = false;
- 
-  // ── Attempt SAM segmentation ──────────────────────────────────────────────
+
+  // ── Attempt SAM2 segmentation ─────────────────────────────────────────────
   try {
-    const samResult = await callSAMSegmentation(dataUri, spaceType);
- 
-    // Validate mask coverage
-    const { data: pixelData } = await sharp(samResult)
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
- 
-    const whitePercent = calcWhitePercent(pixelData);
- 
-    // Reject masks that are near-empty (<5%) or near-total (≥90%)
-    // — both indicate SAM misidentified the region
-    if (whitePercent >= 5 && whitePercent < 90) {
+    const samResult = await callSAM2Segmentation(
+      rawBase64, spaceType, width, height
+    );
+
+    const { valid, whitePercent } = await validateMask(samResult);
+
+    if (valid) {
       mask_buffer = samResult;
-      usedSAM     = true;
+      usedSAM = true;
     } else {
       throw new Error(
-        `SAM mask rejected: ${whitePercent.toFixed(1)}% white pixels ` +
-        `(expected 5–90%)`
+        `SAM2 mask rejected: ${whitePercent.toFixed(1)}% coverage (expected 5–90%)`
       );
     }
- 
+
   } catch (err) {
-    console.error(
-      `[MASK] SAM failed or produced invalid mask — using floor-only fallback.\n` +
-      `       Reason: ${(err as Error).message}`
-    );
- 
+    // console.warn(
+    //   `[MASK] SAM2 failed — using floor-only fallback.\n` +
+    //   `       Reason: ${(err as Error).message}`
+    // );
     mask_buffer = await buildFallbackMask(width, height, spaceType);
   }
- 
-  console.error(`[MASK] Strategy: ${usedSAM ? 'SAM segmentation' : 'floor-only fallback'}`);
- 
+
+  // console.log(`[MASK] Strategy: ${usedSAM ? 'SAM2 (Replicate)' : 'floor-only fallback'}`);
+
   const mask_base64 = `data:image/png;base64,${mask_buffer.toString('base64')}`;
- 
-  // Persist debug mask (fire-and-forget — don't block the response)
+
+  // Debug upload — fire-and-forget
   uploadBufferLocal(mask_buffer, `debug-mask-${Date.now()}.png`, 'debug-masks').catch(
-    e => console.error('[MASK] Debug upload failed:', e)
+    (e: Error) => console.error('[MASK] Debug upload failed:', e)
   );
- 
+
   return {
-    task_id:     'local',
-    mask_url:    null,           // no remote URL for locally-generated masks
+    task_id: 'local',
+    mask_url: null,
     mask_buffer,
     mask_base64,
   };
@@ -733,39 +1063,81 @@ export async function callGroqForPlanning(
 
   const config = SPACE_CONFIG[detectedSpace.category];
 
-  const systemPrompt = `You are an ${config.persona} creating a transformation plan.
- 
-STRICT RULES:
-- Base EVERY step ONLY on what is in the scene description. Never invent objects.
-- Treat the space as a blank slate unless the description explicitly says otherwise.
-- Steps must be additive (ADD / BUILD), not corrective, unless the description names a specific problem.
- 
-STYLE SELECTION RULES:
-- NEVER default to "Modern" as a style — it is too generic and will be rejected.
-- Choose a style that specifically matches the visible conditions in the scene.
-- Good style examples for this space type: ${config.styleExamples}
-- The style must feel like it belongs in THIS specific space, not a catalog.
- 
-DECORATION RULES:
-- ${config.decorRule}
- 
-Return ONLY valid JSON — no markdown, no extra text:
+  const systemPrompt = `
+You are an expert ${config.persona} with 10+ years of experience designing real-world spaces.
+
+Your job is to create a HIGH-QUALITY, PRACTICAL transformation plan based strictly on the given scene.
+
+---
+
+CORE DESIGN PRINCIPLES:
+
+1. REALITY FIRST
+- Base decisions ONLY on described elements.
+- You MAY introduce new elements (plants, furniture, decor), but ONLY if they logically fit the space.
+- Do NOT hallucinate structures (no new walls, no layout changes).
+
+2. ADDITIVE DESIGN (VERY IMPORTANT)
+- All steps must ADD or ENHANCE — never remove or redesign core structure.
+- Respect existing layout, circulation, and usability.
+
+3. SPATIAL THINKING (THIS IS CRITICAL)
+Every plan MUST include:
+- Focal point creation
+- Layering (foreground / midground / background)
+- Height variation (low / medium / tall)
+- Visual balance (avoid clutter or emptiness)
+
+4. ZONING LOGIC
+Break the space into functional micro-zones:
+- Primary zone (main use)
+- Secondary enhancement zone
+- Transition/edge areas
+
+5. STYLE INTELLIGENCE
+- NEVER use generic styles like "Modern".
+- Choose a DISTINCT, CONTEXT-AWARE style.
+- Style must reflect the actual space conditions.
+Examples: ${config.styleExamples}
+
+6. PRACTICAL EXECUTION
+- Use real materials, real plants, real objects.
+- Mention sizes, placement, and positioning clearly.
+- Avoid vague suggestions.
+
+7. COST-AWARE DESIGN
+- Prefer smart, affordable solutions first.
+- Escalate to premium only when justified.
+
+---
+
+OUTPUT RULES (STRICT):
+
+Return ONLY valid JSON.
+
 {
-  "summary": "One bold sentence describing the transformation vision for THIS specific space",
-  "style": "Specific named style (not 'Modern')",
+  "summary": "One strong, specific transformation vision",
+  "style": "Specific non-generic style",
   "steps": [
     {
       "step": 1,
       "category": "${config.validCategories}",
-      "action": "Action title (max 8 words)",
-      "details": "Specific how-to: real item names, real materials, real dimensions. Min 2 sentences.",
+      "action": "Short action title",
+      "details": "Clear execution steps with placement, materials, and reasoning",
       "effort": "low | medium | high",
       "cost": "budget | moderate | premium"
     }
   ]
 }
- 
-Order steps: lowest effort first. Aim for 5–7 steps. No filler.`;
+
+---
+
+STEP QUALITY RULES:
+- 5–7 steps total
+- Order: lowest effort → highest
+- NO filler steps
+- Each step must feel like a professional designer decision
+`;
 
   const userPrompt = `
 SPACE TYPE: ${detectedSpace.spaceType} (${detectedSpace.category})
@@ -851,75 +1223,155 @@ Build FROM the described baseline — do not assume anything else exists.
 export function buildImagePrompt(
   plan: DesignPlan,
   sceneDescription: string,
-  detectedSpace: DetectedSpace
+  // detectedSpace: DetectedSpace
 ): string {
 
   const isAfternoon = sceneDescription.toLowerCase().includes('afternoon');
-  const lightingCondition = isAfternoon ? 'warm golden afternoon light' : 'soft natural daylight';
+  const lightingCondition = isAfternoon
+    ? 'warm golden hour afternoon lighting with soft shadows'
+    : 'natural soft daylight with balanced exposure';
 
-  if (detectedSpace.category === 'outdoor') {
-    const plants = plan.steps
-      .filter(s => s.category === 'Softscape')
-      .map(s => s.details.split('.')[0])
-      .join('; ');
-    const hardscape = plan.steps
-      .filter(s => s.category === 'Hardscape')
-      .map(s => s.action)
-      .join(', ');
-    const lighting = plan.steps
-      .filter(s => s.category === 'Lighting')
-      .map(s => s.action)
-      .join(', ');
+  // Extract structured plan elements
+  const plants = plan.steps
+    .filter(s => s.category === 'Softscape')
+    .map(s => s.details.split('.')[0])
+    .join(', ');
 
-    return [
-      `Add ${plan.style} garden elements to this existing ${detectedSpace.spaceType}:`,
-      plants ? `plants including ${plants},` : '',
-      hardscape ? `${hardscape},` : '',
-      lighting ? `${lighting},` : '',
-      `${lightingCondition},`,
-      `photorealistic, high detail, 4k,`,
-      `keep original floor tiles unchanged,`,
-      `keep original railings and walls unchanged,`,
-      `keep original architectural structure and perspective intact`,
-    ].filter(Boolean).join(' ');
+  const hardscape = plan.steps
+    .filter(s => s.category === 'Hardscape')
+    .map(s => s.action)
+    .join(', ');
 
-  } else {
-    // indoor
-    const furniture = plan.steps
-      .filter(s => s.category === 'Furniture')
-      .map(s => s.details.split('.')[0])
-      .join('; ');
-    const decor = plan.steps
-      .filter(s => s.category === 'Decor')
-      .map(s => s.action)
-      .join(', ');
-    const textiles = plan.steps
-      .filter(s => s.category === 'Textiles')
-      .map(s => s.action)
-      .join(', ');
-    const lighting = plan.steps
-      .filter(s => s.category === 'Lighting')
-      .map(s => s.action)
-      .join(', ');
-    const paint = plan.steps
-      .filter(s => s.category === 'Paint & Finish')
-      .map(s => s.action)
-      .join(', ');
+  const lighting = plan.steps
+    .filter(s => s.category === 'Lighting')
+    .map(s => s.action)
+    .join(', ');
 
-    return [
-      `Transform this ${detectedSpace.spaceType} into a ${plan.style} interior:`,
-      furniture ? `furniture including ${furniture},` : '',
-      decor ? `${decor},` : '',
-      textiles ? `${textiles},` : '',
-      lighting ? `${lighting},` : '',
-      paint ? `${paint},` : '',
-      `${lightingCondition},`,
-      `photorealistic, interior photography, high detail, 4k,`,
-      `keep original walls, floor, and ceiling unchanged,`,
-      `keep original windows and doors intact,`,
-      `same room dimensions and perspective`,
-    ].filter(Boolean).join(' ');
-  }
+  const water = plan.steps
+    .filter(s => s.category === 'Water Feature')
+    .map(s => s.action)
+    .join(', ');
+
+  const pathways = plan.steps
+    .filter(s => s.category === 'Hardscape' && /path|walkway/i.test(s.action))
+    .map(s => s.action)
+    .join(', ');
+
+  return `
+Transform this space into a sophisticated, lush ${plan.style} garden using advanced spatial planting and landscape design principles.
+
+SCENE CONTEXT:
+${sceneDescription}
+
+ABSOLUTE STRUCTURAL CONSTRAINTS:
+- DO NOT alter architecture, walls, flooring, railings, furniture, or layout.
+- DO NOT change perspective, geometry, or proportions.
+- Preserve all existing structural elements exactly as-is.
+- Only enhance by adding greenery, planters, and soft landscape elements.
+
+🚨 DESIGN ELEMENTS TO APPLY (STRICTLY FOLLOW):
+
+Plants & greenery:
+${plants || 'Use natural mixed greenery suitable for the space.'}
+
+Hardscape additions:
+${hardscape || 'Minimal natural materials only if needed.'}
+
+Pathways & circulation:
+${pathways || 'Maintain existing walking flow without adding new paths.'}
+
+Lighting:
+${lighting || 'No artificial lighting changes unless subtle.'}
+
+Water features:
+${water || 'None'}
+
+---
+
+🚨 MANDATORY GREENERY INSERTION (CRITICAL — MUST FOLLOW):
+
+- The space MUST contain clearly visible plants. It must NOT remain empty.
+- Add a minimum of 6–12 plants across the scene.
+
+- You MUST include:
+  • flowering plants with visible blooms (red, yellow, pink, or purple flowers)
+  • leafy green plants
+  • at least 2–3 medium-sized potted plants
+  • smaller decorative pots grouped naturally
+
+- ALL plants must be placed in:
+  • realistic pots, planters, or containers
+  • visible and clearly distinguishable (not hidden or tiny)
+
+- Flowering plants MUST be visually noticeable (bright blooms, not just green leaves).
+
+---
+
+DESIGN STRATEGY (PROFESSIONAL LANDSCAPE APPROACH):
+
+1. VERTICAL LAYERS (HEIGHT UTILIZATION):
+- Introduce climbing plants (ivy, jasmine, bougainvillea, etc.) on available vertical structures.
+- Add wall-mounted planters or vertical garden panels where suitable.
+- Use trailing plants to create natural cascading effects.
+
+2. FOCAL POINT CREATION:
+- Identify a natural focal area (e.g., corner, structure, entrance).
+- Enhance it using layered plants (tall + medium + low height).
+- Ensure flowering plants are part of the focal composition.
+
+3. FLOOR & GROUND TREATMENT:
+- Preserve original flooring visibility.
+- Add greenery only along edges and corners.
+- Place asymmetrical clusters of pots (small → medium → large).
+- Maintain clear functional walking paths.
+
+4. EDGE & BOUNDARY SOFTENING:
+- Add planter boxes along edges, railings, or boundaries.
+- Use cascading plants to soften hard lines.
+- Maintain airflow and openness.
+
+5. MICRO-ZONE CREATION:
+- Subtly divide into:
+  • Relaxation zone
+  • Green focal zone
+  • Transition zone
+
+6. NATURAL COMPOSITION PRINCIPLES:
+- Avoid rigid symmetry
+- Create layered depth (foreground / midground / background)
+- Balance greenery with empty space
+
+PLANT SELECTION LOGIC:
+- Mix textures (broad, fine, trailing)
+- Use varied heights
+- Include flowering species such as marigold, petunia, bougainvillea, or similar visible bloom plants
+- Keep species realistic and climate-appropriate
+
+LIGHTING & ATMOSPHERE:
+- ${lightingCondition}
+- realistic shadows and highlights
+- natural light interaction with plants and surfaces
+
+RENDER QUALITY:
+- ultra photorealistic
+- highly detailed textures
+- realistic depth and lighting
+- 4K resolution
+
+🚨 FINAL SCENE REQUIREMENT (VERY IMPORTANT):
+
+The final image MUST clearly show:
+- multiple visible potted plants
+- clearly visible flowering plants with colorful blooms
+- layered greenery across the space
+- no empty or bare areas
+
+If flowering plants or pots are not clearly visible, the result is incorrect.
+
+FINAL INTENT:
+Follow the provided design elements strictly and apply them naturally into the existing space. 
+The result must feel like a real, professionally designed garden — elegant, balanced, and believable — without altering the original structure.
+`;
 }
 /**
  * Performs mask-guided inpainting using WaveSpeed `flux-fill-dev`.
@@ -960,12 +1412,25 @@ export async function callInpainting(
   prompt: string,
   fileName: string
 ): Promise<string> {
+  const ENDPOINT = 'https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-kontext-pro';
 
-  const ENDPOINT = 'https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-fill-dev';
-
-  // Strip data URI prefix — WaveSpeed expects raw base64 only
   const rawImageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
   const rawMaskBase64 = maskBase64.replace(/^data:image\/\w+;base64,/, '');
+
+  // Anchor prompt — tells model to PRESERVE the scene, only ADD plants
+ const anchoredPrompt = `
+  Photorealistic. Preserve all existing structures, walls, floor, railings, architecture exactly.
+  Only add: potted plants, flowering plants, green foliage, small garden pots placed naturally 
+  in the masked region. Same lighting, same perspective, same camera angle as original photo.
+  Do not alter anything outside the masked area.
+  ${prompt}
+`.trim();
+
+  const negativePrompt = `
+    completely new scene, different room, different location, changed architecture,
+    distorted perspective, different layout, unrealistic geometry, cartoon, painting,
+    low quality, blurry, watermark, text, extra limbs
+  `.trim();
 
   const submitResponse = await fetch(ENDPOINT, {
     method: 'POST',
@@ -975,20 +1440,15 @@ export async function callInpainting(
     },
     body: JSON.stringify({
       image: rawImageBase64,
-      mask_image: rawMaskBase64,   // white = fill, black = preserve
-      prompt,
+      mask_image: rawMaskBase64,
+      prompt: anchoredPrompt,
+      negative_prompt: negativePrompt,
       num_inference_steps: 28,
-      guidance_scale: 28,             // flux-fill-dev requires >= 28
-      num_images: 1,
+      guidance_scale: 8.0,   // ← lowered: lets model respect original image more
+      strength: 0.75,
+      num_images: 2,
       output_format: 'jpeg',
       seed: -1,
-      negative_prompt: `
-      completely new scene,
-      different layout,
-      distorted perspective,
-      changed architecture,
-      unrealistic geometry
-`
     }),
   });
 
@@ -1007,7 +1467,6 @@ export async function callInpainting(
 
   while (status !== 'completed' && status !== 'failed') {
     if (attempts >= MAX) throw new Error('[Inpainting] Timed out after 80s');
-
     await new Promise(r => setTimeout(r, 2000));
     attempts++;
 
@@ -1033,3 +1492,5 @@ export async function callInpainting(
 
   throw new Error('[Inpainting] Ended with unexpected status');
 }
+
+

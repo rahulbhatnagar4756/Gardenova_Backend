@@ -16,6 +16,7 @@ export interface IFullUserProfile {
   };
   occupation: string | null;
   company: string | null;
+  responseId?: string | null; // ✅ added responseId to the full profile interface
 }
 
 export interface IUserProfile {
