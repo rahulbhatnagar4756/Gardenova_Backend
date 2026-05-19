@@ -190,7 +190,7 @@ export const getPlantDetailsByIdService = async (
         const id = parseInt(plantId, 10);
         if (isNaN(id)) throw new Error("Invalid plant ID — must be a number");
 
-        const [plantResult, userPlantResult, careResult,diseasecare] = await Promise.all([
+        const [plantResult, userPlantResult, careResult, diseasecare] = await Promise.all([
             pool.query(
                 `SELECT
                     id,
@@ -284,12 +284,12 @@ export const getPlantDetailsByIdService = async (
                     pruning: careData.pruning ?? null,
                 }
                 : null,
-                disease: diseaseData?{
-                    host: diseaseData.host,
-                    description: diseaseData.description,
-                    solution: diseaseData.solution,
-                    local_image_disease_path: diseaseUrl(diseaseData.local_image_path),
-                }:null,
+            disease: diseaseData ? {
+                host: diseaseData.host,
+                description: diseaseData.description,
+                solution: diseaseData.solution,
+                local_image_disease_path: diseaseUrl(diseaseData.local_image_path),
+            } : null,
 
             AlreadyAdded: !!userPlant,
             reminder: {
@@ -612,9 +612,9 @@ export const getUserPlantsService = async (
         [...baseParams, safeLimit, offset]
     );
     const plants = dataResult.rows.map((row) => ({
-    ...row,
-    image_url: toImageUrl(row.local_image_path),
-}));
+        ...row,
+        image_url: toImageUrl(row.local_image_path),
+    }));
 
     return {
         currentPage: safePage,
@@ -659,133 +659,177 @@ export const getUserPlantByIdService = async (
 ): Promise<PlantDetailsResponse | null> => {
     const pool = await getDB();
 
-    const query = `
-        SELECT 
-            up.*,
-            p.*,
-            pd.*,
-            pc.watering   AS care_watering,
-            pc.sunlight   AS care_sunlight,
-            pc.pruning    AS care_pruning
-        FROM user_plants up
-        JOIN plant_table_final p ON up.plant_id = p.id
-        LEFT JOIN plant_care_table pc ON pc.plant_id = p.id
-        left join plant_diseases pd on pd.id = p.id
-        WHERE up.user_id = $1 AND up.plant_id = $2
-    `;
+    const userPlantQuery = `
+    SELECT * FROM user_plants
+    WHERE user_id = $1 AND plant_id = $2
+  `;
 
-    const result = await pool.query(query, [userId, userPlantId]);
-    if (result.rows.length === 0) return null;
+    const plantQuery = `
+    SELECT * FROM plant_table_final
+    WHERE id = $1
+  `;
 
-    const row = result.rows[0];
+    const careQuery = `
+    SELECT * FROM plant_care_table
+    WHERE plant_id = $1
+  `;
 
+    const diseaseQuery = `
+    SELECT * FROM plant_diseases
+    WHERE id = $1
+  `;
+
+    // 🔥 Parallel execution
+    const [
+        userPlantRes,
+        plantRes,
+        careRes,
+        diseaseRes
+    ] = await Promise.all([
+        pool.query(userPlantQuery, [userId, userPlantId]),
+        pool.query(plantQuery, [userPlantId]),
+        pool.query(careQuery, [userPlantId]),
+        pool.query(diseaseQuery, [userPlantId]),
+    ]);
+
+    if (userPlantRes.rows.length === 0 || plantRes.rows.length === 0) {
+        return null;
+    }
+
+    const userPlant = userPlantRes.rows[0];
+    const plant = plantRes.rows[0];
+    const care = careRes.rows[0] || null;
+    const disease = diseaseRes.rows[0] || null;
     return {
-        user_plant_id: row.plant_id,
+        user_plant_id: plant.id,
+
         plant: {
-            plant_id: row.plant_id,
-            scientific_name: row.scientific_name,
-            common_name: row.common_name,
-            other_name: row.other_name,
-            family: row.family,
-            genus: row.genus,
-            plant_type: row.type,
-            growth_habit: row.growth_habit,
-            edible: row.edible,
-            edible_part: row.edible_part,
-            vegetable: row.vegetable,
-            species_epithet: row.species_epithet,
-            description: row.description,
-            author: row.authority,
-            subspecies: row.subspecies,
-            cultivar: row.cultivar,
-            variety: row.variety,
-            origin: row.origin,
-            type: row.type,
-            cycle: row.cycle,
-            watering: row.watering,
-            watering_benchmark_value: row.watering_benchmark_value,
-            watering_benchmark_unit: row.watering_benchmark_unit,
-            sunlight: row.sunlight,
-            hardiness_min: row.hardiness_min,
-            hardiness_max: row.hardiness_max,
-            dimension_type: row.dimension_type,
-            dimension_min_value: row.dimension_min_value,
-            dimension_max_value: row.dimension_max_value,
-            dimension_unit: row.dimension_unit,
-            growth_rate: row.growth_rate,
-            maintenance: row.maintenance,
-            care_level: row.care_level,
-            soil: row.soil,
-            pruning_month: row.pruning_month,
-            propagation: row.propagation,
-            attracts: row.attracts,
-            pest_susceptibility: row.pest_susceptibility,
-            plant_anatomy: row.plant_anatomy,
-            drought_tolerant: row.drought_tolerant,
-            salt_tolerant: row.salt_tolerant,
-            thorny: row.thorny,
-            invasive: row.invasive,
-            tropical: row.tropical,
-            indoor: row.indoor,
-            flowers: row.flowers,
-            flowering_season: row.flowering_season,
-            cones: row.cones,
-            fruits: row.fruits,
-            edible_fruit: row.edible_fruit,
-            harvest_season: row.harvest_season,
-            leaf: row.leaf,
-            edible_leaf: row.edible_leaf,
-            seeds: row.seeds,
-            cuisine: row.cuisine,
-            medicinal: row.medicinal,
-            poisonous_to_humans: row.poisonous_to_humans,
-            poisonous_to_pets: row.poisonous_to_pets,
-            care_guides_url: row.care_guides_url,
-            image_original_url: row.image_original_url,
-            image_regular_url: row.image_regular_url,
-            image_medium_url: row.image_medium_url,
-            image_small_url: row.image_small_url,
-            image_thumbnail: row.image_thumbnail,
-            image_url: toImageUrl(row.local_image_path),
-            image_license: row.image_license,
+            plant_id: plant.id,
+            scientific_name: plant.scientific_name,
+            common_name: plant.common_name,
+            other_name: plant.other_name,
+            family: plant.family,
+            genus: plant.genus,
+            plant_type: plant.type,
+            growth_habit: plant.growth_habit,
+            edible: plant.edible,
+            edible_part: plant.edible_part,
+            vegetable: plant.vegetable,
+            species_epithet: plant.species_epithet,
+            description: plant.description,
+            author: plant.authority,
+            subspecies: plant.subspecies,
+            cultivar: plant.cultivar,
+            variety: plant.variety,
+            origin: plant.origin,
+            type: plant.type,
+            cycle: plant.cycle,
+            watering: plant.watering,
+            watering_benchmark_value: plant.watering_benchmark_value,
+            watering_benchmark_unit: plant.watering_benchmark_unit,
+            sunlight: plant.sunlight,
+            hardiness_min: plant.hardiness_min,
+            hardiness_max: plant.hardiness_max,
+            dimension_type: plant.dimension_type,
+            dimension_min_value: plant.dimension_min_value,
+            dimension_max_value: plant.dimension_max_value,
+            dimension_unit: plant.dimension_unit,
+            growth_rate: plant.growth_rate,
+            maintenance: plant.maintenance,
+            care_level: plant.care_level,
+            soil: plant.soil,
+            pruning_month: plant.pruning_month,
+            propagation: plant.propagation,
+            attracts: plant.attracts,
+            pest_susceptibility: plant.pest_susceptibility,
+            plant_anatomy: plant.plant_anatomy,
+            drought_tolerant: plant.drought_tolerant,
+            salt_tolerant: plant.salt_tolerant,
+            thorny: plant.thorny,
+            invasive: plant.invasive,
+            tropical: plant.tropical,
+            indoor: plant.indoor,
+            flowers: plant.flowers,
+            flowering_season: plant.flowering_season,
+            cones: plant.cones,
+            fruits: plant.fruits,
+            edible_fruit: plant.edible_fruit,
+            harvest_season: plant.harvest_season,
+            leaf: plant.leaf,
+            edible_leaf: plant.edible_leaf,
+            seeds: plant.seeds,
+            cuisine: plant.cuisine,
+            medicinal: plant.medicinal,
+            poisonous_to_humans: plant.poisonous_to_humans,
+            poisonous_to_pets: plant.poisonous_to_pets,
+            care_guides_url: plant.care_guides_url,
+            image_original_url: plant.image_original_url,
+            image_regular_url: plant.image_regular_url,
+            image_medium_url: plant.image_medium_url,
+            image_small_url: plant.image_small_url,
+            image_thumbnail: plant.image_thumbnail,
+            image_url: toImageUrl(plant.local_image_path),
+            image_license: plant.image_license,
         },
-        care: {
-            watering: row.care_watering ?? null,
-            sunlight: row.care_sunlight ?? null,
-            pruning: row.care_pruning ?? null,
-        },
-        disease:{
-            host: row.host,
-            description: row.description,
-            solution: row.solution,
-            local_image_disease_path: diseaseUrl(row.local_disease_image_path),
 
-        },
+        care: care
+            ? {
+                watering: care.watering,
+                sunlight: care.sunlight,
+                pruning: care.pruning,
+            }
+            : {
+                watering: null,
+                sunlight: null,
+                pruning: null,
+            },
+
+        disease: disease
+            ? {
+                host: disease.host,
+                description: disease.description,
+                solution: disease.solution,
+                local_image_disease_path: diseaseUrl(
+                    disease.local_disease_image_path
+                ),
+            }
+            : null,
+
         reminder: {
-            watering_notification_enabled: row.watering_notification_enabled,
-            watering_reminder_frequency: row.watering_reminder_frequency,
-            watering_preferred_time: row.watering_preferred_time,
-            next_watered_at: row.next_watered_at,
-            last_watered_at: row.last_watered_at,
+            watering_notification_enabled:
+                userPlant.watering_notification_enabled,
+            watering_reminder_frequency:
+                userPlant.watering_reminder_frequency,
+            watering_preferred_time: userPlant.watering_preferred_time,
+            next_watered_at: userPlant.next_watered_at,
+            last_watered_at: userPlant.last_watered_at,
 
-            fertilizer_notification_enabled: row.fertilizer_notification_enabled,
-            fertilizer_reminder_frequency: row.fertilizer_reminder_frequency,
-            fertilizer_preferred_time: row.fertilizer_preferred_time,
-            next_fertilized_at: row.next_fertilized_at,
-            last_fertilized_at: row.last_fertilized_at,
+            fertilizer_notification_enabled:
+                userPlant.fertilizer_notification_enabled,
+            fertilizer_reminder_frequency:
+                userPlant.fertilizer_reminder_frequency,
+            fertilizer_preferred_time:
+                userPlant.fertilizer_preferred_time,
+            next_fertilized_at: userPlant.next_fertilized_at,
+            last_fertilized_at: userPlant.last_fertilized_at,
 
-            puring_notification_enabled: row.pruning_notification_enabled,
-            pruning_reminder_frequency: row.pruning_reminder_frequency,
-            next_pruned_at: row.next_pruned_at,
-            last_pruned_at: row.last_pruned_at,
+            puring_notification_enabled:
+                userPlant.pruning_notification_enabled,
+            pruning_reminder_frequency:
+                userPlant.pruning_reminder_frequency,
+            next_pruned_at: userPlant.next_pruned_at,
+            last_pruned_at: userPlant.last_pruned_at,
 
-            generic_notification_enabled: row.generic_notification_enabled,
-            generic_care_reminder_frequency: row.generic_care_reminder_frequency,
-            last_generic_care_at: row.last_generic_care_at,
-            next_generic_care_at: row.next_generic_care_at,
+            generic_notification_enabled:
+                userPlant.generic_notification_enabled,
+            generic_care_reminder_frequency:
+                userPlant.generic_care_reminder_frequency,
+            last_generic_care_at: userPlant.last_generic_care_at,
+            next_generic_care_at: userPlant.next_generic_care_at,
         },
     };
 };
+
 const CARE_TYPES_WITH_PREFERRED_TIME = new Set(["watering", "fertilizer"]);
 
 /**
@@ -1573,7 +1617,7 @@ export const getAllPlantsAdminService = async (
         image_small_url: row.image_small_url,
         image_thumbnail: row.image_thumbnail,
         image_license: row.image_license,
-        image_url:toImageUrl(row.local_image_path),
+        image_url: toImageUrl(row.local_image_path),
     }));
 
     return {
