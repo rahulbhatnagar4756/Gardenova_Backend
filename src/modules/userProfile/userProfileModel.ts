@@ -24,11 +24,13 @@ export async function getUserProfileById(
  * Updates an existing user profile with validation.
  * @param profileId - UUID of the profile to update
  * @param data - Unvalidated input data
+ * @param userId - ID of the user making the update (for auditing or related updates)
  * @returns Updated profile record or null if not found
  */
 export async function updateValidatedUserProfile(
   profileId: string,
-  data: unknown
+  data: unknown,
+  userId: string
 ): Promise<IUserProfile | null> {
   const client = await getDB();
 
@@ -91,6 +93,18 @@ export async function updateValidatedUserProfile(
 
     const row = result.rows[0];
 
+
+    const userQuery = `
+      UPDATE users
+      SET phone_number = $1
+      WHERE id = $2
+    `;
+
+    await client.query(userQuery, [
+      parsedData.contactNumber,
+      userId,
+    ]);
+
     // Normalize timestamp fields to string
     const normalizedRow = {
       ...row,
@@ -132,4 +146,43 @@ export async function getProfessionalProfileById(
     [profileId]
   );
   return result.rows[0] || null;
+}
+
+interface IEmailVerification {
+  code: string;
+  expiresAt: Date;
+}
+/**
+ * Saves an email verification code for a user in the database.
+ *
+ * This function inserts a new verification record into the
+ * `email_verifications` table with:
+ * - User ID
+ * - Verification code
+ * - Expiration timestamp
+ * - Initial usage status (`is_used = false`)
+ *
+ * @async
+ * @function saveEmailVerificationCode
+ *
+ * @param {string} userId - Unique identifier of the user.
+ * @param {IEmailVerification} body - Verification payload containing
+ * the OTP code and expiration time.
+ *
+ * @returns {Promise<void>} Resolves when the verification code is saved.
+ *
+ * @throws Will throw an error if the database insert operation fails.
+ *
+ * @example
+ * await saveEmailVerificationCode(userId, {
+ *   code: "4831",
+ *   expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+ * });
+ */
+export const saveEmailVerificationCode= async (userId: string, body: IEmailVerification): Promise<void> => {
+  const client = await getDB();
+  await client.query(
+    `INSERT INTO email_verifications (user_id, code,expires_at,is_Used) VALUES ($1, $2, $3,$4)`,
+    [userId, body.code, body.expiresAt, false]
+  );
 }

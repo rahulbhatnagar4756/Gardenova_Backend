@@ -1,8 +1,10 @@
 import { Router } from "express";
 import {
   getCurrentUserProfile,
+  sentEmailVarification,
   softDeleteUserProfile,
   updateUserProfile,
+  verifyCode,
 } from "./userProfileController";
 import { updateUserProfileValidation } from "./userProfileValidations";
 import validateRequest from "../../core/middleware/validateRequest";
@@ -204,5 +206,137 @@ router.patch(
   auth,
   softDeleteUserProfile
 );
+
+
+/**
+ * @swagger
+ * /api/v1/userProfile/sentemailvarification:
+ *   patch:
+ *     summary: Send email verification code
+ *     description: |
+ *       Sends a 4-digit email verification code to the provided email.
+ *       The user must be authenticated. If the email is already verified,
+ *       it returns a message indicating so.
+ *     tags:
+ *       - Email Verification
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *     responses:
+ *       201:
+ *         description: Verification code sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Verification code sent to email
+ *       200:
+ *         description: Email already verified
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Email is already verified
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+router.patch(
+"/sentemailvarification",
+auth,
+// validateRequest(verifyEmailValidation),
+sentEmailVarification
+)
+
+/**
+ * @swagger
+ * /api/v1/userProfile/verifyemail:
+ *   post:
+ *     summary: Verify email using OTP code
+ *     description: |
+ *       Verifies the email address using a 4-digit OTP code sent to the user.
+ *       The OTP must be valid, not expired, and not already used.
+ *       On success, the user's email is marked as verified.
+ *     tags:
+ *       - Email Verification
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - otp
+ *             properties:
+ *               otp:
+ *                 type: string
+ *                 example: "1234"
+ *     responses:
+ *       200:
+ *         description: Email verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Email verified successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Invalid or expired verification code
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.post(
+  "/verifyemail",
+auth,
+// validateRequest(verifyEmailValidation),
+verifyCode
+)
 
 export default router;

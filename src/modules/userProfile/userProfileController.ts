@@ -6,17 +6,22 @@ import {
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import { error, warn } from "../../core/utils/logger";
 import { CustomError } from "../../interface/Error";
-import { findUserByEmail } from "../auth/authRepository";
+import { findUserByEmail, findUserById, getRoleById } from "../auth/authRepository";
 import { getDB } from "../../core/config/db";
 import { IFullUserProfile, IUserProfileRow } from "../../interface/userProfile";
 import {
   getUserProfileById,
+  saveEmailVerificationCode,
   updateValidatedUserProfile,
 } from "./userProfileModel";
 import env from "../../core/config/env";
 import { AuthRequest } from "../../interface/auth";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
+import { sendVerificationEmail } from "../../core/services/emailService";
+import { generateToken } from "../../core/utils/usableMethods";
+
 
 /**
  * Retrieves the currently authenticated user's profile.
@@ -296,6 +301,17 @@ export const updateUserProfile = async (
         .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
+    if (!user.id) {
+      await error("Profile update failed - User ID missing", {
+        email: userPayload.userEmail,
+        action: "updateUserProfile",
+        req,
+      });
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(errorResponse("User ID is missing for the authenticated user"));
+      return;
+    }
 
     const client = await getDB();
 
@@ -395,7 +411,8 @@ export const updateUserProfile = async (
 
     const updatedProfile = await updateValidatedUserProfile(
       profileId,
-      req.body
+      req.body,
+      user.id
     );
 
     if (!updatedProfile) {
@@ -433,6 +450,253 @@ export const updateUserProfile = async (
     next(errorObj);
   }
 };
+
+/**
+ * Generates a secure random 4-digit verification code.
+ *
+ * Uses Node.js crypto module to generate a cryptographically
+ * secure random integer between 1000 and 9999.
+ *
+ * @function generate4DigitCode
+ *
+ * @returns {string} A randomly generated 4-digit code as a string.
+ *
+ * @example
+ * const code = generate4DigitCode();
+ * console.log(code); // "4831"
+ */
+const generate4DigitCode = (): string => {
+  return crypto.randomInt(1000, 10000).toString(); // 1000–9999
+};
+
+/**
+ * Sends an email verification OTP to the authenticated user.
+ *
+ * This endpoint:
+ * - Validates the authenticated user
+ * - Updates the user's email address
+ * - Marks the email as unverified
+ * - Generates a secure 4-digit OTP
+ * - Saves the OTP with expiration time
+ * - Sends the OTP to the provided email address
+ *
+ * @async
+ * @function sendEmailVerification
+ *
+ * @param {AuthRequest} req - Express authenticated request object.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function.
+ *
+ * @returns {Promise<void>} Sends JSON response to client.
+ *
+ * @throws Will pass errors to Express error middleware.
+ */
+export const sentEmailVarification = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const userPayload = req.user as { userEmail?: string } | undefined;
+
+  if (!userPayload?.userEmail) {
+    res
+      .status(HTTP_STATUS.UNAUTHORIZED)
+      .json(errorResponse("Unauthorized request"));
+
+    return;
+  }
+  try {
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      await error("Email verification failed - User not found", {
+        email: userPayload.userEmail,
+        action: "emailVerification",
+        req,
+      });
+
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+    if (!user.id) {
+      await error("Email verification failed - User ID missing", {
+        email: userPayload.userEmail,
+        action: "emailVerification",
+        req,
+      });
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(errorResponse("User ID is missing for the authenticated user"));
+      return;
+    }
+
+
+    if (user.is_email_verified && user.email === req.body.email) {
+      res
+        .status(HTTP_STATUS.OK)
+        .json(errorResponse("Email is already verified"));
+      return;
+    }
+    const client = await getDB();
+
+    const userQuery = `
+    UPDATE users
+    SET is_email_verified = false, email = $1
+    WHERE id = $2
+    RETURNING *
+    `;
+
+    await client.query(userQuery, [
+      req.body.email,
+      user.id,
+    ]);
+
+    const verificationCode = generate4DigitCode();
+
+    // optionally set expiry (e.g., 10 minutes)
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    // TODO: save code to DB (recommended)
+    await saveEmailVerificationCode(user.id, {
+      code: verificationCode,
+      expiresAt,
+    });
+     sendVerificationEmail(req.body.email, verificationCode, expiresAt);
+    res.status(HTTP_STATUS.CREATED).json(
+      successResponse(null, "Verification code sent to email")
+    );
+    return;
+  } catch (err: unknown) {
+    // console.log("Error in sentEmailVarification:", err);
+    const errorObj: CustomError =
+      err instanceof Error
+        ? (err as CustomError)
+        : ({
+          name: "UnknownError",
+          message: "An unknown error occurred",
+        } as CustomError);
+
+    await error("Email verification error", {
+      email: userPayload?.userEmail,
+      error: errorObj.message,
+      stack: errorObj.stack,
+      action: "emailVerification",
+      req,
+    });
+    next(errorObj);
+  }
+};
+
+/**
+ * Verifies the email verification OTP for the authenticated user.
+ *
+ * This endpoint:
+ * - Validates the provided OTP
+ * - Ensures the OTP is not expired or already used
+ * - Marks the OTP as used
+ * - Marks the user's email as verified
+ * - Generates a new authentication token
+ *
+ * @async
+ * @function verifyCode
+ *
+ * @param {AuthRequest} req - Express authenticated request object.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function.
+ *
+ * @returns {Promise<void>} Sends JSON response with authentication token.
+ *
+ * @throws Will pass errors to Express error middleware.
+ */
+export const verifyCode = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  // Implementation for verifying the code goes here
+  // const userPayload = req.user as { userEmail?: string } | undefined;
+  const userId = (req.user as { userId?: string } | undefined)?.userId;
+
+  // const user = await findUserByEmail(userPayload?.userEmail!);
+  // if(!userId || !user) {
+  //   res
+  //     .status(HTTP_STATUS.UNAUTHORIZED)
+
+  //     .json(errorResponse("Unauthorized request"));
+  //   return;
+  // }
+  const user  = await findUserById(userId!);
+  const role = await getRoleById(userId!)
+  // if (!userPayload?.userEmail) {
+  //   res
+  //     .status(HTTP_STATUS.UNAUTHORIZED)
+  //     .json(errorResponse("Unauthorized request"));
+  //   return;
+  // }
+  try {
+    const { otp } = req.body;
+    // 1. Validate OTP and mark email as verified if correct
+
+    const client = await getDB();
+    const userQuery = `
+    select * from email_verifications
+     where user_id = $1 and code = $2 and expires_at > now() and is_used = false
+    `;
+    const { rows } = await client.query(userQuery, [
+      userId,
+      otp,
+    ]);
+    if (rows.length === 0) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("Invalid or expired verification code"));
+      return;
+    }
+    // Mark code as used
+    const markUsedQuery = `
+    UPDATE email_verifications
+    SET is_used = true
+      WHERE user_id = $1 AND code = $2
+    `;
+    await client.query(markUsedQuery, [userId, otp]);
+    // Update user's email verification status
+    const updateUserQuery = `
+    UPDATE users
+    SET is_email_verified = true
+    WHERE id = $1
+    `;
+    await client.query(updateUserQuery, [userId]);
+    const token = generateToken( user?.email! ,role?.name || "user",  userId!);
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(token, "Email verified successfully"));
+  } catch (err: unknown) {
+    const errorObj: CustomError =
+      err instanceof Error
+        ? (err as CustomError)
+        : ({
+          name: "UnknownError",
+          message: "An unknown error occurred",
+        } 
+        );
+
+    // await error("Email verification error", {
+    //   email: userPayload?.userEmail,
+    //   error: errorObj.message,
+    //   stack: errorObj.stack,
+    //   action: "verifyCode",
+    //   req,
+    // });
+    next(errorObj);
+  }
+};
+
+
+
+
+
+
 
 
 

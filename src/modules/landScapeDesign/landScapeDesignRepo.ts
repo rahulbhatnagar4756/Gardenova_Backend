@@ -881,13 +881,22 @@ export async function callSegmentationAPI(
 
   const sharp = (await import('sharp')).default;
 
-  // Normalise: strip prefix for sharp & Replicate; both want raw base64
-  const rawBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const inputBuffer = Buffer.from(rawBase64, 'base64');
+  const rawBase64Original = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const inputBufferRaw = Buffer.from(rawBase64Original, 'base64');
+
+  // ✅ Rotate once, reuse everywhere
+  const inputBuffer = await sharp(inputBufferRaw)
+    .rotate()          // strips EXIF rotation and bakes it in
+    .jpeg({ quality: 92 })            // re-encode so downstream gets a clean, orientation-safe image
+    .toBuffer();
+
+  // ✅ Re-derive rawBase64 FROM the corrected buffer
+  const rawBase64 = inputBuffer.toString('base64');
 
   const metadata = await sharp(inputBuffer).metadata();
-  const width = metadata.width ?? 1024;
+  const width  = metadata.width  ?? 1024;
   const height = metadata.height ?? 1024;
+
 
   let mask_buffer: Buffer;
   /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -1257,217 +1266,332 @@ export function buildImagePrompt(
     lighting  && `Lighting: ${lighting}`,
     water     && `Water features: ${water}`,
   ].filter(Boolean).join('\n');
+  //   return `
+// Ultra-photorealistic architectural garden transformation of an existing ${detectedSpace.spaceType}.
 
-  return `
-Ultra-photorealistic architectural garden transformation of an existing ${detectedSpace.spaceType}.
+// Transform this space into a visually rich, dense, and immersive premium garden environment.
+// The final result must feel like a fully developed, mature garden — NOT a minimally decorated space.
 
-Transform this space into a visually rich, dense, and immersive premium garden environment.
-The final result must feel like a fully developed, mature garden — NOT a minimally decorated space.
+// --------------------------------------------------
+// SCENE CONTEXT
+// --------------------------------------------------
+// ${sceneDescription}
 
---------------------------------------------------
-SCENE CONTEXT
---------------------------------------------------
+// --------------------------------------------------
+// ⚠️ STRUCTURAL PRESERVATION — ABSOLUTE
+// --------------------------------------------------
+// DO NOT modify, remove, move, redesign, or reinterpret:
+// - Walls, textures, paint
+// - Windows, doors, glass
+// - Railings, staircase, pergola, structures
+// - Floor levels or geometry
+// - Camera angle or perspective
+
+// Architecture must remain EXACTLY identical (pixel-preserved).
+// ONLY ADD garden elements layered on top.
+
+// --------------------------------------------------
+// 🚫 SURROUNDING PROTECTION (CRITICAL)
+// --------------------------------------------------
+// - DO NOT change or reinterpret surroundings in ANY way
+// - Do NOT add, remove, or alter background buildings, sky, or external environment
+// - Do NOT extend or shrink the visible space
+// - Only work strictly WITHIN the existing visible boundaries
+
+// ❗ Any modification outside the original space is strictly forbidden
+
+// --------------------------------------------------
+// 🌸 FLOWER DENSITY BOOST (CRITICAL)
+// --------------------------------------------------
+// - Flower presence must be HIGH and clearly visible
+// - At least 40–60% of plants must include flowering species
+
+// - Distribute flowers across:
+//   - ground level clusters
+//   - mid-height shrubs
+//   - trailing plants on railings
+
+// - Use bold contrasting colors:
+//   pink, magenta, yellow, orange, red, purple
+
+// - Flowers must appear:
+//   - dense
+//   - vibrant
+//   - naturally spread (not isolated)
+
+// ❗ Green-only foliage is NOT acceptable — flowers must dominate visually
+
+// --------------------------------------------------
+// 🌿 GROUND TRANSFORMATION — PREMIUM TRIMMED LAWN (MANDATORY)
+// --------------------------------------------------
+// - Convert entire visible floor into a perfectly maintained natural grass lawn
+
+// - Grass must appear:
+//   - evenly trimmed to a consistent height
+//   - dense and well-maintained
+//   - soft and lush with fine blade detail
+//   - clean and professionally landscaped
+
+// - Subtle realism is still required:
+//   - slight tonal variation (light and dark greens)
+//   - natural sunlight variation across surface
+//   - very minor imperfections ONLY (not messy or overgrown)
+
+// - Strictly avoid:
+//   ❌ irregular growth
+//   ❌ patchy or wild grass
+//   ❌ dry or uneven areas
+//   ❌ artificial turf or plastic-like texture
+
+// - Lawn must feel like a high-end residential garden (manicured, premium quality)
+
+// - Blend edges cleanly into walls and structures
+// - Maintain neat boundaries around all edges
+
+// --------------------------------------------------
+// 🔥 DENSITY ENFORCEMENT (CRITICAL RULE)
+// --------------------------------------------------
+// - Increase plant and flower presence by MINIMUM 4x, with strong floral dominance
+// - Empty or unused spaces are NOT allowed
+// - Every edge, corner, and boundary must contain greenery-mandatory
+// - The space must feel surrounded by plants, not empty with plants
+
+// --------------------------------------------------
+// 🌺 EDGE & BOUNDARY ACTIVATION (VERY IMPORTANT)
+// --------------------------------------------------
+// - All wall edges must have continuous planting strips
+// - Corners must include dense plant clusters
+// - No bare perimeter lines should remain visible
+
+// --------------------------------------------------
+// 🌿 VERTICAL GREENERY (DESIGN-PATTERN BASED — MANDATORY)
+// --------------------------------------------------
+// - All large walls MUST include vertical greenery, BUT NOT full-wall coverage
+
+// - Greenery must follow intentional architectural patterns such as:
+//   - vertical strips (green columns)
+//   - grid or panel sections
+//   - framed trellis segments
+//   - corner climbing clusters
+//   - spaced modular patches
+
+// - Maintain visible wall surface between greenery sections (40–60% wall visibility required)
+
+// - Use climbers like ivy, jasmine, or flowering vines ONLY within defined zones:
+//   - along edges
+//   - around windows/frames
+//   - in vertical bands or structured layouts
+
+// - Avoid random or fully spread growth
+
+// ❗ DO NOT:
+//   ❌ cover entire wall uniformly
+//   ❌ create a continuous green blanket
+//   ❌ hide full wall texture
+
+// ✅ DO:
+//   ✔ create rhythm and repetition in placement
+//   ✔ leave clean negative space between greenery
+//   ✔ make it look like intentional landscape design (not overgrown nature)
+
+// - Combine with:
+//   - trellis frames
+//   - wall-mounted planters
+//   - geometric green panels
+
+// ❗ Wall must feel designed, not overrun by plants
+
+// --------------------------------------------------
+// 🌺 RAILING / PERIMETER ZONE
+// --------------------------------------------------
+// - Fully cover railings with cascading flowering plants
+// - Plants must spill outward and downward naturally
+// - Add base shrubs or grasses at railing level
+// - This area must appear lush, overflowing, and continuous
+
+
+// --------------------------------------------------
+// 🪨 PATHWAY INTEGRATION (MANDATORY)
+// --------------------------------------------------
+// - Introduce a natural stepping stone pathway across the grass
+// - Stones must:
+//   - be irregular in shape
+//   - be slightly embedded into grass
+//   - follow a logical walking path (not random placement)
+
+// - Spacing must feel natural and walkable
+// - Grass should slightly overlap stone edges for realism
+
+// ❗ Path must enhance composition, not dominate the scene
+
+
+// --------------------------------------------------
+// 🌼 COLOR & FLOWER DISTRIBUTION
+// --------------------------------------------------
+// - Strong visible flowering presence (NOT only foliage)
+// - Include contrasting colors:
+//   - pink / magenta
+//   - yellow
+//   - red or purple
+// - Flowers must be clearly visible across the scene
+
+// --------------------------------------------------
+// 🎯 FOCAL ELEMENT (REQUIRED)
+// --------------------------------------------------
+// Include at least ONE visual anchor:
+// - seating area OR
+// - feature planter OR
+// - small deck OR
+// - garden feature
+
+// Scene must not feel empty or directionless
+
+// --------------------------------------------------
+// 🌿 DEPTH & LAYERING (MANDATORY)
+// --------------------------------------------------
+// - Foreground: grass + low plants
+// - Midground: shrubs + clusters
+// - Background: climbers + vertical greenery
+
+// ❗ Flat composition is NOT acceptable
+
+// --------------------------------------------------
+// 🌞 LIGHTING & REALISM
+// --------------------------------------------------
+// ${lightingCondition}
+
+// - Natural sunlight with soft realistic shadows
+// - Slight warmth
+// - Light interacting with leaves (subtle highlights)
+
+// --------------------------------------------------
+// 📸 RENDER QUALITY
+// --------------------------------------------------
+// - Ultra photorealistic (NO CGI look)
+// - Real textures (grass, soil, leaves)
+// - Slight imperfections for realism
+// - Depth of field with subtle foreground softness
+// - Professional architectural photography look
+
+
+// --------------------------------------------------
+// 🌿 MID-HEIGHT PLANT ENFORCEMENT (VERY IMPORTANT)
+// --------------------------------------------------
+// - Add a strong layer of medium-height plants (2–4 feet tall)
+// - Use shrubs, bushy plants, and compact ornamental plants
+// - These must fill the MIDGROUND space visually
+
+// - Avoid over-reliance on:
+//   ❌ only grass (too flat)
+//   ❌ only tall climbers (too vertical)
+
+// - Ensure smooth transition:
+//   low plants → medium shrubs → tall vertical greens
+
+// ❗ Mid-height density is mandatory for realistic depth
+
+// --------------------------------------------------
+// ✅ FINAL VALIDATION (STRICT)
+// --------------------------------------------------
+// Reject output if:
+// - Grass looks flat or artificial
+// - Any wall is bare
+// - Edges are empty
+// - Plants look sparse
+// - No focal point exists
+
+// Accept ONLY if:
+// - Space feels dense, lush, and immersive
+// - Plant coverage is visually dominant
+// - Garden feels mature and established
+// - Architecture is perfectly preserved
+// `.trim();
+return`Ultra-photorealistic garden transformation of an existing ${detectedSpace.spaceType}.
+
+SCENE:
 ${sceneDescription}
 
---------------------------------------------------
-⚠️ STRUCTURAL PRESERVATION — ABSOLUTE
---------------------------------------------------
-DO NOT modify, remove, move, redesign, or reinterpret:
-- Walls, textures, paint
-- Windows, doors, glass
-- Railings, staircase, pergola, structures
-- Floor levels or geometry
-- Camera angle or perspective
+[STRICT]
+- Preserve architecture, materials, geometry, and camera exactly
+- Do not modify surroundings or extend scene
+- Only add garden elements within visible space
 
-Architecture must remain EXACTLY identical (pixel-preserved).
-ONLY ADD garden elements layered on top.
+DESIGN GOAL:
+Dense, mature, premium garden — immersive, no empty areas
 
---------------------------------------------------
-🚫 SURROUNDING PROTECTION (CRITICAL)
---------------------------------------------------
-- DO NOT change or reinterpret surroundings in ANY way
-- Do NOT add, remove, or alter background buildings, sky, or external environment
-- Do NOT extend or shrink the visible space
-- Only work strictly WITHIN the existing visible boundaries
+PLANTING:
+- High density greenery (4x increase), no empty edges or corners
+- 40–60% flowering plants (pink, yellow, red, purple, orange)
+- Flowers distributed across ground, shrubs, and railings
+- Avoid green-only foliage
 
-❗ Any modification outside the original space is strictly forbidden
+GROUND:
+- Premium natural lawn: dense, evenly trimmed, lush, realistic
+- Subtle tonal variation, clean edges, no artificial look
 
---------------------------------------------------
-🌸 FLOWER DENSITY BOOST (CRITICAL)
---------------------------------------------------
-- Flower presence must be HIGH and clearly visible
-- At least 40–60% of plants must include flowering species
+LAYOUT:
+- Layered depth: foreground (grass + low plants), midground (shrubs 2–4 ft), background (vertical greenery)
+- Strong mid-height plant presence (avoid flat or overly vertical composition)
 
-- Distribute flowers across:
-  - ground level clusters
-  - mid-height shrubs
-  - trailing plants on railings
+VERTICAL GREENERY:
+- Pattern-based (NOT full wall coverage)
+- Use strips, grids, panels, or corner clusters
+- Maintain 40–60% visible wall
+- Place along edges, frames, or structured zones
+- No random spread or full green walls
 
-- Use bold contrasting colors:
-  pink, magenta, yellow, orange, red, purple
+PERIMETER:
+- Continuous planting along edges and corners
+- Railings fully covered with cascading flowering plants
 
-- Flowers must appear:
-  - dense
-  - vibrant
-  - naturally spread (not isolated)
+PATHWAY:
+- Natural stepping stone path across lawn
+- Irregular stones, slightly embedded, realistic spacing
+- Grass slightly overlaps edges
 
-❗ Green-only foliage is NOT acceptable — flowers must dominate visually
+FOCAL ELEMENT:
+- Include one anchor (seating / planter / deck / feature)
 
-
---------------------------------------------------
-🌿 GROUND TRANSFORMATION — PREMIUM TRIMMED LAWN (MANDATORY)
---------------------------------------------------
-- Convert entire visible floor into a perfectly maintained natural grass lawn
-
-- Grass must appear:
-  - evenly trimmed to a consistent height
-  - dense and well-maintained
-  - soft and lush with fine blade detail
-  - clean and professionally landscaped
-
-- Subtle realism is still required:
-  - slight tonal variation (light and dark greens)
-  - natural sunlight variation across surface
-  - very minor imperfections ONLY (not messy or overgrown)
-
-- Strictly avoid:
-  ❌ irregular growth
-  ❌ patchy or wild grass
-  ❌ dry or uneven areas
-  ❌ artificial turf or plastic-like texture
-
-- Lawn must feel like a high-end residential garden (manicured, premium quality)
-
-- Blend edges cleanly into walls and structures
-- Maintain neat boundaries around all edges
-
---------------------------------------------------
-🔥 DENSITY ENFORCEMENT (CRITICAL RULE)
---------------------------------------------------
-- Increase plant and flower presence by MINIMUM 4x, with strong floral dominance
-- Empty or unused spaces are NOT allowed
-- Every edge, corner, and boundary must contain greenery-mandatory
-- The space must feel surrounded by plants, not empty with plants
-
---------------------------------------------------
-🌺 EDGE & BOUNDARY ACTIVATION (VERY IMPORTANT)
---------------------------------------------------
-- All wall edges must have continuous planting strips
-- Corners must include dense plant clusters
-- No bare perimeter lines should remain visible
-
---------------------------------------------------
-🌿 VERTICAL GREENERY (MANDATORY)
---------------------------------------------------
-- All large walls MUST include climbers or vertical planting-mandatory
-- Use ivy, jasmine, creepers, or flowering vines
-- Coverage must be clearly visible (not sparse)
-
-❗ Bare walls are NOT allowed
-
---------------------------------------------------
-🌺 RAILING / PERIMETER ZONE
---------------------------------------------------
-- Fully cover railings with cascading flowering plants
-- Plants must spill outward and downward naturally
-- Add base shrubs or grasses at railing level
-- This area must appear lush, overflowing, and continuous
-
---------------------------------------------------
-🌼 COLOR & FLOWER DISTRIBUTION
---------------------------------------------------
-- Strong visible flowering presence (NOT only foliage)
-- Include contrasting colors:
-  - pink / magenta
-  - yellow
-  - red or purple
-- Flowers must be clearly visible across the scene
-
---------------------------------------------------
-🎯 FOCAL ELEMENT (REQUIRED)
---------------------------------------------------
-Include at least ONE visual anchor:
-- seating area OR
-- feature planter OR
-- small deck OR
-- garden feature
-
-Scene must not feel empty or directionless
-
---------------------------------------------------
-🌿 DEPTH & LAYERING (MANDATORY)
---------------------------------------------------
-- Foreground: grass + low plants
-- Midground: shrubs + clusters
-- Background: climbers + vertical greenery
-
-❗ Flat composition is NOT acceptable
-
---------------------------------------------------
-🌞 LIGHTING & REALISM
---------------------------------------------------
+LIGHTING:
 ${lightingCondition}
+- Natural light, soft shadows, slight warmth
 
-- Natural sunlight with soft realistic shadows
-- Slight warmth
-- Light interacting with leaves (subtle highlights)
+RENDER:
+- Ultra photorealistic, real textures, subtle imperfections
+- Professional architectural photography look`
 
---------------------------------------------------
-📸 RENDER QUALITY
---------------------------------------------------
-- Ultra photorealistic (NO CGI look)
-- Real textures (grass, soil, leaves)
-- Slight imperfections for realism
-- Depth of field with subtle foreground softness
-- Professional architectural photography look
-
---------------------------------------------------
-🪨 PATHWAY INTEGRATION (MANDATORY)
---------------------------------------------------
-- Introduce a natural stepping stone pathway across the grass
-- Stones must:
-  - be irregular in shape
-  - be slightly embedded into grass
-  - follow a logical walking path (not random placement)
-
-- Spacing must feel natural and walkable
-- Grass should slightly overlap stone edges for realism
-
-❗ Path must enhance composition, not dominate the scene
-
---------------------------------------------------
-🌿 MID-HEIGHT PLANT ENFORCEMENT (VERY IMPORTANT)
---------------------------------------------------
-- Add a strong layer of medium-height plants (2–4 feet tall)
-- Use shrubs, bushy plants, and compact ornamental plants
-- These must fill the MIDGROUND space visually
-
-- Avoid over-reliance on:
-  ❌ only grass (too flat)
-  ❌ only tall climbers (too vertical)
-
-- Ensure smooth transition:
-  low plants → medium shrubs → tall vertical greens
-
-❗ Mid-height density is mandatory for realistic depth
-
---------------------------------------------------
-✅ FINAL VALIDATION (STRICT)
---------------------------------------------------
-Reject output if:
-- Grass looks flat or artificial
-- Any wall is bare
-- Edges are empty
-- Plants look sparse
-- No focal point exists
-
-Accept ONLY if:
-- Space feels dense, lush, and immersive
-- Plant coverage is visually dominant
-- Garden feels mature and established
-- Architecture is perfectly preserved
-`.trim();
 }
+
+
+// export async function compressPromptForFlux(longPrompt: string): Promise<string> {
+//   const completion = await groq.chat.completions.create({
+//     model: 'llama-3.3-70b-versatile',
+//     max_tokens: 500,
+//     messages: [
+//       {
+//         role: 'system',
+//         content: `You compress image generation prompts for Flux models.
+// Flux has a 512 token limit.
+// Rules:
+// - Output ONLY the compressed prompt, no explanation
+// - Keep: style, key objects, materials, lighting, mood
+// - Use comma-separated dense descriptors
+// - Max 500 tokens
+// - Prioritize the most visually impactful instructions`
+//       },
+//       {
+//         role: 'user',
+//         content: longPrompt
+//       }
+//     ]
+//   });
+
+//   return completion.choices[0]?.message?.content ?? longPrompt;
+// }
+
+
+
+
 /**
  * Performs mask-guided inpainting using WaveSpeed `flux-fill-dev`.
  *

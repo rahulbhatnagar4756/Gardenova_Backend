@@ -28,6 +28,7 @@ export const createUserProfileDto = z
     zipCode: stringOptional,
     occupation: stringOptional,
     company: stringOptional,
+    contactNumber: stringOptional,
   })
   .strict(); // Prevents extra fields
 

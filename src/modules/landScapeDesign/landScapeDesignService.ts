@@ -4,6 +4,7 @@ import {
   callInpainting,
   callSegmentationAPI,
   callVisionForSceneDescription,
+  // compressPromptForFlux,
   DesignResult,
   detectSpaceType,
   uploadBufferLocal
@@ -95,7 +96,8 @@ export const processDesign = async (
   // ── Step 5: Build editing prompt ──────────────────────────────────────────
   const imagePrompt = buildImagePrompt(plan, description, detectedSpace);
   // console.log(`[6/6] Prompt: ${imagePrompt}`);
-
+  // const compressedPrmpt = await compressPromptForFlux(imagePrompt);
+  // console.log(`[6/6] Compressed Prompt: ${compressedPrmpt}`);
   // ── Step 6: Inpaint masked region only ────────────────────────────────────
   const resultUrl = await callInpainting(processedBase64, mask_base64, imagePrompt, fileName);
   // console.log(`[✅] Done: ${resultUrl}`);

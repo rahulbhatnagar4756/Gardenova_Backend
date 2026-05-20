@@ -11,6 +11,7 @@ import { leadTemplateForSuppliers } from "../../templates/leademalForSupplier";
 import { leadNotificationForProfessional } from "../../templates/LeadNotificationForProfessional";
 import { leadNotificationForUser } from "../../templates/LeadNotificationForUser";
 import { leadNotificationForAdmin } from "../../templates/leadNotificationForAdmin";
+import { sendVerificationEmailTemplate } from "../../templates/sendVerificationEmailTemplate";
 
 /**
  * Creates and configures an email transporter using Nodemailer.
@@ -380,3 +381,32 @@ export const sendLeadCreationEmailTOAdmin = async ({
     ),
   });
 }
+
+/**
+ * Sends an email verification OTP to the specified email address.
+ *
+ * This function creates an email transporter and sends a verification
+ * email containing the OTP code and its expiration time.
+ *
+ * @async
+ * @function sendVerificationEmail
+ *
+ * @param {string} email - Recipient email address.
+ * @param {string} code - Verification OTP/code to send.
+ * @param {Date} expiration - Expiration date and time of the verification code.
+ *
+ * @returns {Promise<void>} Resolves when the email is successfully sent.
+ *
+ * @throws Will throw an error if the email transporter fails
+ * to send the email.
+ */
+export const sendVerificationEmail = async (email:string, code:string, expiration:Date): Promise<void> => {
+  const transporter = createTransporter();
+  const mailOptions = {
+    from: process.env.EMAIL_FROM,
+    to: email,
+    subject: "Email Verification - Your 4-Digit Code",
+    html: sendVerificationEmailTemplate(code, expiration),
+  };
+  await transporter.sendMail(mailOptions);
+};

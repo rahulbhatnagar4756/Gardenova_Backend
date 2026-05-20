@@ -532,7 +532,7 @@ export const handlePasswordResetToken = async (
       .digest("hex");
 
     // Expiry (5 minutes)
-    const resetTokenExpiry = new Date(Date.now() + 5 * 60 * 1000);
+    const resetTokenExpiry = new Date(Date.now() + 1 * 60 * 1000);
 
     // Update DB
     await updatePasswordResetToken(user.id!, hashedToken, resetTokenExpiry);
@@ -546,7 +546,7 @@ export const handlePasswordResetToken = async (
           {
             message: `Password reset token ${isResend ? "resent" : "sent"
               } to your email`,
-            expiresIn: "5 minutes",
+            expiresIn: "1 minutes",
           },
           MESSAGES.PASSWORD_RESET_TOKEN_SENT
         )
