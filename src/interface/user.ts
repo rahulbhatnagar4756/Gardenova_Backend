@@ -14,6 +14,7 @@ export interface IUser {
   password_reset_token?: string | null;
   password_reset_expires?: Date | null;
   isdeleted?: boolean;
+  pending_email?: string | null;
   created_at?: Date;
   updated_at?: Date;
 }

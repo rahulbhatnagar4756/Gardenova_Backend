@@ -475,6 +475,29 @@ const generate4DigitCode = (): string => {
 };
 
 /**
+ * Extracts the authenticated user's ID from the request object.
+ *
+ * @param req - The authenticated request containing the user payload.
+ * @returns The user ID if present; otherwise, `null`.
+ */
+function extractUserId(req: AuthRequest): string | null {
+  return (req.user as { userId?: string } | undefined)?.userId ?? null;
+}
+/**
+ * Converts an unknown thrown value into a consistent `CustomError` object.
+ *
+ * If the value is already an instance of `Error`, it is returned as a
+ * `CustomError`. Otherwise, a generic fallback error is created.
+ *
+ * @param err - The unknown error value to normalize.
+ * @returns A normalized `CustomError` instance.
+ */
+function toCustomError(err: unknown): CustomError {
+  if (err instanceof Error) return err as CustomError;
+  return { name: "UnknownError", message: "An unknown error occurred" } as CustomError;
+}
+
+/**
  * Sends an email verification OTP to the authenticated user.
  *
  * This endpoint:
@@ -496,109 +519,114 @@ const generate4DigitCode = (): string => {
  *
  * @throws Will pass errors to Express error middleware.
  */
-export const sentEmailVarification = async (
+export const sendEmailVerification = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as { userEmail?: string } | undefined;
-
-  if (!userPayload?.userEmail) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
-
+  // ── 1. Auth guard ──────────────────────────────────────────────────────────
+  const userId = extractUserId(req);
+  if (!userId) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
-  try {
-    const user = await findUserByEmail(userPayload.userEmail);
-    if (!user) {
-      await error("Email verification failed - User not found", {
-        email: userPayload.userEmail,
-        action: "emailVerification",
-        req,
-      });
-
-      res
-        .status(HTTP_STATUS.NOT_FOUND)
-        .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
-      return;
-    }
-    if (!user.id) {
-      await error("Email verification failed - User ID missing", {
-        email: userPayload.userEmail,
-        action: "emailVerification",
-        req,
-      });
-      res
-        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-        .json(errorResponse("User ID is missing for the authenticated user"));
-      return;
-    }
-    const existingUser = await findUserByEmail(req.body.email);
-
-    if (existingUser) {
-      res
-        .status(HTTP_STATUS.BAD_REQUEST)
-        .json(errorResponse("Email is already in use by another account"));
-      return;
-    }
-
-    if (user.is_email_verified && user.email === req.body.email) {
-      res
-        .status(HTTP_STATUS.OK)
-        .json(errorResponse("Email is already verified"));
-      return;
-    }
-    const client = await getDB();
-
-    const userQuery = `
-    UPDATE users
-    SET is_email_verified = false, email = $1
-    WHERE id = $2
-    RETURNING *
-    `;
-
-    await client.query(userQuery, [
-      req.body.email,
-      user.id,
-    ]);
-
-    const verificationCode = generate4DigitCode();
-
-    // optionally set expiry (e.g., 10 minutes)
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    // TODO: save code to DB (recommended)
-    await saveEmailVerificationCode(user.id, {
-      code: verificationCode,
-      expiresAt,
-    });
-    sendVerificationEmail(req.body.email, verificationCode, expiresAt);
-    res.status(HTTP_STATUS.CREATED).json(
-      successResponse(null, "Verification code sent to email")
-    );
+ 
+  // ── 2. Validate body ───────────────────────────────────────────────────────
+  const targetEmail: string | undefined = req.body?.email?.trim().toLowerCase();
+  if (!targetEmail) {
+    res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Email is required"));
     return;
+  }
+ 
+  // Basic email format check (use a library like `validator` for production)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(targetEmail)) {
+    res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid email format"));
+    return;
+  }
+ 
+  try {
+    // ── 3. Load authenticated user ─────────────────────────────────────────
+    const user = await findUserById(userId);
+    if (!user) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+ 
+    // ── 4. Already verified with the same email? ───────────────────────────
+    if (user.is_email_verified && user.email === targetEmail) {
+      res.status(HTTP_STATUS.OK).json(successResponse(null, "Email is already verified"));
+      return;
+    }
+ 
+    // ── 5. Is the target email taken by someone else? ──────────────────────
+    const emailOwner = await findUserByEmail(targetEmail);
+    if (emailOwner && emailOwner.id !== userId) {
+      res
+        .status(HTTP_STATUS.CONFLICT)
+        .json(errorResponse("This email is already in use by another account"));
+      return;
+    }
+ 
+    const client = await getDB();
+ 
+    // ── 6. Rate-limit: reuse an unexpired, unused OTP ──────────────────────
+    //    Prevents users from spamming the endpoint and burning e-mail quota.
+    const existingOtpQuery = `
+      SELECT id, expires_at
+      FROM   email_verifications
+      WHERE  user_id   = $1
+        AND  is_used   = false
+        AND  expires_at > now()
+      ORDER  BY expires_at DESC
+      LIMIT  1
+    `;
+    const { rows: existingOtps } = await client.query(existingOtpQuery, [userId]);
+    if (existingOtps.length > 0) {
+      const remaining = Math.ceil(
+        (new Date(existingOtps[0].expires_at).getTime() - Date.now()) / 1000
+      );
+      res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json(
+        errorResponse(
+          `An OTP was already sent. Please wait ${remaining}s before requesting a new one.`
+        )
+      );
+      return;
+    }
+ 
+    // ── 7. Store pending email (do NOT overwrite live email yet) ───────────
+    //    Requires a `pending_email` column in your users table:
+    //    ALTER TABLE users ADD COLUMN pending_email TEXT;
+    const pendingEmailQuery = `
+      UPDATE users
+      SET    pending_email = $1
+      WHERE  id = $2
+    `;
+    await client.query(pendingEmailQuery, [targetEmail, userId]);
+ 
+    // ── 8. Generate OTP and persist it ────────────────────────────────────
+    const verificationCode = generate4DigitCode();
+    const expiresAt = new Date(Date.now() + 1 * 60 * 1000); // 10 minutes
+ 
+    await saveEmailVerificationCode(userId, { code: verificationCode, expiresAt });
+ 
+    // ── 9. Fire the email (intentionally not awaited — non-blocking) ───────
+    sendVerificationEmail(targetEmail, verificationCode, expiresAt);
+ 
+    res.status(HTTP_STATUS.OK).json(successResponse(null, "Verification code sent to email"));
   } catch (err: unknown) {
-    // console.log("Error in sentEmailVarification:", err);
-    const errorObj: CustomError =
-      err instanceof Error
-        ? (err as CustomError)
-        : ({
-          name: "UnknownError",
-          message: "An unknown error occurred",
-        } as CustomError);
-
-    await error("Email verification error", {
-      email: userPayload?.userEmail,
+    const errorObj = toCustomError(err);
+    await error("sendEmailVerification error", {
+      userId,
       error: errorObj.message,
       stack: errorObj.stack,
-      action: "emailVerification",
+      action: "sendEmailVerification",
       req,
     });
     next(errorObj);
   }
 };
+ 
 
 /**
  * Verifies the email verification OTP for the authenticated user.
@@ -626,84 +654,121 @@ export const verifyCode = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  // Implementation for verifying the code goes here
-  // const userPayload = req.user as { userEmail?: string } | undefined;
-  const userId = (req.user as { userId?: string } | undefined)?.userId;
-
-  // const user = await findUserByEmail(userPayload?.userEmail!);
-  // if(!userId || !user) {
-  //   res
-  //     .status(HTTP_STATUS.UNAUTHORIZED)
-
-  //     .json(errorResponse("Unauthorized request"));
-  //   return;
-  // }
-  const user = await findUserById(userId!);
-  const role = await getRoleById(userId!)
-  // if (!userPayload?.userEmail) {
-  //   res
-  //     .status(HTTP_STATUS.UNAUTHORIZED)
-  //     .json(errorResponse("Unauthorized request"));
-  //   return;
-  // }
+  // ── 1. Auth guard ──────────────────────────────────────────────────────────
+  const userId = extractUserId(req);
+  if (!userId) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
+    return;
+  }
+ 
+  // ── 2. Validate body ───────────────────────────────────────────────────────
+  const otp: string | undefined = req.body?.otp?.toString().trim();
+  if (!otp) {
+    res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("OTP is required"));
+    return;
+  }
+  if (!/^\d{4}$/.test(otp)) {
+    res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("OTP must be a 4-digit number"));
+    return;
+  }
+ 
   try {
-    const { otp } = req.body;
-    // 1. Validate OTP and mark email as verified if correct
-
-    const client = await getDB();
-    const userQuery = `
-    select * from email_verifications
-     where user_id = $1 and code = $2 and expires_at > now() and is_used = false
-    `;
-    const { rows } = await client.query(userQuery, [
-      userId,
-      otp,
-    ]);
-    if (rows.length === 0) {
-      res
-        .status(HTTP_STATUS.BAD_REQUEST)
-        .json(errorResponse("Invalid or expired verification code"));
+    // ── 3. Load user ───────────────────────────────────────────────────────
+    const user = await findUserById(userId);
+    if (!user) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
-    // Mark code as used
+ 
+    // ── 4. Already fully verified? ─────────────────────────────────────────
+    //    (pending_email check means they started a new change — let them verify)
+    if (user.is_email_verified && !user.pending_email) {
+      res.status(HTTP_STATUS.OK).json(successResponse(null, "Email is already verified"));
+      return;
+    }
+ 
+    const client = await getDB();
+ 
+    // ── 5. Look up OTP record ──────────────────────────────────────────────
+    const otpQuery = `
+      SELECT id
+      FROM   email_verifications
+      WHERE  user_id    = $1
+        AND  code       = $2
+        AND  is_used    = false
+        AND  expires_at > now()
+      LIMIT  1
+    `;
+    const { rows } = await client.query(otpQuery, [userId, otp]);
+ 
+    if (rows.length === 0) {
+      // Differentiate expired vs wrong code for better UX
+      const anyCodeQuery = `
+        SELECT expires_at, is_used
+        FROM   email_verifications
+        WHERE  user_id = $1 AND code = $2
+        LIMIT  1
+      `;
+      const { rows: anyRows } = await client.query(anyCodeQuery, [userId, otp]);
+ 
+      if (anyRows.length > 0 && anyRows[0].is_used) {
+        res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(errorResponse("This OTP has already been used. Please request a new one."));
+        return;
+      }
+      if (anyRows.length > 0 && new Date(anyRows[0].expires_at) < new Date()) {
+        res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(errorResponse("OTP has expired. Please request a new one."));
+        return;
+      }
+ 
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("Invalid OTP. Please check and try again."));
+      return;
+    }
+ 
+    // ── 6. Mark OTP as used ────────────────────────────────────────────────
     const markUsedQuery = `
-    UPDATE email_verifications
-    SET is_used = true
-      WHERE user_id = $1 AND code = $2
+      UPDATE email_verifications
+      SET    is_used = true
+      WHERE  user_id = $1 AND code = $2
     `;
     await client.query(markUsedQuery, [userId, otp]);
-    // Update user's email verification status
-    const updateUserQuery = `
-    UPDATE users
-    SET is_email_verified = true
-    WHERE id = $1
+ 
+    // ── 7. Promote pending_email → email, mark verified ───────────────────
+    const verifyQuery = `
+      UPDATE users
+      SET    email              = COALESCE(pending_email, email),
+             pending_email      = NULL,
+             is_email_verified  = true
+      WHERE  id = $1
+      RETURNING email
     `;
-    await client.query(updateUserQuery, [userId]);
-    const token = generateToken(user?.email!, role?.name || "user", userId!);
+    const { rows: updatedRows } = await client.query(verifyQuery, [userId]);
+    const verifiedEmail: string = updatedRows[0].email;
+ 
+    // ── 8. Issue fresh token (email may have changed) ──────────────────────
+    const role = await getRoleById(userId);
+    const token = generateToken(verifiedEmail, role?.name ?? "user", userId);
+ 
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(token, "Email verified successfully"));
   } catch (err: unknown) {
-    const errorObj: CustomError =
-      err instanceof Error
-        ? (err as CustomError)
-        : ({
-          name: "UnknownError",
-          message: "An unknown error occurred",
-        }
-        );
-
-    // await error("Email verification error", {
-    //   email: userPayload?.userEmail,
-    //   error: errorObj.message,
-    //   stack: errorObj.stack,
-    //   action: "verifyCode",
-    //   req,
-    // });
+    const errorObj = toCustomError(err);
+    await error("verifyCode error", {
+      userId,
+      error: errorObj.message,
+      stack: errorObj.stack,
+      action: "verifyCode",
+      req,
+    });
     next(errorObj);
   }
 };
-
 
 
 
@@ -1052,7 +1117,8 @@ export const addPasswordForSSOUser = async (
 
     const {new_password} = req.body;
     if (!new_password || typeof new_password !== "string" || new_password.length < 6) {
-      res        .status(HTTP_STATUS.BAD_REQUEST)
+      res        
+        .status(HTTP_STATUS.BAD_REQUEST)
         .json(errorResponse("New password must be at least 6 characters long"));
       return;
     }

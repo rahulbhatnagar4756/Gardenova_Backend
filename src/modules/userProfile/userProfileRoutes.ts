@@ -1,7 +1,8 @@
 import { Router } from "express";
 import {
+  addPasswordForSSOUser,
   getCurrentUserProfile,
-  sentEmailVarification,
+  sendEmailVerification,
   softDeleteUserProfile,
   updateUserProfile,
   verifyCode,
@@ -272,7 +273,7 @@ router.patch(
 "/sentemailvarification",
 auth,
 // validateRequest(verifyEmailValidation),
-sentEmailVarification
+sendEmailVerification
 )
 
 /**
@@ -340,3 +341,64 @@ verifyCode
 )
 
 export default router;
+
+/**
+ * @swagger
+ * /api/v1/userProfile/addPasswordforsso:
+ *   patch:
+ *     summary: Add password for SSO user
+ *     description: Allows an authenticated SSO user (who does not already have a password) to set a local password.
+ *     tags:
+ *       - Email Verification
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - new_password
+ *             properties:
+ *               new_password:
+ *                 type: string
+ *                 minLength: 6
+ *                 example: "MySecurePass123"
+ *     responses:
+ *       200:
+ *         description: Password added successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Password added successfully
+ *                 data:
+ *                   type: null
+ *       400:
+ *         description: Bad request (validation error or password already exists)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Password already exists for this user
+ *       401:
+ *         description: Unauthorized (missing or invalid auth token)
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+router.patch("/addPasswordforsso", auth, addPasswordForSSOUser);

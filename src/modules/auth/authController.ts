@@ -127,6 +127,7 @@ export const register = async (
       password,
       roleId: role.id,
       phoneNumber,
+      isEmailVerified: true,
     });
 
     //  Create empty user profile (if you have a `user_profiles` table)
