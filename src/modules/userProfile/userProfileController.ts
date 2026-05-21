@@ -440,7 +440,7 @@ export const updateUserProfile = async (
         : ({
           name: "UnknownError",
           message: "An unknown error occurred",
-        } as CustomError);
+        } );
 
     await error("Profile updation error", {
       email: userPayload?.userEmail,
@@ -451,6 +451,8 @@ export const updateUserProfile = async (
     });
 
     next(errorObj);
+    // console.log("Error in updateUserProfile:", err);
+    next(err);
   }
 };
 

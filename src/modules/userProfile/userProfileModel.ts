@@ -1,7 +1,6 @@
-import { ZodError } from "zod";
-import { createUserProfileDto } from "../../dto/userProfileDto";
 import { getDB } from "../../core/config/db";
 import { IUserProfile } from "../../interface/userProfile";
+import { updateUserProfileValidation } from "./userProfileValidations";
 
 /**
  * Fetches a user profile record by its ID.
@@ -35,91 +34,104 @@ export async function updateValidatedUserProfile(
   const client = await getDB();
 
   try {
-    // Validate the input data using Zod schema
-    const parsedData = createUserProfileDto.parse(data);
+    const { error: validationError, value: parsedData } =
+      updateUserProfileValidation.validate(data, {
+        abortEarly: false,
+        stripUnknown: true,
+      });
 
-    // Update query — only set updated_at, do not touch created_at
-    const query = `
-      UPDATE userprofiles
-      SET
-        profile_image = $1,
-        date_of_birth = $2,
-        gender = $3,
-        bio = $4,
-        street = $5,
-        city = $6,
-        state = $7,
-        country = $8,
-        zip_code = $9,
-        occupation = $10,
-        company = $11,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $12
-      RETURNING 
-        id,
-        user_id,
-        profile_image,
-        date_of_birth,
-        gender,
-        bio,
-        street,
-        city,
-        state,
-        country,
-        zip_code,
-        occupation,
-        company,
-        updated_at;
-    `;
+    if (validationError) {
+      throw new Error(validationError.details.map((d) => d.message).join(", "));
+    }
 
-    const values = [
-      parsedData.profileImage,
-      parsedData.dateOfBirth,
-      parsedData.gender,
-      parsedData.bio,
-      parsedData.street,
-      parsedData.city,
-      parsedData.state,
-      parsedData.country,
-      parsedData.zipCode,
-      parsedData.occupation,
-      parsedData.company,
-      profileId,
-    ];
-
-    const result = await client.query<IUserProfile>(query, values);
-
-    if (result.rows.length === 0) return null;
-
-    const row = result.rows[0];
-
-
-    const userQuery = `
-      UPDATE users
-      SET phone_number = $1
-      name = $2,
-      updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-    `;
-
-    await client.query(userQuery, [
-      parsedData.contactNumber,
-      parsedData.name,
-      userId,
-    ]);
-
-    // Normalize timestamp fields to string
-    const normalizedRow = {
-      ...row,
-      updated_at:
-        row?.updatedAt instanceof Date
-          ? row.updatedAt.toISOString()
-          : row?.updatedAt,
+    // ── Profile table update ───────────────────────────────────────────────
+    const profileFieldMap: Record<string, string> = {
+      profile_image: "profileImage",
+      date_of_birth: "dateOfBirth",
+      gender: "gender",
+      bio: "bio",
+      street: "street",
+      city: "city",
+      state: "state",
+      country: "country",
+      zip_code: "zipCode",
+      occupation: "occupation",
+      company: "company",
     };
 
-    return normalizedRow as unknown as IUserProfile;
+    const profileSetClauses: string[] = [];
+    const profileValues: unknown[] = [];
+    let paramIndex = 1;
+
+    for (const [column, dtoKey] of Object.entries(profileFieldMap)) {
+      if (parsedData[dtoKey] !== undefined) {
+        profileSetClauses.push(`${column} = $${paramIndex++}`);
+        profileValues.push(parsedData[dtoKey]);
+      }
+    }
+
+    let updatedRow: IUserProfile | null = null;
+
+    if (profileSetClauses.length > 0) {
+      profileSetClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+      profileValues.push(profileId);
+
+      const profileQuery = `
+        UPDATE userprofiles
+        SET ${profileSetClauses.join(", ")}
+        WHERE id = $${paramIndex}
+        RETURNING
+          id, user_id, profile_image, date_of_birth, gender, bio,
+          street, city, state, country, zip_code,
+          occupation, company, updated_at;
+      `;
+
+      const result = await client.query<IUserProfile>(profileQuery, profileValues);
+      if (result.rows.length === 0) return null;
+
+      const row = result.rows[0];
+      updatedRow = {
+        ...row,
+        updated_at:
+          row?.updatedAt instanceof Date
+            ? row.updatedAt.toISOString()
+            : row?.updatedAt,
+      } as unknown as IUserProfile;
+    }
+
+    // ── Users table update ─────────────────────────────────────────────────
+    if (parsedData.contactNumber !== undefined || parsedData.name !== undefined) {
+      const userSetClauses: string[] = [];
+      const userValues: unknown[] = [];
+      let userParamIndex = 1;
+
+      if (parsedData.contactNumber !== undefined) {
+        userSetClauses.push(`phone_number = $${userParamIndex++}`);
+        userValues.push(parsedData.contactNumber);
+      }
+
+      if (parsedData.name !== undefined) {
+        userSetClauses.push(`name = $${userParamIndex++}`);
+        userValues.push(parsedData.name);
+      }
+
+      userSetClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+      userValues.push(userId);
+
+      const userQuery = [
+        "UPDATE users",
+        "SET " + userSetClauses.join(", "),
+        "WHERE id = $" + userParamIndex,
+      ].join(" ");
+
+      // console.log("USER QUERY =>", userQuery);
+      // console.log("USER VALUES =>", userValues);
+
+      await client.query(userQuery, userValues);
+    }
+
+    return updatedRow;
   } catch (err) {
-    if (err instanceof ZodError) throw err;
     throw err;
   }
 }
@@ -182,7 +194,7 @@ interface IEmailVerification {
  *   expiresAt: new Date(Date.now() + 10 * 60 * 1000),
  * });
  */
-export const saveEmailVerificationCode= async (userId: string, body: IEmailVerification): Promise<void> => {
+export const saveEmailVerificationCode = async (userId: string, body: IEmailVerification): Promise<void> => {
   const client = await getDB();
   await client.query(
     `INSERT INTO email_verifications (user_id, code,expires_at,is_Used) VALUES ($1, $2, $3,$4)`,

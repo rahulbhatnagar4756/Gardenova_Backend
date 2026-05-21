@@ -3,6 +3,7 @@ import { getDB } from "../../core/config/db";
 import { getSignedFileUrl } from "../../core/services/s3UploadService";
 import { createPlantDto, updatePlantDto } from "../../dto/plantDto";
 import config from "../../core/config/env";
+import type { AxiosError } from "axios";
 import {
   HealthIssue,
   IdentifyPlantPayload,
@@ -582,9 +583,10 @@ export const identifyPlantService = async (
     longitude: body.longitude ?? 0,
     similar_images: body.similar_images ?? true,
   };
+  try {
 
   const result: PlantIDApiResponse = await identifyPlantFromPlantID(payload);
-
+  
   const topSuggestion = result.result.classification.suggestions[0];
 
   const plantInfo = topSuggestion
@@ -637,4 +639,17 @@ export const identifyPlantService = async (
     },
     GARDENOVASolutions,
   };
+  }  catch (error: unknown) {
+  const axiosError = error as AxiosError;
+
+  if (axiosError?.response?.status === 429) {
+    const err = new Error("Rate limit exceeded || quota reached.");
+    (err as Error & { statusCode?: number }).statusCode = 429;
+    throw err;
+  }
+
+  throw error instanceof Error
+    ? error
+    : new Error("Unknown error");
+}
 };

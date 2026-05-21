@@ -338,10 +338,14 @@ export const diagnosePlantController = async (
   try {
     const apiResponse = await identifyPlantService(req.body);
 
-    res
+    // if(apiResponse.status === 200){
+       res
       .status(HTTP_STATUS.OK)
       .json(successResponse(apiResponse, "Plant diagnosed successfully"));
+    // }
+   
   } catch (error: unknown) {
+    // console.log("Error in diagnosePlantController:", error);
     const err = error instanceof Error ? error.message : "Unknown error";
     res.status(500).json({
       success: false,
