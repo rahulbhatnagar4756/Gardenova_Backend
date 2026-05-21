@@ -6,7 +6,7 @@ import {
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import { error, warn } from "../../core/utils/logger";
 import { CustomError } from "../../interface/Error";
-import { findUserByEmail, findUserById, getRoleById } from "../auth/authRepository";
+import { findUserByEmail, findUserById, getRoleById, hashPassword } from "../auth/authRepository";
 import { getDB } from "../../core/config/db";
 import { IFullUserProfile, IUserProfileRow } from "../../interface/userProfile";
 import {
@@ -108,6 +108,9 @@ export const getCurrentUserProfile = async (
       name: user.name ?? null,
       email: user.email ?? null,
       contactNumber: user.phone_number ?? null,
+      is_email_verified: user.is_email_verified ?? false,
+      // eslint-disable-next-line eqeqeq
+      is_sso_user: user.password == null, // If password is null, it's likely an SSO user
 
       // Convert stored relative path → accessible URL
       // e.g. "uploads/Users/ProfileImages/123.jpg"
@@ -530,7 +533,14 @@ export const sentEmailVarification = async (
         .json(errorResponse("User ID is missing for the authenticated user"));
       return;
     }
+    const existingUser = await findUserByEmail(req.body.email);
 
+    if (existingUser) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("Email is already in use by another account"));
+      return;
+    }
 
     if (user.is_email_verified && user.email === req.body.email) {
       res
@@ -562,7 +572,7 @@ export const sentEmailVarification = async (
       code: verificationCode,
       expiresAt,
     });
-     sendVerificationEmail(req.body.email, verificationCode, expiresAt);
+    sendVerificationEmail(req.body.email, verificationCode, expiresAt);
     res.status(HTTP_STATUS.CREATED).json(
       successResponse(null, "Verification code sent to email")
     );
@@ -626,7 +636,7 @@ export const verifyCode = async (
   //     .json(errorResponse("Unauthorized request"));
   //   return;
   // }
-  const user  = await findUserById(userId!);
+  const user = await findUserById(userId!);
   const role = await getRoleById(userId!)
   // if (!userPayload?.userEmail) {
   //   res
@@ -667,7 +677,7 @@ export const verifyCode = async (
     WHERE id = $1
     `;
     await client.query(updateUserQuery, [userId]);
-    const token = generateToken( user?.email! ,role?.name || "user",  userId!);
+    const token = generateToken(user?.email!, role?.name || "user", userId!);
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(token, "Email verified successfully"));
@@ -678,7 +688,7 @@ export const verifyCode = async (
         : ({
           name: "UnknownError",
           message: "An unknown error occurred",
-        } 
+        }
         );
 
     // await error("Email verification error", {
@@ -969,3 +979,125 @@ export const softDeleteUserProfile = async (
     next(errorObj);
   }
 }
+
+/**
+ * Adds a password for an authenticated SSO user who does not already
+ * have a password set in the system.
+ *
+ * This controller:
+ * - Validates the authenticated user
+ * - Checks whether the user exists
+ * - Ensures the user has no existing password
+ * - Validates the new password input
+ * - Hashes the password securely
+ * - Updates the user's password in the database
+ * - Logs errors and warnings for debugging and monitoring
+ *
+ * @async
+ * @function addPasswordForSSOUser
+ *
+ * @param {AuthRequest} req - Express request object containing authenticated user data and request body.
+ * @param {Response} res - Express response object used to send API responses.
+ * @param {NextFunction} next - Express middleware next function for error handling.
+ *
+ * @returns {Promise<void>} Sends a success or error response.
+ *
+ * @throws {Error} Passes unexpected errors to Express error middleware.
+ */
+export const addPasswordForSSOUser = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const userPayload = req.user as { userEmail?: string } | undefined;
+
+  if (!userPayload?.userEmail) {
+    res
+      .status(HTTP_STATUS.UNAUTHORIZED)
+      .json(errorResponse("Unauthorized request"));
+    return;
+  }
+  try {
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      await error("Add password failed - User not found", {
+        email: userPayload.userEmail,
+        action: "addPasswordForSSOUser",
+        req,
+      });
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+    if (!user.id) {
+      await error("Add password failed - User ID missing", {
+        email: userPayload.userEmail,
+        action: "addPasswordForSSOUser",
+        req,
+      });
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(errorResponse("User ID is missing for the authenticated user"));
+      return;
+    }
+    if (user.password) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("Password already exists for this user"));
+      return;
+    }
+
+    const {new_password} = req.body;
+    if (!new_password || typeof new_password !== "string" || new_password.length < 6) {
+      res        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("New password must be at least 6 characters long"));
+      return;
+    }
+
+    const pawwsordhashed = await hashPassword(new_password);
+
+    const client = await getDB();
+    const updateQuery = `
+    UPDATE users
+    SET password = $1
+    WHERE id = $2
+    RETURNING id
+    `;
+    const { rowCount } = await client.query(updateQuery, [
+      pawwsordhashed,
+      user.id,
+    ]);
+    if (rowCount === 0) {
+      await warn("Add password failed - User not found during update", {
+        email: userPayload.userEmail,
+        userId: user.id,
+        action: "addPasswordForSSOUser",
+        req,
+      });
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse("User not found during password update"));
+      return;
+    }
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(null, "Password added successfully"));
+  } catch (err: unknown) {
+    const errorObj: CustomError =
+      err instanceof Error
+        ? (err as CustomError)
+        : ({
+          name: "UnknownError",
+          message: "An unknown error occurred",
+        } as CustomError);
+    await error("Add password error", {
+      email: userPayload?.userEmail,
+      error: errorObj.message,
+      stack: errorObj.stack,
+      action: "addPasswordForSSOUser",  
+      req,
+    });
+    next(errorObj);
+  }
+};

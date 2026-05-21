@@ -3,7 +3,9 @@ export interface IFullUserProfile {
   name: string | null;
   email: string | null;
   contactNumber: string | null;
+  is_email_verified: boolean; // ✅ added is_email_verified to the full profile interface
   profileImage: string | null;
+  is_sso_user: boolean; // ✅ added is_sso_user to indicate if the user is an SSO user
   dateOfBirth: Date | string | null | undefined;
   gender: "male" | "female" | "other" | null;
   bio: string | null;

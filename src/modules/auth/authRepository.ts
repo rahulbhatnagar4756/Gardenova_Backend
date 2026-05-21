@@ -12,7 +12,7 @@ import { AppleJwtPayload } from "../../interface/auth";
  * @param password - The password to hash
  * @returns A promise that resolves to the hashed password or undefined if no password is provided
  */
-async function hashPassword(password?: string): Promise<string | undefined> {
+export async function hashPassword(password?: string): Promise<string | undefined> {
   if (!password) return undefined;
   return bcrypt.hash(password, 12);
 }

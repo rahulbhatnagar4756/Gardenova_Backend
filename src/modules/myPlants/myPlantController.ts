@@ -5,6 +5,7 @@ import { errorResponse, successResponse } from "../../core/utils/responseFormatt
 import { HTTP_STATUS } from "../../core/utils/constants";
 import { findUserByEmail } from "../auth/authRepository";
 import { addPlantToUserService, 
+    deleteUserPlantService, 
     getAllPlantsAdminService, 
     getAllPlantsService, 
     getUserPlantByIdService, 
@@ -551,6 +552,74 @@ export const getAllPlantsAdmin = async (
             return;
         }
 
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(
+            errorResponse("Something went wrong", {
+                details: (err as Error).message,
+            })
+        );
+        next(err);
+    }
+};
+
+/**
+ * Deletes a user's plant by its ID.
+ *
+ * This controller:
+ * - Validates the authenticated user
+ * - Ensures the user exists
+ * - Verifies the user role is "User"
+ * - Validates the `userPlantId` route parameter
+ * - Calls the service to delete the plant
+ *
+ * @async
+ * @function deleteUserPlantController
+ *
+ * @param {AuthRequest} req - Express request object containing authenticated user data and route params.
+ * @param {Response} res - Express response object used to send API responses.
+ * @param {NextFunction} next - Express next middleware function.
+ *
+ * @returns {Promise<void>} Returns a JSON response with success or error details.
+ *
+ * @throws {Error} Returns a BAD_REQUEST response if deletion fails with a known error.
+ */
+export const deleteUserPlantController= async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    const userPayload = req.user as AuthUserPayload | undefined;
+    if (!userPayload?.userEmail) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+        return;
+    }
+    const user = await findUserByEmail(userPayload.userEmail);
+
+    if (!user) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+        return;
+    }
+    if (userPayload.role !== "User") {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized Role"));
+        return;
+    }
+
+    try {
+        const userPlantId = req.params.userPlantId;
+        if (!userPlantId) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("User Plant ID is required"));
+            return;
+        }
+        await deleteUserPlantService(user.id!, userPlantId);
+        res.status(HTTP_STATUS.OK).json(successResponse(
+            null,
+            "Plant deleted successfully"
+        ));
+    }
+    catch (err) {
+        if (err instanceof Error) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+            return;
+        }
         res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(
             errorResponse("Something went wrong", {
                 details: (err as Error).message,

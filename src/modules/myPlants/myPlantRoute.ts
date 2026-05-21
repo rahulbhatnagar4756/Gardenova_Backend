@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
 import { reminderValidation } from "./myPlantValidation";
 import multer from "multer";
@@ -1092,5 +1092,82 @@ router.post("/import", upload.single("file"), importPlantsController);
  *         description: Internal server error
  */
 router.get("/admin/getAllPlants", auth, getAllPlantsAdmin);
+
+
+/**
+ * @swagger
+ * /api/v1/allplants/deletePlant/{userPlantId}:
+ *   delete:
+ *     summary: Delete a user's plant
+ *     description: Deletes a plant associated with the authenticated user.
+ *     tags:
+ *       - [My Plants]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userPlantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The ID of the user plant to delete
+ *     responses:
+ *       200:
+ *         description: Plant deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Plant deleted successfully
+ *                 data:
+ *                   nullable: true
+ *                   example: null
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: User Plant ID is required
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Unauthorized
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Something went wrong
+ */
+router.delete("/deletePlant/:userPlantId", auth, deleteUserPlantController);
  
 export default router;

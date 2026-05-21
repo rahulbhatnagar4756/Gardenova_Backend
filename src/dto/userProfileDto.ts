@@ -29,6 +29,7 @@ export const createUserProfileDto = z
     occupation: stringOptional,
     company: stringOptional,
     contactNumber: stringOptional,
+    name: stringOptional,
   })
   .strict(); // Prevents extra fields
 

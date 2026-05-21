@@ -38,6 +38,9 @@ export const createUserProfileValidation: ObjectSchema = Joi.object({
   contactNumber: Joi.string().trim().allow("", null).optional().messages({
     "string.base": "Contact number must be a string",
   }),
+  name: Joi.string().max(255).trim().allow("", null).optional().messages({
+    "string.max": "Name cannot exceed 255 characters",
+  }),
 });
 
 export const updateUserProfileValidation: ObjectSchema =

@@ -97,11 +97,14 @@ export async function updateValidatedUserProfile(
     const userQuery = `
       UPDATE users
       SET phone_number = $1
-      WHERE id = $2
+      name = $2,
+      updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
     `;
 
     await client.query(userQuery, [
       parsedData.contactNumber,
+      parsedData.name,
       userId,
     ]);
 

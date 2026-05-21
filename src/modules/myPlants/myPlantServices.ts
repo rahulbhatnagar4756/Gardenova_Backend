@@ -1628,3 +1628,36 @@ export const getAllPlantsAdminService = async (
     };
 };
 
+/**
+ * Deletes a plant belonging to a specific user.
+ *
+ * This service:
+ * - Connects to the database
+ * - Deletes the plant record from `user_plants`
+ * - Ensures the plant belongs to the provided user
+ * - Throws an error if no matching plant is found
+ *
+ * @async
+ * @function deleteUserPlantService
+ *
+ * @param {string} userId - The ID of the authenticated user.
+ * @param {string} userPlantId - The ID of the plant to delete.
+ *
+ * @returns {Promise<void>} Resolves when the plant is successfully deleted.
+ *
+ * @throws {Error} Throws an error if the plant does not exist for the user.
+ */
+export const deleteUserPlantService = async (
+    userId: string,
+    userPlantId: string
+): Promise<void> => {
+    const pool = await getDB();
+    const result = await pool.query(
+        `DELETE FROM user_plants WHERE plant_id = $1 AND user_id = $2`,
+        [userPlantId, userId]
+    );
+    if (result.rowCount === 0) {
+        throw new Error("Plant not found for this user");
+    }
+};
+
