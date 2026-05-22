@@ -216,7 +216,7 @@ export const login = async (
 
     if (!user || !user.password) {
       await warn(
-        "Login failed - user not found or missing password",
+        "Invalid email or password. Please try again.",
         { email },
         { source: "auth.login", req }
       );

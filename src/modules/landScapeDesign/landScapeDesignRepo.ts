@@ -1650,7 +1650,7 @@ export async function callInpainting(
       num_inference_steps: 40,
       guidance_scale: 15,   // ← lowered: lets model respect original image more
       // strength: 0.75,
-      num_images: 4,
+      num_images: 1,
       output_format: 'jpeg',
       seed: -1,
     }),

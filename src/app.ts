@@ -85,7 +85,7 @@ app.use("/api/v1/admin", leadsRoutes);
 // Dashboard Routes
 app.use("/api/v1/admin", dashboardRoutes);
 // Subscription Plans
-app.use("/api/v1/subscription", subscriptionRoutes);
+app.use("/api/v1/plans", subscriptionRoutes);
 //external Links Routes
 app.use("/api/v1/externalLinks", externalLinksRoutes);
 // Professional Routes

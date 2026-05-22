@@ -60,9 +60,10 @@ export const processDesign = async (
     : Buffer.from(image_base64, 'base64');
 
   const processedBuffer = await sharp(rawBuffer)
-    .resize(1024, 1024, { fit: 'inside' })
-    .jpeg({ quality: 85 })
-    .toBuffer();
+  .rotate()                              // ← strips EXIF, bakes orientation into pixels
+  .resize(1024, 1024, { fit: 'inside' })
+  .jpeg({ quality: 85 })
+  .toBuffer();
 
   const processedBase64 = `data:image/jpeg;base64,${processedBuffer.toString('base64')}`;
 
