@@ -61,7 +61,8 @@ app.use(express.urlencoded({ extended: true }));
 // });
 // app.use(limiter);
 // User Authentication Routes
-// createPlantCareTables();
+// createPlansTable();
+// createPaymentsTable();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);

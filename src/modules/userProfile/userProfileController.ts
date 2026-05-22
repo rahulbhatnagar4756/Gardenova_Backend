@@ -747,12 +747,13 @@ export const verifyCode = async (
       WHERE  id = $1
       RETURNING email
     `;
-    const { rows: updatedRows } = await client.query(verifyQuery, [userId]);
-    const verifiedEmail: string = updatedRows[0].email;
+     await client.query(verifyQuery, [userId]);
+    // const verifiedEmail: string = updatedRows[0].email;
  
     // ── 8. Issue fresh token (email may have changed) ──────────────────────
-    const role = await getRoleById(userId);
-    const token = generateToken(verifiedEmail, role?.name ?? "user", userId);
+    const users = await findUserById(userId); // Reload user to get latest email & role
+    const role = await getRoleById(users?.role_id!);
+    const token = generateToken(users?.email!, role?.name!, users?.id!);
  
     res
       .status(HTTP_STATUS.OK)
