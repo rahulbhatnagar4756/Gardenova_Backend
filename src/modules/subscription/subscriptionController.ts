@@ -4,7 +4,7 @@ import { AuthRequest } from "../../interface/auth";
 import { Response, NextFunction } from "express";
 import { findUserByEmail } from "../auth/authRepository";
 import { error } from "../../core/utils/logger";
-import { getAllPlansWithDetailService, updatePlanDetailService } from "./subscriptionRepository";
+import { createRazorpayOrderService, getAllPlansWithDetailService, getPlanDetailsByIdServices, updatePlanDetailService, verifyRazorpayPaymentService } from "./subscriptionRepository";
 
 /**
  * Retrieve all subscription plans with their details.
@@ -33,7 +33,7 @@ import { getAllPlansWithDetailService, updatePlanDetailService } from "./subscri
  * - 404 if the user is not found
  * - 500 if fetching subscription plans fails
  */
-export const getAllPlanswithDetails = async (req: AuthRequest, res: Response, next: NextFunction):Promise<void> => {
+export const getAllPlanswithDetails = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
 
     const userPayload = req.user as { userEmail?: string } | undefined;
 
@@ -115,9 +115,9 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response, ne
  * - 404 if the user is not found
  * - 500 for unexpected server errors
  */
-export const updatePlanDetails =async (req:AuthRequest, res:Response, next:NextFunction):Promise<void> => {
+export const updatePlanDetails = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
 
-    const userPayload = req.user as { userEmail?: string, role?:string } | undefined;
+    const userPayload = req.user as { userEmail?: string, role?: string } | undefined;
 
     if (!userPayload?.userEmail) {
         res
@@ -126,7 +126,7 @@ export const updatePlanDetails =async (req:AuthRequest, res:Response, next:NextF
         return;
     }
 
-    if(userPayload.role !== "Admin"){
+    if (userPayload.role !== "Admin") {
         res
             .status(HTTP_STATUS.FORBIDDEN)
             .json(errorResponse("Forbidden request - Admins only"));
@@ -147,7 +147,7 @@ export const updatePlanDetails =async (req:AuthRequest, res:Response, next:NextF
             return;
         }
         const { planId } = req.params;
-        const{data} = req.body;
+        const { data } = req.body;
 
         await updatePlanDetailService(planId!, data);
         // Placeholder for actual subscription plan update logic
@@ -169,3 +169,298 @@ export const updatePlanDetails =async (req:AuthRequest, res:Response, next:NextF
     }
     next();
 }
+/**
+ * Retrieves subscription plan details by plan ID.
+ *
+ * This controller:
+ * - Validates authenticated user access
+ * - Checks if the user exists
+ * - Fetches subscription plan details using the provided plan ID
+ * - Returns the subscription plan data
+ *
+ * @param req - Express request object containing authenticated user info and route params
+ * @param req.params.planId - Subscription plan ID
+ * @param res - Express response object
+ * @param next - Express next middleware function
+ *
+ * @returns JSON response with subscription plan details
+ *
+ * @throws 401 - If user is unauthorized
+ * @throws 404 - If user is not found
+ * @throws 500 - If an internal server error occurs
+ */
+export const getPlanDetailsById = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    const userPayload = req.user as { userEmail?: string } | undefined;
+
+    if (!userPayload?.userEmail) {
+        res.status(HTTP_STATUS.UNAUTHORIZED)
+            .json(errorResponse("Unauthorized request"));
+        return;
+    }
+
+    try {
+        const user = await findUserByEmail(userPayload.userEmail);
+        if (!user) {
+            await error("Profile retrieval failed - User not found", {
+                email: userPayload.userEmail,
+                action: "getPlanDetailsById",
+                req,
+            });
+            res
+                .status(HTTP_STATUS.NOT_FOUND)
+
+                .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+            return;
+        }
+
+        const { planId } = req.params;
+        // Placeholder for actual subscription plan retrieval logic
+        const subscriptionPlan = await getPlanDetailsByIdServices(planId!);
+
+
+        res
+            .status(HTTP_STATUS.OK)
+            .json(successResponse(subscriptionPlan, "Subscription plan details retrieved successfully"));
+        return;
+    }
+    catch (err) {
+        await error("Error fetching subscription plan details", {
+            email: userPayload.userEmail,
+            action: "getPlanDetailsById",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while fetching subscription plan details"));
+    }
+
+    next();
+
+}
+
+
+/**
+ * Creates a Razorpay order for subscription/payment processing.
+ *
+ * This controller:
+ * - Validates authenticated user access
+ * - Checks if the user exists in the database
+ * - Creates a Razorpay order using the provided subscription/payment details
+ * - Returns the created Razorpay order response
+ *
+ * @param req - Express request object containing authenticated user and request body
+ * @param req.body.planId - Subscription plan ID
+ * @param req.body.billing_period - Subscription billing period (monthly/yearly)
+ * @param req.body.amount - Payment amount
+ * @param req.body.currency - Payment currency (e.g. INR)
+ * @param res - Express response object
+ * @param next - Express next middleware function
+ *
+ * @returns JSON response with Razorpay order details
+ *
+ * @throws 401 - If user is unauthorized
+ * @throws 404 - If user is not found
+ * @throws 500 - If an internal server error occurs while creating the order
+ */
+export const createRazorpayOrder = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const userPayload = req.user as { userEmail?: string } | undefined;
+
+  if (!userPayload?.userEmail) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
+    return;
+  }
+
+  try {
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      await error("Profile retrieval failed - User not found", {
+        email: userPayload.userEmail,
+        action: "createRazorpayOrder",
+        req,
+      });
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+
+    const { planId, billing_period, amount, currency } = req.body;
+    const createOrderResult = await createRazorpayOrderService(
+      amount,
+      currency,
+      billing_period,
+      user.id!,
+      planId
+    );
+
+    res.status(HTTP_STATUS.OK).json(successResponse(createOrderResult, "Razorpay order created successfully"));
+  } catch (err) {
+    await error("Error creating Razorpay order", {
+      email: userPayload.userEmail,
+      action: "createRazorpayOrder",
+      req,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res
+      .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+      .json(errorResponse("An error occurred while creating Razorpay order"));
+  }
+  next();
+};
+
+
+/**
+ * Verifies a Razorpay payment and activates the user's subscription.
+ *
+ * This controller:
+ * - Validates authenticated user access
+ * - Checks if the user exists in the database
+ * - Verifies Razorpay payment signature
+ * - Activates or updates the user's subscription after successful verification
+ * - Returns payment verification status
+ *
+ * @param req - Express request object containing authenticated user and payment details
+ * @param req.body.paymentId - Razorpay payment ID
+ * @param req.body.orderId - Razorpay order ID
+ * @param req.body.signature - Razorpay payment signature
+ * @param res - Express response object
+ * @param next - Express next middleware function
+ *
+ * @returns JSON response with payment verification result
+ *
+ * @throws 401 - If user is unauthorized
+ * @throws 404 - If user is not found
+ * @throws 400 - If payment verification fails
+ * @throws 500 - If an internal server error occurs during verification
+ */
+export const verifyRazorpayPayment = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const userPayload = req.user as { userEmail?: string } | undefined;
+
+  if (!userPayload?.userEmail) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
+    return;
+  }
+
+  try {
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      await error("Profile retrieval failed - User not found", {
+        email: userPayload.userEmail,
+        action: "verifyRazorpayPayment",
+        req,
+      });
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+
+    const { paymentId, orderId, signature } = req.body;
+
+    // ✅ userId, planId, billing_period come from the order notes — not client body
+    const verificationResult = await verifyRazorpayPaymentService(
+      paymentId,
+      orderId,
+      signature
+    );
+
+    if (!verificationResult.success) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(verificationResult.message));
+      return;
+    }
+
+    res.status(HTTP_STATUS.OK).json(successResponse(null, verificationResult.message));
+    return;
+  } catch (err) {
+    await error("Error verifying Razorpay payment", {
+      email: userPayload.userEmail,
+      action: "verifyRazorpayPayment",
+      req,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res
+      .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+      .json(errorResponse("An error occurred while verifying Razorpay payment"));
+  }
+  next();
+};
+
+
+
+// export const webhookController = async (req:AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+
+//     const userPayload = req.user as { userEmail?: string } | undefined;
+//     const user = await findUserByEmail(userPayload?.userEmail || "");
+
+//     if(!user) {
+//         await error("Webhook received from Razorpay - User not found", {
+//             email: userPayload?.userEmail,
+//             action: "webhookController",
+//             req,
+//         });
+//         res.status(HTTP_STATUS.NOT_FOUND)
+//             .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+//         return;
+//     }
+
+//     try {
+//         const expectedSignature = crypto
+//     .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+//     .update(req.body)
+//     .digest('hex');
+
+//   if (expectedSignature !== req.headers['x-razorpay-signature']) {
+//      res.status(400).json({ error: 'Invalid webhook signature' });
+//      return;
+//   }
+
+//   const event = JSON.parse(req.body);
+
+//   if (event.event === 'payment.captured') {
+//     const payment = event.payload.payment.entity;
+
+//     // notes were saved during order creation (step 1)
+//     const { user_id, plan_id, billing_period } = payment.notes;
+
+//     const expires_at = new Date();
+//     billing_period === 'yearly'
+//       ? expires_at.setFullYear(expires_at.getFullYear() + 1)
+//       : expires_at.setMonth(expires_at.getMonth() + 1);
+//     const db = await connectDB();
+//     await db.query(
+//       `INSERT INTO subscriptions 
+//         (user_id, plan_id, billing_period, status, started_at, expires_at)
+//        VALUES ($1, $2, $3, 'active', now(), $4)
+//        ON CONFLICT ON CONSTRAINT uq_user_active_sub
+//        DO UPDATE SET
+//          plan_id        = EXCLUDED.plan_id,
+//          billing_period = EXCLUDED.billing_period,
+//          status         = 'active',
+//          started_at     = now(),
+//          expires_at     = EXCLUDED.expires_at,
+//          updated_at     = now()`,
+//       [user_id, plan_id, billing_period, expires_at]
+//     );
+//   }
+
+
+
+
+//         res.status(HTTP_STATUS.OK).json(successResponse(null, "Webhook received successfully"));
+//     } catch (err) {
+//         await error("Error processing Razorpay webhook", {
+//             email: userPayload?.userEmail,
+//             action: "webhookController",
+//             req,
+//             error: err instanceof Error ? err.message : String(err),
+//         });
+//         res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+//             .json(errorResponse("An error occurred while processing Razorpay webhook"));
+//     }
+//     next();
+// }

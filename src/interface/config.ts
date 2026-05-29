@@ -30,4 +30,6 @@ export interface Config {
   FB_APP_ID: string;
   // APPDEV_URL: string;
   FB_APP_SECRET: string;
+  RAZORPAY_KEY_ID: string;
+  RAZORPAY_KEY_SECRET: string;
 }

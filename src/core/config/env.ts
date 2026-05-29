@@ -49,6 +49,8 @@ const config: Config = {
   FB_APP_ID: getEnv("FB_APP_ID"),
   // APPDEV_URL: getEnv("APPDEV_URL"),
   FB_APP_SECRET: getEnv("FB_APP_SECRET"),
+  RAZORPAY_KEY_ID: getEnv("RAZORPAY_KEY_ID"),
+  RAZORPAY_KEY_SECRET: getEnv("RAZORPAY_KEY_SECRET"),
 };
 
 export default config;

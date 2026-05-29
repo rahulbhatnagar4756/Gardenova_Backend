@@ -1,5 +1,13 @@
 import { connectDB } from "../../core/config/db";
+import config from "../../core/config/env";
 import { GetAllPlansWithDetailResponse, PlanFields, PlanLimitFields, ServiceResponse, UpdatePlanPayload } from "../../interface/subscription";
+import Razorpay from "razorpay";
+import crypto from "crypto";
+
+const razorpay = new Razorpay({
+  key_id : config.RAZORPAY_KEY_ID,
+  key_secret : config.RAZORPAY_KEY_SECRET,
+});
 
 /**
  * Fetch all active subscription plans along with their limits/details.
@@ -241,4 +249,216 @@ export const updatePlanDetailService = async (
     return { success: false, message: 'Failed to update plan' };
 
   } 
+};
+
+
+/**
+ * Fetches detailed information for a subscription plan by plan ID.
+ *
+ * This service:
+ * - Connects to the database
+ * - Retrieves plan information from the `plans` table
+ * - Retrieves associated feature limits from the `plan_limits` table
+ * - Returns a combined detailed subscription plan object
+ *
+ * @param planId - Unique identifier of the subscription plan
+ *
+ * @returns Promise resolving to a plan detail response object
+ * - success: Indicates whether the operation succeeded
+ * - data: Detailed subscription plan information (if found)
+ * - message: Error or status message
+ *
+ * @throws Handles database query errors internally and returns failure response
+ */
+export const getPlanDetailsByIdServices= async (planId: string): Promise<GetAllPlansWithDetailResponse> => {
+    const client = await connectDB();
+    try {
+        const query = `
+        SELECT
+    p.id AS plan_id,
+    p.name,
+    p.tier,
+    p.price_monthly,
+    p.price_yearly,
+    p.is_active AS plan_status,
+    
+    pl.scans_per_month,
+    pl.landscape_gens_per_month,
+    pl.max_saved_plants,
+    pl.care_reminders,
+    pl.ad_free,
+    pl.ai_care_assistant,
+    pl.hd_renders,
+    pl.priority_support,
+    pl.pdf_export,
+    pl.priority_generation,
+    pl.premium_styles,
+    pl.before_after_downloads
+    FROM plans p
+    JOIN plan_limits pl
+        ON p.id = pl.plan_id
+    WHERE p.id = $1;
+        `;
+        const result = await client.query(query, [planId]);
+
+        if (result.rows.length === 0) {
+            return {
+                success: false,
+                message: "Plan not found"
+            };
+        }
+
+        return {
+            success: true,
+            data: result.rows[0] // return single plan details
+        };
+    } catch (error) {
+        console.error("Error fetching plan details:", error);
+        return {
+            success: false,
+            message: "Failed to fetch plan details"
+        };
+    }
+}
+
+
+/**
+ * Creates a Razorpay payment order for a subscription plan.
+ *
+ * This service:
+ * - Creates a new Razorpay order
+ * - Converts amount into paise/cents (smallest currency unit)
+ * - Stores subscription-related metadata in Razorpay order notes
+ * - Returns the generated Razorpay order ID
+ *
+ * @param amount - Subscription/payment amount
+ * @param currency - Currency code (e.g. INR, USD)
+ * @param billing_period - Subscription billing period (monthly/yearly)
+ * @param userId - Unique user ID
+ * @param planId - Subscription plan ID
+ *
+ * @returns Promise resolving to:
+ * - success: Indicates whether order creation succeeded
+ * - orderId: Razorpay generated order ID (if successful)
+ * - message: Error message (if failed)
+ *
+ * @throws Handles Razorpay API errors internally and returns failure response
+ */
+export const createRazorpayOrderService = async (
+  amount: number,
+  currency: string,
+  billing_period: string,
+  userId: string,
+  planId: string
+): Promise<{ success: boolean; orderId?: string; message?: string }> => {
+  try {
+    const order = await razorpay.orders.create({
+      amount: amount * 100,
+      currency,
+      receipt: `receipt_${Date.now()}`,
+      notes: {
+        userId,
+        planId,
+        billing_period,
+      },
+    });
+
+    return { success: true, orderId: order.id };  // ✅ actual order ID
+  } catch (err) {
+    console.error("Error creating Razorpay order:", err);
+    return { success: false, message: "Failed to create Razorpay order" };
+  }
+};
+
+
+/**
+ * Verifies a Razorpay payment signature and activates the user's subscription.
+ *
+ * This service:
+ * - Validates Razorpay webhook/payment signature
+ * - Supports test bypass mode in non-production environments
+ * - Fetches order metadata from Razorpay order notes
+ * - Calculates subscription expiration date
+ * - Creates or updates the user's active subscription in the database
+ *
+ * @param razorpay_payment_id - Razorpay payment ID
+ * @param razorpay_order_id - Razorpay order ID
+ * @param razorpay_signature - Razorpay generated payment signature
+ *
+ * @returns Promise resolving to:
+ * - success: Indicates whether payment verification succeeded
+ * - message: Verification or error message
+ *
+ * @throws Error if Razorpay secret key is not configured
+ * @throws Handles invalid signatures and missing metadata gracefully
+ */
+export const verifyRazorpayPaymentService = async (
+  razorpay_payment_id: string,
+  razorpay_order_id: string,
+  razorpay_signature: string
+): Promise<{ success: boolean; message: string }> => {
+  
+  // ── Step 1: Guard env var ─────────────────────────────────
+  const secret = config.RAZORPAY_KEY_SECRET;
+  if (!secret) throw new Error("RAZORPAY_KEY_SECRET is not configured");
+
+  // ── Step 2: Test bypass (dev/staging only) ────────────────
+  const isTestBypass =
+    process.env.NODE_ENV !== "production" &&
+    razorpay_signature === "test_bypass";
+
+  if (!isTestBypass) {
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex");
+
+    if (expectedSignature !== razorpay_signature) {
+      return { success: false, message: "Invalid payment signature" };
+    }
+  }
+
+  // ── Step 3: Fetch order notes from Razorpay ───────────────
+  const order = await razorpay.orders.fetch(razorpay_order_id);
+  const { userId, planId, billing_period } = order.notes as {
+    userId: string;
+    planId: string;
+    billing_period: string;
+  };
+
+  if (!userId || !planId || !billing_period) {
+    return { success: false, message: "Order is missing required metadata" };
+  }
+
+  // ── Step 4: Calculate expires_at ─────────────────────────
+  const now = new Date();
+  const expires_at = new Date(now);
+
+  if (billing_period === "yearly") {
+    expires_at.setFullYear(expires_at.getFullYear() + 1);
+  } else {
+    expires_at.setMonth(expires_at.getMonth() + 1);
+  }
+
+  // ── Step 5: Upsert subscription via shared pool ───────────
+  const pool = await connectDB();
+  await pool.query(
+    `INSERT INTO subscriptions
+        (user_id, plan_id, billing_period, status, started_at, expires_at)
+     VALUES
+        ($1, $2, $3, 'active', now(), $4)
+     ON CONFLICT ON CONSTRAINT uq_user_active_sub
+     DO UPDATE SET
+       plan_id        = EXCLUDED.plan_id,
+       billing_period = EXCLUDED.billing_period,
+       status         = 'active',
+       started_at     = now(),
+       expires_at     = EXCLUDED.expires_at,
+       updated_at     = now()
+     RETURNING *`,
+    [userId, planId, billing_period, expires_at]
+  );
+
+  return { success: true, message: "Payment verified and subscription activated" };
 };
