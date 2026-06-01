@@ -63,6 +63,7 @@ const diseaseUrl = (localPath: string | null): string | null => {
  * @param {number} page - Current page number.
  * @param {number} limit - Number of records per page.
  * @param lang
+ * @param userId
  * @param search
  * @returns {Promise<PaginatedPlants>} Paginated plant result including
  * current page, total pages, total count, and plant list.
@@ -70,6 +71,7 @@ const diseaseUrl = (localPath: string | null): string | null => {
 export const getAllPlantsService = async (
     page: number,
     limit: number,
+    userId: string,
     search?: string
 ): Promise<PaginatedPlants> => {
     const pool = getDB();
@@ -79,7 +81,6 @@ export const getAllPlantsService = async (
     const searchValue = search?.trim() ?? "";
 
     // ── Search condition ───────────────────────────────────────────────────────
-    // Searches both common_name and scientific_name
     const searchCondition = search
         ? `AND (
             unaccent(common_name)      ILIKE unaccent($2)
@@ -108,7 +109,39 @@ export const getAllPlantsService = async (
           END`
         : `0::integer`;
 
-    const searchParams = search ? [searchValue, `${searchValue}%`] : [];
+    // ── Exclude user plants (only when not searching) ──────────────────────────
+    const excludeUserPlants = !search
+        ? `AND NOT EXISTS (
+            SELECT 1 FROM user_plants
+            WHERE user_plants.plant_id::integer = ${TABLE}.id
+            AND user_plants.user_id = $1::uuid
+          )`
+        : "";
+
+    // ── Params ─────────────────────────────────────────────────────────────────
+    // no search → count: [$1=userId]
+    // no search → data:  [$1=limit, $2=offset, $3=userId]  <-- wait, userId must be $1 for excludeUserPlants in count
+    // Let's keep userId as $1 for count, and $3 for data (after limit, offset)
+
+    const countParams = search
+        ? [searchValue, `${searchValue}%`]
+        : [userId];
+
+    const dataParams = search
+        ? [searchValue, `${searchValue}%`, limit, offset]
+        : [limit, offset, userId];
+
+    const limitPh  = `$${search ? 3 : 1}`;
+    const offsetPh = `$${search ? 4 : 2}`;
+
+    // when no search: limit=$1, offset=$2, userId=$3
+    const excludeUserPlantsData = !search
+        ? `AND NOT EXISTS (
+            SELECT 1 FROM user_plants
+            WHERE user_plants.plant_id::integer = ${TABLE}.id
+            AND user_plants.user_id = $3::uuid
+          )`
+        : "";
 
     // ── Total count ────────────────────────────────────────────────────────────
     const totalQuery = `
@@ -116,19 +149,14 @@ export const getAllPlantsService = async (
         FROM ${TABLE}
         WHERE id IS NOT NULL
         ${searchCondition}
+        ${excludeUserPlants}
     `;
 
-    const totalResult = await pool.query(totalQuery, searchParams);
-    const totalCount = Number(totalResult.rows[0].count);
-    const totalPages = Math.ceil(totalCount / limit);
+    const totalResult = await pool.query(totalQuery, countParams);
+    const totalCount  = Number(totalResult.rows[0].count);
+    const totalPages  = Math.ceil(totalCount / limit);
 
     // ── Main query ─────────────────────────────────────────────────────────────
-    const limitPh = `$${search ? 3 : 1}`;
-    const offsetPh = `$${search ? 4 : 2}`;
-    const params = search
-        ? [searchValue, `${searchValue}%`, limit, offset]
-        : [limit, offset];
-
     const dataQuery = `
         SELECT
             id,
@@ -147,6 +175,7 @@ export const getAllPlantsService = async (
         FROM ${TABLE}
         WHERE id IS NOT NULL
         ${searchCondition}
+        ${excludeUserPlantsData}
         ORDER BY
             (${relevanceScore}) DESC,
             id ASC
@@ -154,10 +183,10 @@ export const getAllPlantsService = async (
         OFFSET ${offsetPh}
     `;
 
-    const result = await pool.query(dataQuery, params);
+    const result = await pool.query(dataQuery, dataParams);
     const plants = result.rows.map((row) => ({
         ...row,
-        image_url: toImageUrl(row.local_image_path),  // ← new clean URL field
+        image_url: toImageUrl(row.local_image_path),
     }));
 
     return {
@@ -168,6 +197,107 @@ export const getAllPlantsService = async (
         plants,
     };
 };
+// export const getAllPlantsService = async (
+//     page: number,
+//     limit: number,
+//     search?: string
+// ): Promise<PaginatedPlants> => {
+//     const pool = getDB();
+//     const offset = (page - 1) * limit;
+//     const TABLE = "plant_table_final";
+
+//     const searchValue = search?.trim() ?? "";
+
+//     // ── Search condition ───────────────────────────────────────────────────────
+//     // Searches both common_name and scientific_name
+//     const searchCondition = search
+//         ? `AND (
+//             unaccent(common_name)      ILIKE unaccent($2)
+//             OR unaccent(scientific_name) ILIKE unaccent($2)
+//             OR to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+//                  @@ plainto_tsquery('simple', unaccent($1))
+//             OR to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+//                  @@ plainto_tsquery('simple', unaccent($1))
+//             OR unaccent(COALESCE(common_name, ''))      % unaccent($1)
+//             OR unaccent(COALESCE(scientific_name, ''))  % unaccent($1)
+//           )`
+//         : "";
+
+//     // ── Relevance score ────────────────────────────────────────────────────────
+//     const relevanceScore = search
+//         ? `CASE
+//             WHEN unaccent(common_name)      ILIKE unaccent($2) THEN 300
+//             WHEN unaccent(scientific_name)  ILIKE unaccent($2) THEN 280
+//             WHEN to_tsvector('simple', unaccent(COALESCE(common_name, '')))
+//                    @@ plainto_tsquery('simple', unaccent($1))  THEN 150
+//             WHEN to_tsvector('simple', unaccent(COALESCE(scientific_name, '')))
+//                    @@ plainto_tsquery('simple', unaccent($1))  THEN 130
+//             WHEN unaccent(COALESCE(common_name, ''))      % unaccent($1) THEN 80
+//             WHEN unaccent(COALESCE(scientific_name, ''))  % unaccent($1) THEN 60
+//             ELSE 0
+//           END`
+//         : `0::integer`;
+
+//     const searchParams = search ? [searchValue, `${searchValue}%`] : [];
+
+//     // ── Total count ────────────────────────────────────────────────────────────
+//     const totalQuery = `
+//         SELECT COUNT(*)
+//         FROM ${TABLE}
+//         WHERE id IS NOT NULL
+//         ${searchCondition}
+//     `;
+
+//     const totalResult = await pool.query(totalQuery, searchParams);
+//     const totalCount = Number(totalResult.rows[0].count);
+//     const totalPages = Math.ceil(totalCount / limit);
+
+//     // ── Main query ─────────────────────────────────────────────────────────────
+//     const limitPh = `$${search ? 3 : 1}`;
+//     const offsetPh = `$${search ? 4 : 2}`;
+//     const params = search
+//         ? [searchValue, `${searchValue}%`, limit, offset]
+//         : [limit, offset];
+
+//     const dataQuery = `
+//         SELECT
+//             id,
+//             common_name,
+//             scientific_name,
+//             image_original_url,
+//             local_image_path,
+//             family,
+//             type,
+//             cycle,
+//             watering,
+//             indoor,
+//             medicinal,
+//             edible_fruit,
+//             ${relevanceScore} AS relevance
+//         FROM ${TABLE}
+//         WHERE id IS NOT NULL
+//         ${searchCondition}
+//         ORDER BY
+//             (${relevanceScore}) DESC,
+//             id ASC
+//         LIMIT  ${limitPh}
+//         OFFSET ${offsetPh}
+//     `;
+
+//     const result = await pool.query(dataQuery, params);
+//     const plants = result.rows.map((row) => ({
+//         ...row,
+//         image_url: toImageUrl(row.local_image_path),  // ← new clean URL field
+//     }));
+
+//     return {
+//         currentPage: page,
+//         totalPages,
+//         totalCount,
+//         limit,
+//         plants,
+//     };
+// };
 
 /**
  * Retrieves detailed information about a plant by its ID.

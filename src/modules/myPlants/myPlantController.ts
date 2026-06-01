@@ -60,7 +60,7 @@ export const getAllPlants = async (
         const search = (req.query.search as string)?.trim() || undefined;
         // const lang   = (req.headers["accept-language"] ?? "en").toLowerCase(); // 
 
-        const data = await getAllPlantsService(page, limit, search); // 
+        const data = await getAllPlantsService(page, limit,user.id!, search); // 
 
         res.status(HTTP_STATUS.OK).json(successResponse(
             data,
