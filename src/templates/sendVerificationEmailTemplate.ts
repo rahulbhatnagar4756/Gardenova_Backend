@@ -50,7 +50,7 @@ export const sendVerificationEmailTemplate = (
             <!-- HEADER -->
             <tr>
               <td style="background:#2E3A30; padding:20px; text-align:center;">
-                <img src="${process.env.BASE_URL}/plant_images/logo.jpg"
+                <img src="${process.env.APPDEV_URL}/plant_images/logo.jpg"
                      width="60" alt="GARDENOVA Logo" />
               </td>
             </tr>

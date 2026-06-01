@@ -315,7 +315,7 @@ export const professionalWelcomeEmailTemplate = (
                                                                                 <td class="pc-fb-font"
                                                                                     style="vertical-align: top; font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 24px; font-weight: 700; line-height: 1.42; letter-spacing: -0.4px; color: #151515; padding: 0 20px;"
                                                                                     valign="top">
-                                                                                    <img src="${process.env.BASE_URL}/plant_images/logo.jpg"
+                                                                                    <img src="${process.env.APPDEV_URL}/plant_images/logo.jpg"
                                                                                         alt="Logo" border="0" style="
     width: 60px;
     margin: 0 auto;
