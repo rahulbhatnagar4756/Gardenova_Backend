@@ -314,7 +314,7 @@ export const passwordResetEmailTemplate = (
 
 
 
-                                                                                    <img src="https://newbucketassets.s3.sa-east-1.amazonaws.com/logo.png"
+                                                                                    <img src="${process.env.BASE_URL}/plant_images/logo.jpg"
                                                                                         alt="Group-3" border="0" style="
     width: 60px;
     margin: 0 auto;
