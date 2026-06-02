@@ -314,7 +314,7 @@ export const passwordResetEmailTemplate = (
 
 
 
-                                                                                    <img src="${process.env.APPDEV_URL}/plant_images/logo.jpg"
+                                                                                    <img src="${process.env.APPDEV_URL}/plant-images/logo.jpg"
                                                                                         alt="Group-3" border="0" style="
     width: 60px;
     margin: 0 auto;
