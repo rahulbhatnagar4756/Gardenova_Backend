@@ -4,7 +4,7 @@ import { AuthRequest } from "../../interface/auth";
 import { Response, NextFunction } from "express";
 import { findUserByEmail } from "../auth/authRepository";
 import { error } from "../../core/utils/logger";
-import { createRazorpayOrderService, getAllPlansWithDetailService, getPlanDetailsByIdServices, updatePlanDetailService, verifyRazorpayPaymentService } from "./subscriptionRepository";
+import {  createRazorpayOrderService, getAllPlansWithDetailService, getAllRazorpayOrdersService, getPlanDetailsByIdServices, updatePlanDetailService, verifyRazorpayPaymentService } from "./subscriptionRepository";
 
 /**
  * Retrieve all subscription plans with their details.
@@ -33,7 +33,7 @@ import { createRazorpayOrderService, getAllPlansWithDetailService, getPlanDetail
  * - 404 if the user is not found
  * - 500 if fetching subscription plans fails
  */
-export const getAllPlanswithDetails = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): Promise<void> => {
 
     const userPayload = req.user as { userEmail?: string } | undefined;
 
@@ -80,7 +80,7 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response, ne
             .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
             .json(errorResponse("An error occurred while fetching subscription plans"));
     }
-    next();
+    // next();
 }
 /**
  * Update subscription plan details.
@@ -265,8 +265,7 @@ export const getPlanDetailsById = async (req: AuthRequest, res: Response, next: 
  */
 export const createRazorpayOrder = async (
   req: AuthRequest,
-  res: Response,
-  next: NextFunction
+  res: Response
 ): Promise<void> => {
   const userPayload = req.user as { userEmail?: string } | undefined;
 
@@ -287,13 +286,13 @@ export const createRazorpayOrder = async (
       return;
     }
 
-    const { planId, billing_period, amount, currency } = req.body;
+    const { planId } = req.body;
+    const billing_period = req.body.billing_period || "monthly"; // default to monthly if not provided
+    
     const createOrderResult = await createRazorpayOrderService(
-      amount,
-      currency,
-      billing_period,
+      planId,
       user.id!,
-      planId
+      billing_period
     );
 
     res.status(HTTP_STATUS.OK).json(successResponse(createOrderResult, "Razorpay order created successfully"));
@@ -308,9 +307,86 @@ export const createRazorpayOrder = async (
       .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
       .json(errorResponse("An error occurred while creating Razorpay order"));
   }
-  next();
+  // next();
 };
 
+/**
+ * Get Razorpay orders for the authenticated user.
+ *
+ * @param req - Authenticated request containing user details and query parameters.
+ * @param res - Express response object.
+ * @param next - Express next middleware function.
+ * @returns Promise<void>
+ */
+export const getAllRazorpayOrders = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
+  const userPayload = req.user as { userEmail?: string; role?: string } | undefined;
+
+  if (!userPayload?.userEmail) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
+    return;
+  }
+
+  try {
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      await error("Profile retrieval failed - User not found", {
+        email: userPayload.userEmail,
+        action: "getAllRazorpayOrders",
+        req,
+      });
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
+
+    const {
+      from,
+      to,
+      count = "10",
+      skip = "0",
+      all = "false",          // admin-only: fetch all users' orders
+    } = req.query as Record<string, string>;
+
+    const isAdmin = userPayload.role === "admin";
+
+    // Only admins can fetch orders across all users
+    const filterUserId = isAdmin && all === "true" ? undefined : user.id!;
+
+    const result = await getAllRazorpayOrdersService(
+      filterUserId,
+      from ? Number(from) : undefined,
+      to ? Number(to) : undefined,
+      Number(count),
+      Number(skip)
+    );
+
+   // ✅ Guard: surface service-level failures properly
+    if (!result.success) {
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(errorResponse(result.message ?? "Failed to fetch plan details"));
+      return;
+    }
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(result, "Subscription plan details retrieved successfully"));
+      return;
+  } catch (err) {
+    await error("Error fetching Razorpay orders", {
+      email: userPayload.userEmail,
+      action: "getAllRazorpayOrders",
+      req,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res
+      .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+      .json(errorResponse("An error occurred while fetching Razorpay orders"));
+  }
+//   next();
+};
 
 /**
  * Verifies a Razorpay payment and activates the user's subscription.
@@ -360,12 +436,12 @@ export const verifyRazorpayPayment = async (
       return;
     }
 
-    const { paymentId, orderId, signature } = req.body;
+    const { paymentId, subscription_id, signature } = req.body;
 
     // ✅ userId, planId, billing_period come from the order notes — not client body
     const verificationResult = await verifyRazorpayPaymentService(
       paymentId,
-      orderId,
+      subscription_id,
       signature
     );
 

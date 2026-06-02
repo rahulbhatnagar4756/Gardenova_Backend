@@ -1,5 +1,5 @@
 import express from "express";
-import  { createRazorpayOrder, getAllPlanswithDetails, getPlanDetailsById, updatePlanDetails, verifyRazorpayPayment } from "./subscriptionController";
+import  { createRazorpayOrder, getAllPlanswithDetails, getAllRazorpayOrders, getPlanDetailsById, updatePlanDetails, verifyRazorpayPayment } from "./subscriptionController";
 import auth from "../../core/middleware/authMiddleware";
 
 const router = express.Router();
@@ -82,6 +82,169 @@ const router = express.Router();
  *         description: Internal server error
  */
 router.get("/getplans", auth, getAllPlanswithDetails);
+/**
+ * @swagger
+ * /api/v1/plans/orders:
+ *   get:
+ *     summary: Get all Razorpay orders
+ *     description: >
+ *       Fetches Razorpay orders for the authenticated user.
+ *       Admins can pass `all=true` to retrieve orders across all users.
+ *       Results are paginated using `count` and `skip` query parameters.
+ *     tags:
+ *       - Subscription Plans
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: count
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           minimum: 1
+ *           maximum: 100
+ *         required: false
+ *         description: Number of orders to fetch per page
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *           minimum: 0
+ *         required: false
+ *         description: Number of orders to skip (for pagination)
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: Unix timestamp to filter orders created after this time
+ *         example: 1700000000
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: Unix timestamp to filter orders created before this time
+ *         example: 1710000000
+ *       - in: query
+ *         name: all
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         required: false
+ *         description: "Admin only: set to true to fetch orders across all users"
+ *     responses:
+ *       200:
+ *         description: Orders fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Razorpay orders fetched successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalCount:
+ *                       type: integer
+ *                       example: 42
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             example: order_PzJ2xKq1234ABC
+ *                           entity:
+ *                             type: string
+ *                             example: order
+ *                           amount:
+ *                             type: integer
+ *                             description: Amount in paise (1 INR = 100 paise)
+ *                             example: 49900
+ *                           amount_paid:
+ *                             type: integer
+ *                             example: 49900
+ *                           amount_due:
+ *                             type: integer
+ *                             example: 0
+ *                           currency:
+ *                             type: string
+ *                             example: INR
+ *                           receipt:
+ *                             type: string
+ *                             example: receipt_1712345678901
+ *                           status:
+ *                             type: string
+ *                             enum: [created, attempted, paid]
+ *                             example: paid
+ *                           attempts:
+ *                             type: integer
+ *                             example: 1
+ *                           notes:
+ *                             type: object
+ *                             properties:
+ *                               userId:
+ *                                 type: string
+ *                                 example: user_abc123
+ *                               planId:
+ *                                 type: string
+ *                                 example: plan_xyz789
+ *                               billing_period:
+ *                                 type: string
+ *                                 example: monthly
+ *                           created_at:
+ *                             type: integer
+ *                             description: Unix timestamp of order creation
+ *                             example: 1712345678
+ *       401:
+ *         description: Unauthorized — missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Unauthorized request
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: User not found
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: An error occurred while fetching Razorpay orders
+ */
+router.get("/orders", auth, getAllRazorpayOrders);
 
 /**
  * @swagger
@@ -323,13 +486,12 @@ router.patch("/updateplan/:planId", auth, updatePlanDetails);
  */
 router.get("/:planId", auth, getPlanDetailsById);
 
-
 /**
  * @swagger
- * /api/v1/plans/create-order:
+ * /api/v1/plans/create-subscription:
  *   post:
- *     summary: Create Razorpay order
- *     description: Creates a Razorpay payment order for subscription or plan purchase.
+ *     summary: Create Razorpay subscription
+ *     description: Creates a Razorpay subscription for the selected plan and returns the subscription details required for Razorpay Checkout.
  *     tags:
  *       - Subscription Plans
  *     security:
@@ -341,33 +503,23 @@ router.get("/:planId", auth, getPlanDetailsById);
  *           schema:
  *             type: object
  *             required:
- *               - amount
- *               - currency
- *               - billing_period
- *               - userId
  *               - planId
  *             properties:
- *               amount:
- *                 type: number
- *                 example: 499
- *               currency:
- *                 type: string
- *                 example: INR
- *               billing_period:
- *                 type: string
- *                 example: monthly
- *               userId:
- *                 type: string
- *                 example: 665fdc4a91ab1234567890ef
  *               planId:
  *                 type: string
+ *                 description: Database ID of the subscription plan.
  *                 example: 665fdc4a91ab1234567890aa
- *               rec:
- *                 type: boolean
- *                 example: false
+ *               billing_period:
+ *                 type: string
+ *                 description: Subscription billing cycle.
+ *                 enum:
+ *                   - monthly
+ *                   - yearly
+ *                 default: monthly
+ *                 example: monthly
  *     responses:
  *       200:
- *         description: Razorpay order created successfully
+ *         description: Subscription created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -378,10 +530,19 @@ router.get("/:planId", auth, getPlanDetailsById);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: Razorpay order created successfully
+ *                   example: Subscription created successfully
  *                 data:
  *                   type: object
- *                   nullable: true
+ *                   properties:
+ *                     subscriptionId:
+ *                       type: string
+ *                       example: sub_Qxyz123456789
+ *                     status:
+ *                       type: string
+ *                       example: created
+ *                     billingPeriod:
+ *                       type: string
+ *                       example: monthly
  *       401:
  *         description: Unauthorized request
  *         content:
@@ -396,7 +557,7 @@ router.get("/:planId", auth, getPlanDetailsById);
  *                   type: string
  *                   example: Unauthorized request
  *       404:
- *         description: User not found
+ *         description: User or plan not found
  *         content:
  *           application/json:
  *             schema:
@@ -407,7 +568,7 @@ router.get("/:planId", auth, getPlanDetailsById);
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: User not found
+ *                   example: Plan not found
  *       500:
  *         description: Internal server error
  *         content:
@@ -420,11 +581,9 @@ router.get("/:planId", auth, getPlanDetailsById);
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: An error occurred while creating Razorpay order
+ *                   example: An error occurred while creating subscription
  */
-router.post("/create-order", auth, createRazorpayOrder);
-// router.post("/create-order", auth, createRazorpayOrder );
-
+router.post("/create-subscription", auth, createRazorpayOrder);
 
 /**
  * @swagger

@@ -5,10 +5,12 @@ export interface PlanWithDetails {
 
     tier: 'free' | 'starter' | 'plus' | 'pro';
 
-    price_monthly: number;
-    price_yearly: number;
+    price: number;
+    // price_yearly: number;
+    billing_period: 'monthly' | 'yearly';
 
     plan_status: boolean;
+    razorpay_id: string;
 
     limit_id: string;
 
@@ -65,4 +67,24 @@ export type UpdatePlanPayload = Partial<PlanFields> & Partial<PlanLimitFields>;
 export interface ServiceResponse {
   success : boolean;
   message : string;
+}
+
+
+
+export interface RazorpayOrder {
+  id: string;
+  entity: string;
+  amount: number;
+  amount_paid: number;
+  amount_due: number;
+  currency: string;
+  receipt: string;
+  status: "created" | "attempted" | "paid";
+  attempts: number;
+  notes: {
+    userId?: string;
+    planId?: string;
+    billing_period?: string;
+  };
+  created_at: number;
 }

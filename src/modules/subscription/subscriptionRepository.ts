@@ -1,6 +1,6 @@
 import { connectDB } from "../../core/config/db";
 import config from "../../core/config/env";
-import { GetAllPlansWithDetailResponse, PlanFields, PlanLimitFields, ServiceResponse, UpdatePlanPayload } from "../../interface/subscription";
+import { GetAllPlansWithDetailResponse, PlanFields, PlanLimitFields, RazorpayOrder, ServiceResponse, UpdatePlanPayload } from "../../interface/subscription";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
@@ -39,9 +39,10 @@ export const getAllPlansWithDetailService = async ():Promise<GetAllPlansWithDeta
     p.id AS plan_id,
     p.name,
     p.tier,
-    p.price_monthly,
-    p.price_yearly,
+    p.price,
+    p.billing_period,
     p.is_active AS plan_status,
+    p.razorpay_id,
     
     pl.plan_id AS limit_id,
     pl.scans_per_month,
@@ -278,8 +279,9 @@ export const getPlanDetailsByIdServices= async (planId: string): Promise<GetAllP
     p.id AS plan_id,
     p.name,
     p.tier,
-    p.price_monthly,
-    p.price_yearly,
+    p.price,
+    p.billing_period,
+    p.razorpay_id,
     p.is_active AS plan_status,
     
     pl.scans_per_month,
@@ -345,17 +347,25 @@ export const getPlanDetailsByIdServices= async (planId: string): Promise<GetAllP
  * @throws Handles Razorpay API errors internally and returns failure response
  */
 export const createRazorpayOrderService = async (
-  amount: number,
-  currency: string,
-  billing_period: string,
+  planId: string,
   userId: string,
-  planId: string
-): Promise<{ success: boolean; orderId?: string; message?: string }> => {
+  billing_period: string
+): Promise<{success:boolean, message?:string,orderId?:string }> => {
   try {
-    const order = await razorpay.orders.create({
-      amount: amount * 100,
-      currency,
-      receipt: `receipt_${Date.now()}`,
+    // For simplicity, using fixed amount and currency. In real implementation, fetch plan details to get these values
+    const client = await connectDB();
+    const planResult = await client.query(
+      `SELECT price_monthly, price_yearly FROM plans WHERE razorpay_id = $1`,
+      [planId]
+    );
+    if (planResult.rows.length === 0) {
+      return { success: false, message: "Plan not found" };
+    }
+
+    const razorpaySubscription = await razorpay.subscriptions.create({
+      plan_id : planId,
+      customer_notify: 1,
+      total_count: billing_period === "yearly" ? 12 : 1, // monthly = 1 payment, yearly = 12 payments
       notes: {
         userId,
         planId,
@@ -363,13 +373,69 @@ export const createRazorpayOrderService = async (
       },
     });
 
-    return { success: true, orderId: order.id };  // ✅ actual order ID
+    return { success: true, orderId: razorpaySubscription.id };
+    
+  
+
   } catch (err) {
-    console.error("Error creating Razorpay order:", err);
-    return { success: false, message: "Failed to create Razorpay order" };
+    // console.error("Error creating Razorpay order:", err);
+    
+    return { success: false, message: `Failed to create Razorpay order error - ${err}` };
   }
 };
 
+
+/**
+ * Fetch Razorpay orders with optional user and date filtering.
+ *
+ * @param userId - Optional user ID to filter orders by notes.userId.
+ * @param from - Optional start timestamp.
+ * @param to - Optional end timestamp.
+ * @param count - Number of orders to fetch.
+ * @param skip - Number of orders to skip.
+ * @returns Razorpay orders and total count.
+ */
+export const getAllRazorpayOrdersService = async (
+  userId?: string,
+  from?: number,
+  to?: number,
+  count: number = 10,
+  skip: number = 0
+): Promise<{
+  success: boolean;
+  orders?: RazorpayOrder[];
+  totalCount?: number;
+  message?: string;
+}> => {
+  try {
+    const params: Record<string, string | number> = {
+      count,
+      skip,
+    };
+
+    if (from) params.from = from;
+    if (to) params.to = to;
+
+    const response = await razorpay.orders.all(params);
+    //  console.log("Fetched Razorpay orders:", response);
+
+    let orders = response.items as RazorpayOrder[];
+
+    // Filter by userId from notes if provided
+    if (userId) {
+      orders = orders.filter((order) => order.notes?.userId === userId);
+    }
+
+    return {
+      success: true,
+      orders,
+      totalCount: response.count,
+    };
+  } catch (err) {
+    console.error("Error fetching Razorpay orders:", err);
+    return { success: false, message: "Failed to fetch Razorpay orders" };
+  }
+};
 
 /**
  * Verifies a Razorpay payment signature and activates the user's subscription.
@@ -382,7 +448,7 @@ export const createRazorpayOrderService = async (
  * - Creates or updates the user's active subscription in the database
  *
  * @param razorpay_payment_id - Razorpay payment ID
- * @param razorpay_order_id - Razorpay order ID
+ * @param razorpay_subscription_id - Razorpay order ID
  * @param razorpay_signature - Razorpay generated payment signature
  *
  * @returns Promise resolving to:
@@ -394,7 +460,7 @@ export const createRazorpayOrderService = async (
  */
 export const verifyRazorpayPaymentService = async (
   razorpay_payment_id: string,
-  razorpay_order_id: string,
+  razorpay_subscription_id: string,
   razorpay_signature: string
 ): Promise<{ success: boolean; message: string }> => {
   
@@ -408,7 +474,7 @@ export const verifyRazorpayPaymentService = async (
     razorpay_signature === "test_bypass";
 
   if (!isTestBypass) {
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const body =razorpay_payment_id + "|" + razorpay_subscription_id;
     const expectedSignature = crypto
       .createHmac("sha256", secret)
       .update(body)
@@ -420,7 +486,7 @@ export const verifyRazorpayPaymentService = async (
   }
 
   // ── Step 3: Fetch order notes from Razorpay ───────────────
-  const order = await razorpay.orders.fetch(razorpay_order_id);
+  const order = await razorpay.subscriptions.fetch(razorpay_subscription_id);
   const { userId, planId, billing_period } = order.notes as {
     userId: string;
     planId: string;
