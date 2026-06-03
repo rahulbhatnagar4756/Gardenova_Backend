@@ -19,7 +19,7 @@ import dashboardRoutes from "./modules/admin/dashboard/dashboardRoutes";
 import subscriptionRoutes from "./modules/subscription/subscriptionRoutes";
 import externalLinksRoutes from "./modules/admin/externalLinks/externalLinksRoutes";
 import myPlantRoutes from "./modules/myPlants/myPlantRoute";
-import professionalRoutes from "./modules/professional/professionalRoutes";
+// import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import { connectDB } from "./core/config/db";
 
@@ -89,7 +89,7 @@ app.use("/api/v1/plans", subscriptionRoutes);
 //external Links Routes
 app.use("/api/v1/externalLinks", externalLinksRoutes);
 // Professional Routes
-app.use("/api/v1/professional", professionalRoutes);
+// app.use("/api/v1/professional", professionalRoutes);
 // Error handler (must be last middleware)
 app.use("/api/v1/allplants", myPlantRoutes);
 // Suppliers Routes
