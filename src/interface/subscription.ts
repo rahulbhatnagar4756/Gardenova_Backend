@@ -29,11 +29,11 @@ export interface PlanWithDetails {
     before_after_downloads: boolean;
 }
 
-export interface GetAllPlansWithDetailResponse {
-    success: boolean;
-    data?: PlanWithDetails[];
-    message?: string;
-}
+// export interface GetAllPlansWithDetailResponse {
+//     success: boolean;
+//     data?: PlanWithDetails[];
+//     message?: string;
+// }
 
 // ─── plans table fields ────────────────────────────────────
 export interface PlanFields {
@@ -87,4 +87,28 @@ export interface RazorpayOrder {
     billing_period?: string;
   };
   created_at: number;
+}
+
+export interface PlanFeature {
+    key: string;
+    label: string;
+    value?: number;
+    enabled?: boolean;
+}
+
+export interface SubscriptionPlan {
+    id: string;
+    name: string;
+    tier: string;
+    billing_period: "monthly" | "yearly";
+    product_id: string | null;
+    price: string;
+    currency: string;
+    features: PlanFeature[];
+}
+
+export interface GetAllPlansWithDetailResponse {
+    success: boolean;
+    message?: string;
+    data?: SubscriptionPlan[];
 }

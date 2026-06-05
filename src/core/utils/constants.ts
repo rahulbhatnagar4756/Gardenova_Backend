@@ -19,7 +19,7 @@ export const MESSAGES = {
   LOGIN_SUCCESS: "Login successful",
   INVALID_CREDENTIALS: "Invalid email or password",
   USER_EXISTS: "User with this email already exists",
-  USER_NOTFOUND: "Login failed - user not found or missing password",
+  USER_NOTFOUND: "Invalid email or password. Please try again.",
   USER_PHONE_EXISTS: "User with this phone number already exists",
   // Token and Auth-related Messages
   TOKEN_INVALID: "Invalid token",

@@ -5,8 +5,8 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 
 const razorpay = new Razorpay({
-  key_id : config.RAZORPAY_KEY_ID,
-  key_secret : config.RAZORPAY_KEY_SECRET,
+  key_id: config.RAZORPAY_KEY_ID,
+  key_secret: config.RAZORPAY_KEY_SECRET,
 });
 
 /**
@@ -30,11 +30,11 @@ const razorpay = new Razorpay({
  * @throws Does not throw; errors are caught and returned in a structured response:
  * - `{ success: false, message: "Failed to fetch plans" }`
  */
-export const getAllPlansWithDetailService = async ():Promise<GetAllPlansWithDetailResponse> => {
-    // Placeholder for actual subscription plan retrieval logic
-    const client = await connectDB();
-    try {
-        const query = `
+export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDetailResponse> => {
+  // Placeholder for actual subscription plan retrieval logic
+  const client = await connectDB();
+  try {
+    const query = `
             SELECT
                 id,
                 name,
@@ -55,22 +55,80 @@ export const getAllPlansWithDetailService = async ():Promise<GetAllPlansWithDeta
             FROM subscription_plans
             WHERE is_active = true
         `;
-        const result = await client.query(query);
+    const result = await client.query(query);
+    const plans = result.rows.map((plan) => ({
+      id: plan.id,
+      name: plan.name,
+      tier: plan.tier,
+      billing_period: plan.billing_period,
+      product_id: plan.product_id,
+      price: plan.price,
+      currency: plan.currency,
+      features: [
+        {
+          key: "diagnosis_scans",
+          label: `${plan.diagnosis_scans} Diagnosis Scans`,
+          enabled: plan.diagnosis_scans > 0
+        },
+        {
+          key: "landscape_gen",
+          label: `${plan.landscape_gen} Landscape Generations`,
+          enabled: plan.landscape_gen > 0
+        },
+        {
+          key: "max_plants",
+          label:
+            plan.max_plants === -1
+              ? "Unlimited Plants"
+              : `${plan.max_plants} Plants`,
+          enabled: plan.max_plants > 0 || plan.max_plants === -1
+        },
+        {
+          key: "ai_assistant",
+          label: "AI Assistant",
+          enabled: plan.ai_assistant
+        },
+        {
+          key: "hd_renders",
+          label: "HD Renders",
+          enabled: plan.hd_renders
+        },
+        {
+          key: "pdf_export",
+          label: "PDF Export",
+          enabled: plan.pdf_export
+        },
+        {
+          key: "premium_styles",
+          label: "Premium Styles",
+          enabled: plan.premium_styles
+        },
+        {
+          key: "before_after_download",
+          label: "Before/After Download",
+          enabled: plan.before_after_download
+        },
+        {
+          key: "basic_reminders",
+          label: "Basic Reminders",
+          enabled: plan.basic_reminders
+        }
+      ]
+    }));
+    return {
+      success: true,
+      data: plans
+    };
 
-        return {
-            success: true,
-            data: result.rows
-        };
+  } catch (error) {
+    console.error("Error fetching plans:", error);
 
-    } catch (error) {
-        console.error("Error fetching plans:", error);
+    return {
+      success: false,
+      message: "Failed to fetch plans"
+    };
 
-        return {
-            success: false,
-            message: "Failed to fetch plans"
-        };
-
-    }
+  }
 }
 
 const PLAN_COLUMNS = new Set<keyof PlanFields>([
@@ -117,13 +175,13 @@ const PLAN_LIMIT_COLUMNS = new Set<keyof PlanLimitFields>([
  * Returns `null` if no fields are provided.
  */
 function buildSetClause(
-  fields : Record<string, unknown>,
+  fields: Record<string, unknown>,
   startAt: number = 1,
 ): { clause: string; values: unknown[]; nextIndex: number } | null {
   const entries = Object.entries(fields);
   if (entries.length === 0) return null;
 
-  const parts : string[]  = [];
+  const parts: string[] = [];
   const values: unknown[] = [];
   let i = startAt;
 
@@ -166,7 +224,7 @@ function buildSetClause(
  * - Unknown fields are ignored and not passed to SQL.
  */
 export const updatePlanDetailService = async (
-  planId    : string,
+  planId: string,
   updateData: UpdatePlanPayload,
 ): Promise<ServiceResponse> => {
   if (!planId) {
@@ -174,9 +232,9 @@ export const updatePlanDetailService = async (
   }
 
   // ── 1. split payload into per-table buckets ──────────────
-  const planFields        : Record<string, unknown> = {};
-  const planLimitFields   : Record<string, unknown> = {};
-  const unknownFields     : string[] = [];
+  const planFields: Record<string, unknown> = {};
+  const planLimitFields: Record<string, unknown> = {};
+  const unknownFields: string[] = [];
 
   for (const [key, value] of Object.entries(updateData)) {
     if (PLAN_COLUMNS.has(key as keyof PlanFields)) {
@@ -192,8 +250,8 @@ export const updatePlanDetailService = async (
     // console.warn(`[updatePlanDetailService] unknown fields ignored:`, unknownFields);
   }
 
-  const hasPlansUpdate     = Object.keys(planFields).length > 0;
-  const hasLimitsUpdate    = Object.keys(planLimitFields).length > 0;
+  const hasPlansUpdate = Object.keys(planFields).length > 0;
+  const hasLimitsUpdate = Object.keys(planLimitFields).length > 0;
 
   if (!hasPlansUpdate && !hasLimitsUpdate) {
     return { success: false, message: 'No valid fields provided to update' };
@@ -240,7 +298,7 @@ export const updatePlanDetailService = async (
     console.error('[updatePlanDetailService] transaction failed:', error);
     return { success: false, message: 'Failed to update plan' };
 
-  } 
+  }
 };
 
 
@@ -262,10 +320,10 @@ export const updatePlanDetailService = async (
  *
  * @throws Handles database query errors internally and returns failure response
  */
-export const getPlanDetailsByIdServices= async (planId: string): Promise<GetAllPlansWithDetailResponse> => {
-    const client = await connectDB();
-    try {
-        const query = `
+export const getPlanDetailsByIdServices = async (planId: string): Promise<GetAllPlansWithDetailResponse> => {
+  const client = await connectDB();
+  try {
+    const query = `
         SELECT
     p.id AS plan_id,
     p.name,
@@ -292,26 +350,26 @@ export const getPlanDetailsByIdServices= async (planId: string): Promise<GetAllP
         ON p.id = pl.plan_id
     WHERE p.id = $1;
         `;
-        const result = await client.query(query, [planId]);
+    const result = await client.query(query, [planId]);
 
-        if (result.rows.length === 0) {
-            return {
-                success: false,
-                message: "Plan not found"
-            };
-        }
-
-        return {
-            success: true,
-            data: result.rows[0] // return single plan details
-        };
-    } catch (error) {
-        console.error("Error fetching plan details:", error);
-        return {
-            success: false,
-            message: "Failed to fetch plan details"
-        };
+    if (result.rows.length === 0) {
+      return {
+        success: false,
+        message: "Plan not found"
+      };
     }
+
+    return {
+      success: true,
+      data: result.rows[0] // return single plan details
+    };
+  } catch (error) {
+    console.error("Error fetching plan details:", error);
+    return {
+      success: false,
+      message: "Failed to fetch plan details"
+    };
+  }
 }
 
 
@@ -341,7 +399,7 @@ export const createRazorpayOrderService = async (
   planId: string,
   userId: string,
   billing_period: string
-): Promise<{success:boolean, message?:string,orderId?:string }> => {
+): Promise<{ success: boolean, message?: string, orderId?: string }> => {
   try {
     // For simplicity, using fixed amount and currency. In real implementation, fetch plan details to get these values
     const client = await connectDB();
@@ -354,7 +412,7 @@ export const createRazorpayOrderService = async (
     }
 
     const razorpaySubscription = await razorpay.subscriptions.create({
-      plan_id : planId,
+      plan_id: planId,
       customer_notify: 1,
       total_count: billing_period === "yearly" ? 12 : 1, // monthly = 1 payment, yearly = 12 payments
       notes: {
@@ -365,12 +423,12 @@ export const createRazorpayOrderService = async (
     });
 
     return { success: true, orderId: razorpaySubscription.id };
-    
-  
+
+
 
   } catch (err) {
     // console.error("Error creating Razorpay order:", err);
-    
+
     return { success: false, message: `Failed to create Razorpay order error - ${err}` };
   }
 };
@@ -454,7 +512,7 @@ export const verifyRazorpayPaymentService = async (
   razorpay_subscription_id: string,
   razorpay_signature: string
 ): Promise<{ success: boolean; message: string }> => {
-  
+
   // ── Step 1: Guard env var ─────────────────────────────────
   const secret = config.RAZORPAY_KEY_SECRET;
   if (!secret) throw new Error("RAZORPAY_KEY_SECRET is not configured");
@@ -465,7 +523,7 @@ export const verifyRazorpayPaymentService = async (
     razorpay_signature === "test_bypass";
 
   if (!isTestBypass) {
-    const body =razorpay_payment_id + "|" + razorpay_subscription_id;
+    const body = razorpay_payment_id + "|" + razorpay_subscription_id;
     const expectedSignature = crypto
       .createHmac("sha256", secret)
       .update(body)
