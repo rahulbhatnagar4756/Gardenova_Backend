@@ -81,7 +81,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.get("/getplans", auth, getAllPlanswithDetails);
+router.get("/getplans",auth, getAllPlanswithDetails);
 /**
  * @swagger
  * /api/v1/plans/orders:

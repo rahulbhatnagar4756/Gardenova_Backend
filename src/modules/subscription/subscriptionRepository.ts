@@ -35,34 +35,25 @@ export const getAllPlansWithDetailService = async ():Promise<GetAllPlansWithDeta
     const client = await connectDB();
     try {
         const query = `
-        SELECT 
-    p.id AS plan_id,
-    p.name,
-    p.tier,
-    p.price,
-    p.billing_period,
-    p.is_active AS plan_status,
-    p.razorpay_id,
-    
-    pl.plan_id AS limit_id,
-    pl.scans_per_month,
-    pl.landscape_gens_per_month,
-    pl.max_saved_plants,
-    pl.care_reminders,
-    pl.ad_free,
-    pl.ai_care_assistant,
-    pl.hd_renders,
-    pl.priority_support,
-    pl.pdf_export,
-    pl.priority_generation,
-    pl.premium_styles,
-    pl.before_after_downloads
-
-    FROM plans p
-    JOIN plan_limits pl
-        ON p.id = pl.plan_id
-    WHERE p.is_active = TRUE;
-            
+            SELECT
+                id,
+                name,
+                tier,
+                billing_period,
+                product_id,
+                price,
+                currency,
+                diagnosis_scans,
+                landscape_gen,
+                max_plants,
+                ai_assistant,
+                hd_renders,
+                pdf_export,
+                premium_styles,
+                before_after_download,
+                basic_reminders
+            FROM subscription_plans
+            WHERE is_active = true
         `;
         const result = await client.query(query);
 
