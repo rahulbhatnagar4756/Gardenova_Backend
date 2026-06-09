@@ -4,3 +4,4 @@ uploads
 .env
 # Firebase keys
 src/core/config/*.json    
+src/config/utils/serviceAccount.json
