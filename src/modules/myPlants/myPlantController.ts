@@ -170,54 +170,54 @@ export const AddPlantToUser = async (
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-
+ 
     // ── 1. Auth checks ────────────────────────────────────────────────────────
     const userPayload = req.user as AuthUserPayload | undefined;
-
+ 
     if (!userPayload?.userEmail) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
-
+ 
     if (userPayload.role !== "User") {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized Role"));
         return;
     }
-
+ 
     const user = await findUserByEmail(userPayload.userEmail);
     if (!user) {
         res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User not found"));
         return;
     }
-
+ 
     // ── 2. Validate required field ────────────────────────────────────────────
     const { plant_id } = req.body;
-
+ 
     if (!plant_id) {
         res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("plant_id is required"));
         return;
     }
-
+ 
     // ── 3. Call service ───────────────────────────────────────────────────────
     try {
         const data = await addPlantToUserService(user.id!, req.body);
-
+ 
         res.status(HTTP_STATUS.CREATED).json(
             successResponse(data, "Plant added successfully")
         );
-
+ 
     } catch (err) {
         if (err instanceof Error) {
             const knownErrors: Record<string, number> = {
-                "Plant species not found": HTTP_STATUS.NOT_FOUND,
+                "Plant species not found":  HTTP_STATUS.NOT_FOUND,
                 "Plant already added to user": HTTP_STATUS.CONFLICT,
             };
-
+ 
             const statusCode = knownErrors[err.message] ?? HTTP_STATUS.BAD_REQUEST;
             res.status(statusCode).json(errorResponse(err.message));
             return;
         }
-
+ 
         next(err);
     }
 };
@@ -416,35 +416,35 @@ export const updateUserPlantController = async (
     try {
         const userPayload = req.user as AuthUserPayload | undefined;
         const userPlantId = req.params.userPlantId;
-
+ 
         if (!userPlantId) {
             res.status(400).json({ message: "Plant ID is required" });
             return;
         }
-
+ 
         if (!userPayload?.userEmail) {
             res.status(401).json({ message: "Unauthorized" });
             return;
         }
-
+ 
         const user = await findUserByEmail(userPayload.userEmail);
         if (!user) {
             res.status(404).json({ message: "User not found" });
             return;
         }
-
-        // ── Map flat body → nested shape before passing to service ─────────────
+ 
         const nestedPayload = mapFlatToNested(req.body as FlatUpdateUserPlantInput);
-
+ 
         const updated = await updateUserPlantService(user.id!, userPlantId, nestedPayload);
-
-        res.status(200).json(successResponse(
-            updated,
-            "Plant notifications updated successfully"
-        ));
+ 
+        res.status(200).json(successResponse(updated, "Plant notifications updated successfully"));
     } catch (err) {
         if (err instanceof Error) {
-            res.status(400).json({ message: err.message });
+            const knownErrors: Record<string, number> = {
+                "Plant not found for this user": 404,
+            };
+            const statusCode = knownErrors[err.message] ?? 400;
+            res.status(statusCode).json({ message: err.message });
         } else {
             res.status(500).json({ message: "Internal server error" });
         }

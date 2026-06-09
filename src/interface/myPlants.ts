@@ -154,25 +154,27 @@ export interface UserPlantsResult {
 
 // ─── Add plant input ──────────────────────────────────────────────────────────
 export interface AddUserPlantInput {
-  plant_id: string;
+    plant_id: number;
  
-
-  watering_notification_enabled?: boolean;
-  watering_preferred_time?: string; 
-
-  fertilizer_notification_enabled?: boolean;
-  fertilizer_preferred_time?: string;
-
-  pruning_notification_enabled?: boolean;
-  pruning_preferred_time?: string;
-
-  generic_care_preferred_time?:string       // "HH:MM:SS"
-  generic_notification_enabled?: boolean;
-
-  watering_reminder_frequency: number;
-  fertilizer_reminder_frequency: number;
-  pruning_reminder_frequency: number;
-  generic_care_reminder_frequency: number;
+    watering_notification_enabled?: boolean;
+    watering_preferred_time?: string;       // "HH:mm:ss"
+    watering_reminder_frequency?: number;   // days
+    watering_snooze_minutes?: number;       // default 30
+ 
+    fertilizer_notification_enabled?: boolean;
+    fertilizer_preferred_time?: string;
+    fertilizer_reminder_frequency?: number;
+    fertilizer_snooze_minutes?: number;
+ 
+    pruning_notification_enabled?: boolean;
+    pruning_preferred_time?: string;
+    pruning_reminder_frequency?: number;
+    pruning_snooze_minutes?: number;
+ 
+    generic_notification_enabled?: boolean;
+    generic_care_preferred_time?: string;
+    generic_care_reminder_frequency?: number;
+    generic_care_snooze_minutes?: number;
 }
 
 export interface PlantRow {
@@ -329,50 +331,58 @@ export interface UpdateUserPlantRemindersResult {
 // }
 
 export interface UpdateUserPlantInput {
-    watering?: CareNotificationInput;
+    watering?:   CareNotificationInput;
     fertilizer?: CareNotificationInput;
-    pruning?: CareNotificationInput;
-    generic?: CareNotificationInput;
+    pruning?:    CareNotificationInput;
+    generic?:    CareNotificationInput;
 }
-
 
 export interface CareUpdateFields {
     notification_enabled: boolean;
     preferred_time: string | null;
     reminder_frequency: number;
+    snooze_minutes: number | null;  // null = skip update, keep existing DB value
     next_at: Date | null;
     recalculate_next: boolean;
 }
 
-
 export interface FlatUpdateUserPlantInput {
-    plant_id?: number; // ignored by update, but accepted so clients can send same body
     watering_notification_enabled?: boolean;
-    watering_preferred_time?: string | null;
+    watering_preferred_time?: string;
     watering_reminder_frequency?: number;
+    watering_snooze_minutes?: number;
+ 
     fertilizer_notification_enabled?: boolean;
-    fertilizer_preferred_time?: string | null;
+    fertilizer_preferred_time?: string;
     fertilizer_reminder_frequency?: number;
+    fertilizer_snooze_minutes?: number;
+ 
     pruning_notification_enabled?: boolean;
+    pruning_preferred_time?: string;
     pruning_reminder_frequency?: number;
+    pruning_snooze_minutes?: number;
+ 
     generic_notification_enabled?: boolean;
+    generic_care_preferred_time?: string;
     generic_care_reminder_frequency?: number;
+    generic_care_snooze_minutes?: number;
 }
+ 
 
 // ── Existing nested shape (keep as-is, service uses this) ────────────────────
 export interface CareNotificationInput {
     notification_enabled: boolean;
     preferred_time?: string | null;
-    reminder_frequency?: number;
+    reminder_frequency?: number | null;
+    snooze_minutes?: number | null;
 }
 
 export interface UpdateUserPlantInput {
-    watering?: CareNotificationInput;
+    watering?:   CareNotificationInput;
     fertilizer?: CareNotificationInput;
-    pruning?: CareNotificationInput;
-    generic?: CareNotificationInput;
+    pruning?:    CareNotificationInput;
+    generic?:    CareNotificationInput;
 }
-
 export interface ReminderforUserPlant{
   watering_reminder_frequency: number | null;
   watering_preferred_time: string | null;

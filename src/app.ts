@@ -19,9 +19,13 @@ import dashboardRoutes from "./modules/admin/dashboard/dashboardRoutes";
 import subscriptionRoutes from "./modules/subscription/subscriptionRoutes";
 import externalLinksRoutes from "./modules/admin/externalLinks/externalLinksRoutes";
 import myPlantRoutes from "./modules/myPlants/myPlantRoute";
+import reminderRoutes from "./modules/reminder/reminder.Routes";
 // import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import { connectDB } from "./core/config/db";
+import { startReminderCron } from "./modules/reminder/reminder.cron";
+// import { createFcmTokensTable } from "./db/createFcm_tokensTable";
+// import { createnotification_logTable } from "./db/createnotification_logTable";
 
 // import { createLeadsTable } from "./db/createLeadSchemaTables";
 const app = express();
@@ -61,8 +65,8 @@ app.use(express.urlencoded({ extended: true }));
 // });
 // app.use(limiter);
 // User Authentication Routes
-// createPlansTable();
-// createPaymentsTable();
+// createFcmTokensTable();
+startReminderCron();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);
@@ -96,6 +100,8 @@ app.use("/api/v1/allplants", myPlantRoutes);
 // app.use("/api/v1/suppliers", suppliersRoutes);
 //landscape design routes
 app.use("/api/v1/landscape", landScapeDesignRoutes);
+// Reminder Routes
+app.use("/api/v1/reminders",reminderRoutes);
 // registerBlockExpiredTrialsCron();
 app.use(errorHandler);
 

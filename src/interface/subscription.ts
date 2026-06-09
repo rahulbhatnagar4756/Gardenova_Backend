@@ -112,3 +112,9 @@ export interface GetAllPlansWithDetailResponse {
     message?: string;
     data?: SubscriptionPlan[];
 }
+
+export interface VerifyPurchaseBody {
+  purchaseToken: string;
+  productId: string;
+  packageName: string;
+}

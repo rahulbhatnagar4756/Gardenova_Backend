@@ -482,213 +482,6 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
 
 /**
  * @swagger
- * tags:
- *   name: My Plants
- *   description: User plant management APIs
- */
-
-/**
- * @swagger
- * components:
- *   securitySchemes:
- *     bearerAuth:
- *       type: http
- *       scheme: bearer
- *       bearerFormat: JWT
- *
- *   schemas:
- *
- *     TimeString:
- *       type: string
- *       pattern: '^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$'
- *       example: "09:00:00"
- *       description: Time in HH:mm:ss format
- *
- *     AddUserPlantRequest:
- *       type: object
- *       required:
- *         - plant_id
- *       properties:
- *
- *         plant_id:
- *           type: integer
- *           example: 1
- *           description: ID of the plant species to add
- *
- *         # ───────────── WATERING ─────────────
- *         watering_notification_enabled:
- *           type: boolean
- *           default: false
- *           description: Enable watering notifications
- *
- *         watering_preferred_time:
- *           $ref: '#/components/schemas/TimeString'
- *           description: Preferred time for watering reminder. Defaults to "09:00:00"
- *
- *         watering_reminder_frequency:
- *           type: integer
- *           minimum: 0
- *           example: 3
- *           description: Watering interval in days. Defaults to 0
- *
- *         # ───────────── FERTILIZER ─────────────
- *         fertilizer_notification_enabled:
- *           type: boolean
- *           default: false
- *           description: Enable fertilizer notifications
- *
- *         fertilizer_preferred_time:
- *           $ref: '#/components/schemas/TimeString'
- *           description: Preferred time for fertilizer reminder. Defaults to "09:00:00"
- *
- *         fertilizer_reminder_frequency:
- *           type: integer
- *           minimum: 0
- *           example: 15
- *           description: Fertilizing interval in days. Defaults to 0
- *
- *         # ───────────── PRUNING ─────────────
- *         pruning_notification_enabled:
- *           type: boolean
- *           default: false
- *           description: Enable pruning notifications
- *
- *         pruning_reminder_frequency:
- *           type: integer
- *           minimum: 0
- *           example: 30
- *           description: Pruning interval in days. Defaults to 0
- *
- *         # ───────────── GENERIC CARE ─────────────
- *         generic_notification_enabled:
- *           type: boolean
- *           default: false
- *           description: Enable generic care notifications
- *
- *         generic_care_reminder_frequency:
- *           type: integer
- *           minimum: 0
- *           example: 7
- *           description: Generic care interval in days. Defaults to 0
- *
- *     UserPlantResponse:
- *       type: object
- *       properties:
- *
- *         id:
- *           type: string
- *           format: uuid
- *
- *         user_id:
- *           type: string
- *           format: uuid
- *
- *         plant_id:
- *           type: integer
- *
- *         added_at:
- *           type: string
- *           format: date-time
- *
- *         # ───────────── WATERING ─────────────
- *         watering_notification_enabled:
- *           type: boolean
- *
- *         watering_preferred_time:
- *           $ref: '#/components/schemas/TimeString'
- *
- *         watering_reminder_frequency:
- *           type: integer
- *
- *         last_watered_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         next_watered_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         # ───────────── FERTILIZER ─────────────
- *         fertilizer_notification_enabled:
- *           type: boolean
- *
- *         fertilizer_preferred_time:
- *           $ref: '#/components/schemas/TimeString'
- *
- *         fertilizer_reminder_frequency:
- *           type: integer
- *
- *         last_fertilized_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         next_fertilized_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         # ───────────── PRUNING ─────────────
- *         pruning_notification_enabled:
- *           type: boolean
- *
- *         pruning_reminder_frequency:
- *           type: integer
- *
- *         last_pruned_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         next_pruned_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         # ───────────── GENERIC CARE ─────────────
- *         generic_notification_enabled:
- *           type: boolean
- *
- *         generic_care_reminder_frequency:
- *           type: integer
- *
- *         last_generic_care_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         next_generic_care_at:
- *           type: string
- *           format: date-time
- *           nullable: true
- *
- *         health_status:
- *           type: string
- *           example: "healthy"
- *
- *         created_at:
- *           type: string
- *           format: date-time
- *
- *         updated_at:
- *           type: string
- *           format: date-time
- *
- *     ErrorResponse:
- *       type: object
- *       properties:
- *         success:
- *           type: boolean
- *           example: false
- *         message:
- *           type: string
- *           example: "Plant species not found"
- */
-
-/**
- * @swagger
  * /api/v1/allPlants/addplant:
  *   post:
  *     summary: Add plant to user's collection
@@ -700,9 +493,9 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *       - If notification is disabled → next_* field will be null
  *       - Frequency defaults to 0 if not provided
  *       - Preferred time defaults to "09:00:00" if not provided
+ *       - Snooze duration defaults to 30 minutes if not provided
  *
  *     tags: [My Plants]
- *
  *     security:
  *       - bearerAuth: []
  *
@@ -711,10 +504,83 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/AddUserPlantRequest'
+ *             type: object
+ *             required:
+ *               - plant_id
+ *             properties:
+ *               plant_id:
+ *                 type: integer
+ *                 example: 5
+ *
+ *               watering_notification_enabled:
+ *                 type: boolean
+ *                 default: false
+ *               watering_preferred_time:
+ *                 type: string
+ *                 example: "08:00:00"
+ *                 description: Time of day for watering reminder (HH:mm:ss)
+ *               watering_reminder_frequency:
+ *                 type: integer
+ *                 example: 3
+ *                 description: Days between watering reminders
+ *               watering_snooze_minutes:
+ *                 type: integer
+ *                 example: 30
+ *                 default: 30
+ *                 description: Snooze duration for watering reminders (minutes)
+ *
+ *               fertilizer_notification_enabled:
+ *                 type: boolean
+ *                 default: false
+ *               fertilizer_preferred_time:
+ *                 type: string
+ *                 example: "09:00:00"
+ *                 description: Time of day for fertilizer reminder (HH:mm:ss)
+ *               fertilizer_reminder_frequency:
+ *                 type: integer
+ *                 example: 14
+ *                 description: Days between fertilizer reminders
+ *               fertilizer_snooze_minutes:
+ *                 type: integer
+ *                 example: 30
+ *                 default: 30
+ *                 description: Snooze duration for fertilizer reminders (minutes)
+ *
+ *               pruning_notification_enabled:
+ *                 type: boolean
+ *                 default: false
+ *               pruning_preferred_time:
+ *                 type: string
+ *                 example: "10:00:00"
+ *                 description: Time of day for pruning reminder (HH:mm:ss)
+ *               pruning_reminder_frequency:
+ *                 type: integer
+ *                 example: 30
+ *                 description: Days between pruning reminders
+ *               pruning_snooze_minutes:
+ *                 type: integer
+ *                 example: 30
+ *                 default: 30
+ *                 description: Snooze duration for pruning reminders (minutes)
+ *
+ *               generic_notification_enabled:
+ *                 type: boolean
+ *                 default: false
+ *               generic_care_preferred_time:
+ *                 type: string
+ *                 example: "09:00:00"
+ *                 description: Time of day for generic care reminder (HH:mm:ss)
+ *               generic_care_reminder_frequency:
+ *                 type: integer
+ *                 example: 7
+ *                 description: Days between generic care reminders
+ *               generic_care_snooze_minutes:
+ *                 type: integer
+ *                 example: 30
+ *                 default: 30
+ *                 description: Snooze duration for generic care reminders (minutes)
  *
  *     responses:
- *
  *       201:
  *         description: Plant added successfully
  *         content:
