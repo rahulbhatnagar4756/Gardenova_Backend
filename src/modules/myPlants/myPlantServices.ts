@@ -77,7 +77,6 @@ export const getAllPlantsService = async (
     const pool = getDB();
     const offset = (page - 1) * limit;
     const TABLE = "plant_table_final";
-
     const searchValue = search?.trim() ?? "";
 
     // ── Search condition ───────────────────────────────────────────────────────

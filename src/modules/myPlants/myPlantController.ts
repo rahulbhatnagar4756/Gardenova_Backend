@@ -74,12 +74,6 @@ export const getAllPlants = async (
                 .json(errorResponse("Validation failed", { issues: err.issues }));
             return;
         }
-
-        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(
-            errorResponse("Something went wrong", {
-                details: (err as Error).message,
-            })
-        );
         next(err);
     }
 };

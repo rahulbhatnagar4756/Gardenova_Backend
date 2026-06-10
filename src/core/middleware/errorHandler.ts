@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { errorResponse } from "../utils/responseFormatter";
 import { HTTP_STATUS } from "../utils/constants";
 import { CustomError } from "../../interface/Error";
+import logger from "../config/logger";
+import { Sentry } from "../config/sentry";
 
 /**
  * Global error-handling middleware for Express.
@@ -42,7 +44,25 @@ const errorHandler = (
     statusCode = HTTP_STATUS.UNAUTHORIZED;
     message = "Invalid token";
   }
-
+  if (!statusCode || statusCode >= 500) {
+    Sentry.captureException(err, {
+      extra: {
+        url: req.originalUrl,
+        method: req.method,
+        userId: (req as any).user?.userId ?? null,      // eslint-disable-line @typescript-eslint/no-explicit-any
+        body: req.body,
+      },
+    });
+  }
+   // ← add this block
+  logger.error("API Error", {
+    message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+    statusCode: statusCode ?? 400,
+    userId: (req as any).user?.id ?? null,  // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
   res.status(statusCode ?? 400).json(errorResponse(message));
 };
 

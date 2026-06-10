@@ -1,3 +1,7 @@
+import initSentry from './core/config/sentry';
+initSentry(); // ← first line
+// console.log('Sentry DSN:', process.env.SENTRY_DSN); // ← check karo
+
 import app from "./app";
 import config from "./core/config/env";
 

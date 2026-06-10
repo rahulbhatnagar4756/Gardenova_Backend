@@ -23,17 +23,21 @@ import reminderRoutes from "./modules/reminder/reminder.Routes";
 // import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import { connectDB } from "./core/config/db";
-import { startReminderCron } from "./modules/reminder/reminder.cron";
+// import { startReminderCron } from "./modules/reminder/reminder.cron";
+import logger from "./core/config/logger";
+import detailedLogger from "./core/middleware/httpLogger";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
 
 // import { createLeadsTable } from "./db/createLeadSchemaTables";
 const app = express();
 setupSwagger(app);
+// app.use(httpLogger);
 
 // Initialize database connection
 connectDB().catch((error) => {
   console.error("Failed to connect to database:", error);
+  logger.error("Failed to connect to database", { error: error.message });
   process.exit(1);
 });
 
@@ -50,6 +54,8 @@ const corsOptions = {
   exposedHeaders: ["Authorization"],
   credentials: true, // Set to true for cookies or HTTP auth
 };
+app.use(detailedLogger);
+
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -66,7 +72,7 @@ app.use(express.urlencoded({ extended: true }));
 // app.use(limiter);
 // User Authentication Routes
 // createFcmTokensTable();
-startReminderCron();
+// startReminderCron();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);
