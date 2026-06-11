@@ -4,6 +4,7 @@ import { answerValidation } from "./answerValidation";
 import {
   submitAnswer,
   getRecommendedPlantsController,
+  getUserAnswersController,
   // getRecommendedPartnersController,
 } from "./answerController";
 
@@ -198,5 +199,45 @@ const router: Router = express.Router();
 router.post("", auth,validateRequest(answerValidation), submitAnswer);
 router.get("/plants/:responseId", getRecommendedPlantsController);
 // router.get("/partners/:responseId", getRecommendedPartnersController);
+/**
+ * @swagger
+ * /api/v1/answers/{responseId}:
+ *   get:
+ *     summary: Get user answers by response ID
+ *     tags: [Answers]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: responseId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Response ID
+ *     responses:
+ *       200:
+ *         description: User answers retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       400:
+ *         description: Invalid response ID
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Answers not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get("/:responseId", auth, getUserAnswersController);
 
 export default router;

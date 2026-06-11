@@ -352,3 +352,76 @@ export const getRecommendedPlantsController = async (
     next(err);
   }
 };
+
+
+/**
+ * Fetches all survey answers for a given response ID.
+ *
+ * This endpoint:
+ * - Validates the authenticated user.
+ * - Retrieves the user from the database using their email.
+ * - Fetches survey answers associated with the provided response ID.
+ * - Returns the list of answers if found.
+ *
+ * @async
+ * @function getUserAnswersController
+ * @param {AuthRequest} req - Express request object containing authentication data and route parameters.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express next middleware function for error handling.
+ * @returns {Promise<void>} Resolves when the response is sent.
+ *
+ * @throws {ZodError} Returns a 400 response when validation fails.
+ * @throws {Error} Passes unexpected errors to the Express error handler.
+ */
+export const getUserAnswersController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { responseId } = req.params;
+    const userPayload = req.user as AuthUserPayload | undefined;
+    if (!userPayload || !userPayload.userEmail) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
+    }
+
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+      return;
+    }
+    if (!user.id) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid user ID"));
+      return;
+    }
+
+    const client = await getDB();
+
+    const result = await client.query<{
+      question_id: string;
+      answer_type: string;
+      selected_option: string;
+    }>(
+      `SELECT sa.question_id, sa.answer_type, sa.selected_option
+        FROM survey_answers sa
+        WHERE sa.response_id = $1
+     `,
+      [responseId]
+    );
+    // console.log("DB result rows:", result);
+
+    if (result.rows.length === 0) {
+      res.status(404).json(errorResponse("No survey answers found for this responseId"));
+      return;
+    }
+    res.status(200).json(successResponse(result.rows, "User answers fetched successfully"));
+  } catch (err) {
+    console.error("[getUserAnswersController]", err);
+    if (err instanceof ZodError) {
+      res.status(400).json(errorResponse("Validation failed", { issues: err.issues }));
+      return;
+    }
+    next(err);
+  }
+};
