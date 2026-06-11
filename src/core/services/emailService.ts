@@ -12,6 +12,7 @@ import { leadNotificationForProfessional } from "../../templates/LeadNotificatio
 import { leadNotificationForUser } from "../../templates/LeadNotificationForUser";
 import { leadNotificationForAdmin } from "../../templates/leadNotificationForAdmin";
 import { sendVerificationEmailTemplate } from "../../templates/sendVerificationEmailTemplate";
+import { contactUsEmailTemplate } from "../../templates/sendContactUsEmail";
 
 /**
  * Creates and configures an email transporter using Nodemailer.
@@ -410,3 +411,29 @@ export const sendVerificationEmail = async (email:string, code:string, expiratio
   };
   await transporter.sendMail(mailOptions);
 };
+
+/**
+ * Sends a "Contact Us" email to the site administrator.
+ *
+ * This function uses a configured email transporter to send an email containing
+ * the user's name, email address, and message submitted through the contact form.
+ *
+ * @async
+ * @function sendContactUsEmail
+ * @param {string} email - The email address of the user submitting the contact form.
+ * @param {string} name - The name of the user submitting the contact form.
+ * @param {string} message - The message content submitted by the user.
+ * @returns {Promise<void>} Resolves when the email has been successfully sent.
+ *
+ * @throws Will throw an error if sending the email fails.
+ */
+export const sendContactUsEmail = async (email:string, name:string, message:string): Promise<void>=> {
+  const transporter = createTransporter();
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: process.env.ADMIN_EMAIL,
+    subject: `New Contact Form Submission from ${name}`,
+    html:contactUsEmailTemplate(name, email, message),
+  };
+  await transporter.sendMail(mailOptions);
+}

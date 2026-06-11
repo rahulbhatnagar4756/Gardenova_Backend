@@ -26,6 +26,7 @@ import { connectDB } from "./core/config/db";
 // import { startReminderCron } from "./modules/reminder/reminder.cron";
 import logger from "./core/config/logger";
 import detailedLogger from "./core/middleware/httpLogger";
+import contactRoutes from "./modules/contactus/contactRoutes";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
 
@@ -100,6 +101,9 @@ app.use("/api/v1/allplants", myPlantRoutes);
 app.use("/api/v1/landscape", landScapeDesignRoutes);
 // Reminder Routes
 app.use("/api/v1/reminders",reminderRoutes);
+
+
+app.use("/api/v1/contact", contactRoutes);
 // registerBlockExpiredTrialsCron();
 app.use(errorHandler);
 
