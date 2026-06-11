@@ -105,10 +105,10 @@ export const createPlantController = async (
       err instanceof Error
         ? err
         : {
-            name: "UnknownError",
-            message:
-              typeof err === "string" ? err : "An unknown error occurred",
-          };
+          name: "UnknownError",
+          message:
+            typeof err === "string" ? err : "An unknown error occurred",
+        };
 
     await error(
       "Plant creation failed with unexpected error",
@@ -181,10 +181,10 @@ export const getPlantByIdController = async (
       err instanceof Error
         ? err
         : {
-            name: "UnknownError",
-            message:
-              typeof err === "string" ? err : "An unknown error occurred",
-          };
+          name: "UnknownError",
+          message:
+            typeof err === "string" ? err : "An unknown error occurred",
+        };
 
     await error(
       "Get plant by ID failed",
@@ -242,10 +242,10 @@ export const updatePlantController = async (
       err instanceof Error
         ? err
         : {
-            name: "UnknownError",
-            message:
-              typeof err === "string" ? err : "An unknown error occurred",
-          };
+          name: "UnknownError",
+          message:
+            typeof err === "string" ? err : "An unknown error occurred",
+        };
 
     await error(
       "Plant update failed",
@@ -283,10 +283,10 @@ export const deletePlantController = async (
       err instanceof Error
         ? err
         : {
-            name: "UnknownError",
-            message:
-              typeof err === "string" ? err : "An unknown error occurred",
-          };
+          name: "UnknownError",
+          message:
+            typeof err === "string" ? err : "An unknown error occurred",
+        };
 
     await error(
       "Plant deletion failed",
@@ -339,19 +339,20 @@ export const diagnosePlantController = async (
     const apiResponse = await identifyPlantService(req.body);
 
     // if(apiResponse.status === 200){
-       res
+    res
       .status(HTTP_STATUS.OK)
       .json(successResponse(apiResponse, "Plant diagnosed successfully"));
     // }
-   
+
   } catch (error: unknown) {
     // console.log("Error in diagnosePlantController:", error);
-    const err = error instanceof Error ? error.message : "Unknown error";
-    res.status(500).json({
-      success: false,
-      error: "Failed to diagnose plant",
-      message: err,
-    });
+    if (error instanceof ZodError) {
+      res.status(500).json({
+        success: false,
+        error: "Failed to diagnose plant",
+        message: error.message,
+      });
+    }
     next(error);
   }
 };

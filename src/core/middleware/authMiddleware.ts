@@ -25,7 +25,7 @@ import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
  */
 
 export const userRateLimiter = new RateLimiterMemory({
-  points: 150,
+  points: 60, // Number of points
   duration: 60,
 });
 /**
@@ -71,11 +71,7 @@ export const getRateLimitErrorMessage = (rateLimiterRes: RateLimiterRes): RateLi
  * @returns {Promise<void>} Resolves when authentication passes or response is sent on failure.
  * @throws {Error} If the JWT token is expired, invalid, or not active.
  */
-const auth = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
+const auth = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const requestInfo = {
     method: req.method,
     url: req.originalUrl,
@@ -83,115 +79,80 @@ const auth = async (
     userAgent: req.get("User-Agent"),
   };
 
+  // ── 1. JWT Verification ──────────────────────────────────────────────────
   try {
     const token = req.header("Authorization")?.replace("Bearer ", "");
 
     if (!token) {
-      await warn(
-        "Authentication failed - missing token",
-        { ...requestInfo },
-        { source: "middleware.auth" }
-      );
+      await warn("Authentication failed - missing token", { ...requestInfo }, { source: "middleware.auth" });
       res.status(HTTP_STATUS.UNAUTHORIZED).json(
-        errorResponse(MESSAGES.TOKEN_MISSING, {
-          code: "TOKEN_MISSING",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-        })
+        errorResponse(MESSAGES.TOKEN_MISSING, { code: "TOKEN_MISSING", statusCode: HTTP_STATUS.UNAUTHORIZED })
       );
       return;
     }
 
     const decoded = jwt.verify(token, config.JWT_SECRET) as AuthTokenPayload;
 
-    // Decode base64 values
-    const decodedUser = {
+    req.user = {
       userEmail: Buffer.from(decoded.userEmail, "base64").toString("utf-8"),
-      role: Buffer.from(decoded.role, "base64").toString("utf-8"),
-      userId: Buffer.from(decoded.userId, "base64").toString("utf-8"),
-      ...(decoded.exp && { exp: decoded.exp }), // Preserve exp if it exists
-      ...(decoded.iat && { iat: decoded.iat }), // Preserve iat if it exists
+      role:      Buffer.from(decoded.role,      "base64").toString("utf-8"),
+      userId:    Buffer.from(decoded.userId,    "base64").toString("utf-8"),
+      ...(decoded.exp && { exp: decoded.exp }),
+      ...(decoded.iat && { iat: decoded.iat }),
     };
 
-    // Add decoded user info to request
-    req.user = decodedUser;
-    // await userRateLimiter.consume(decodedUser.userId);
-    // next();
   } catch (err: unknown) {
     if (err instanceof TokenExpiredError) {
-      await warn(
-        "Authentication failed - token expired",
-        {
-          ...requestInfo,
-          expiredAt: err.expiredAt ? err.expiredAt.toISOString() : null,
-        },
+      await warn("Authentication failed - token expired",
+        { ...requestInfo, expiredAt: err.expiredAt?.toISOString() ?? null },
         { source: "middleware.auth" }
       );
       res.status(HTTP_STATUS.UNAUTHORIZED).json(
-        errorResponse(MESSAGES.TOKEN_EXPIRED, {
-          code: "TOKEN_EXPIRED",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-        })
+        errorResponse(MESSAGES.TOKEN_EXPIRED, { code: "TOKEN_EXPIRED", statusCode: HTTP_STATUS.UNAUTHORIZED })
       );
       return;
     }
-
     if (err instanceof JsonWebTokenError) {
-      await warn(
-        "Authentication failed - invalid token",
+      await warn("Authentication failed - invalid token",
         { ...requestInfo, errorName: err.name, errorMessage: err.message },
         { source: "middleware.auth" }
       );
       res.status(HTTP_STATUS.UNAUTHORIZED).json(
-        errorResponse(MESSAGES.TOKEN_INVALID, {
-          code: "TOKEN_INVALID",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-        })
+        errorResponse(MESSAGES.TOKEN_INVALID, { code: "TOKEN_INVALID", statusCode: HTTP_STATUS.UNAUTHORIZED })
       );
       return;
     }
-
     if (err instanceof NotBeforeError) {
-      await warn(
-        "Authentication failed - token not active yet",
-        { ...requestInfo, notBefore: err.date ? err.date.toISOString() : null },
+      await warn("Authentication failed - token not active yet",
+        { ...requestInfo, notBefore: err.date?.toISOString() ?? null },
         { source: "middleware.auth" }
       );
       res.status(HTTP_STATUS.UNAUTHORIZED).json(
-        errorResponse(MESSAGES.TOKEN_NOT_ACTIVE, {
-          code: "TOKEN_NOT_ACTIVE",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-        })
+        errorResponse(MESSAGES.TOKEN_NOT_ACTIVE, { code: "TOKEN_NOT_ACTIVE", statusCode: HTTP_STATUS.UNAUTHORIZED })
       );
       return;
     }
-
-    // Unexpected error
-    const errorInfo = {
-      ...requestInfo,
-      errorName: err instanceof Error ? err.name : "UnknownError",
-      errorMessage: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    };
-
-    await error("Authentication failed - unexpected JWT error", errorInfo, {
-      source: "middleware.auth",
-    });
-
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(
-      errorResponse(MESSAGES.JWT_UNKNOWN_ERROR, {
-        code: "JWT_UNKNOWN_ERROR",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-      })
+    await error("Authentication failed - unexpected JWT error",
+      { ...requestInfo, errorName: err instanceof Error ? err.name : "UnknownError",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined },
+      { source: "middleware.auth" }
     );
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(
+      errorResponse(MESSAGES.JWT_UNKNOWN_ERROR, { code: "JWT_UNKNOWN_ERROR", statusCode: HTTP_STATUS.UNAUTHORIZED })
+    );
+    return;
   }
 
-   try {
-   const user = req.user as { userId: string };  // 👈 just cast here
- const rateLimiterRes = await userRateLimiter.consume(user.userId);
+  // ── 2. Rate Limiting (only reached if JWT passed) ────────────────────────
+  try {
+    const { userId } = req.user as { userId: string };
+    const rateLimiterRes = await userRateLimiter.consume(userId);
+
     res.set({
-      "X-RateLimit-Limit": "5",
+      "X-RateLimit-Limit":     String(userRateLimiter.points),
       "X-RateLimit-Remaining": String(rateLimiterRes.remainingPoints),
-      "X-RateLimit-Reset": new Date(Date.now() + rateLimiterRes.msBeforeNext).toISOString(),
+      "X-RateLimit-Reset":     new Date(Date.now() + rateLimiterRes.msBeforeNext).toISOString(),
     });
 
   } catch (err) {
@@ -199,26 +160,28 @@ const auth = async (
       const info = getRateLimitErrorMessage(err);
 
       await warn(
-        `Rate limit exceeded for user: `,
-        { ...requestInfo },
+        `Rate limit exceeded for user`,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { ...requestInfo, userId: (req.user as any)?.userId },
         { source: "middleware.auth" }
-      )
+      );
 
       res.set({
-        "Retry-After": String(info.details.retryAfterSeconds),
-        "X-RateLimit-Limit": "5",
+        "Retry-After":           String(info.details.retryAfterSeconds),
+        "X-RateLimit-Limit":     String(userRateLimiter.points),
         "X-RateLimit-Remaining": "0",
-        "X-RateLimit-Reset": info.details.retryAt,
+        "X-RateLimit-Reset":     info.details.retryAt,
       });
 
       res.status(429).json(errorResponse(info.message, info));
-      return;
+      return; // ← don't call next()
     }
 
-    // Rate limiter itself failed — don't block the user, just log it
+    // Rate limiter infra failure — fail open (log but don't block user)
     console.error("Rate limiter unexpected error:", err);
   }
-  next(); 
+
+  next();
 };
 
 export default auth;

@@ -61,15 +61,7 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(translationMiddleware()); // enable translation globally
 
-// const limiter = rateLimit({
-//   windowMs: 1 * 60 * 1000,
-//   max: 5,
-//   keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req),
-//   message: { error: "Too many requests, please try again later." },
-//   standardHeaders: true,
-//   legacyHeaders: false,
-// });
-// app.use(limiter);
+
 // User Authentication Routes
 // createFcmTokensTable();
 // startReminderCron();
