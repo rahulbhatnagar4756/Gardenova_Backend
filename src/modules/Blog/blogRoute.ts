@@ -6,6 +6,8 @@ import {
   saveDraft,
   getAllBlogs,
   getBlogBySlug,
+  updateBlog,
+  deleteBlog,
 } from "./blog.controller";
 /**
  * Configures local disk storage for blog image uploads.
@@ -218,5 +220,9 @@ router.get("/", getAllBlogs);
  *         description: Blog not found
  */
 router.get("/:slug", getBlogBySlug);
+
+
+router.put(   "/:id",    fields, updateBlog);
+router.delete("/:id",            deleteBlog);
 
 export default router;

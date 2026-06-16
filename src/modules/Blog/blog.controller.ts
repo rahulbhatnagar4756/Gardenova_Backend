@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { createBlogPost, getAllBlogPosts, getBlogPostBySlug } from "./blog.service";
+import { createBlogPost, deleteBlogPost, getAllBlogPosts, getBlogPostBySlug, updateBlogPost } from "./blog.service";
 
 /**
  * Retrieves the uploaded image URL from Multer files.
@@ -93,23 +93,23 @@ export async function createBlog(req: Request, res: Response): Promise<Response>
   try {
     const { title, excerpt, content, category, author, tags } = req.body;
 
-    if (!title?.trim())   return res.status(400).json({ error: "Title is required" });
+    if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
     if (!content?.trim()) return res.status(400).json({ error: "Content is required" });
 
     const files = req.files as Record<string, Express.Multer.File[]>;
-    const bannerUrl    = files?.banner?.[0]    ? `/blog_image/${files.banner[0].filename}`    : undefined;
+    const bannerUrl = files?.banner?.[0] ? `/blog_image/${files.banner[0].filename}` : undefined;
     const thumbnailUrl = files?.thumbnail?.[0] ? `/blog_image/${files.thumbnail[0].filename}` : undefined;
 
     const post = await createBlogPost({
-      title:        title.trim(),
-      excerpt:      excerpt?.trim(),
-      content:      content.trim(),
-      category:     category?.trim(),
-      author:       author?.trim(),
-      tags:         parseTags(tags),
+      title: title.trim(),
+      excerpt: excerpt?.trim(),
+      content: content.trim(),
+      category: category?.trim(),
+      author: author?.trim(),
+      tags: parseTags(tags),
       bannerUrl,
       thumbnailUrl,
-      status:       "published",
+      status: "published",
     });
 
     return res.status(201).json({ success: true, post });
@@ -162,19 +162,19 @@ export async function saveDraft(req: Request, res: Response): Promise<Response> 
     if (!title?.trim()) return res.status(400).json({ error: "Title is required to save draft" });
 
     const files = req.files as Record<string, Express.Multer.File[]>;
-    const bannerUrl    = files?.banner?.[0]    ? `/uploads/blogs/${files.banner[0].filename}`    : undefined;
+    const bannerUrl = files?.banner?.[0] ? `/uploads/blogs/${files.banner[0].filename}` : undefined;
     const thumbnailUrl = files?.thumbnail?.[0] ? `/uploads/blogs/${files.thumbnail[0].filename}` : undefined;
 
     const post = await createBlogPost({
-      title:        title.trim(),
-      excerpt:      excerpt?.trim(),
-      content:      content?.trim() ?? "",
-      category:     category?.trim(),
-      author:       author?.trim(),
-      tags:         parseTags(tags),
+      title: title.trim(),
+      excerpt: excerpt?.trim(),
+      content: content?.trim() ?? "",
+      category: category?.trim(),
+      author: author?.trim(),
+      tags: parseTags(tags),
       bannerUrl,
       thumbnailUrl,
-      status:       "draft",
+      status: "draft",
     });
 
     return res.status(201).json({ success: true, post });
@@ -262,5 +262,91 @@ export async function getBlogBySlug(req: Request, res: Response): Promise<Respon
   } catch (err: any) {
     console.error("[getBlogBySlug]", err);
     return res.status(500).json({ error: "Failed to fetch blog post" });
+  }
+}
+/**
+ * Updates an existing blog post by its ID.
+ *
+ * This controller handles:
+ * - Validating the blog post ID from request parameters.
+ * - Extracting updated blog fields from the request body.
+ * - Processing optional banner and thumbnail image uploads.
+ * - Parsing tags before updating the blog post.
+ * - Returning the updated blog post on success.
+ *
+ * @async
+ * @function updateBlog
+ * @param {Request} req - Express request object containing blog data and uploaded files.
+ * @param {Response} res - Express response object used to send the update result.
+ *
+ * @returns {Promise<Response>} Returns a JSON response containing:
+ * - `success: true` and the updated post on successful update.
+ * - Error message with appropriate HTTP status code on failure.
+ *
+ * @throws {500} If an unexpected error occurs while updating the blog post.
+ */
+export async function updateBlog(req: Request, res: Response): Promise<Response> {
+  try {
+    const id = parseInt(req.params.id!);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid post id" });
+
+    const { title, excerpt, content, category, author, tags, status } = req.body;
+    const files = req.files as Record<string, Express.Multer.File[]>;
+    const bannerUrl = files?.banner?.[0] ? `/blog_image/${files.banner[0].filename}` : undefined;
+    const thumbnailUrl = files?.thumbnail?.[0] ? `/blog_image/${files.thumbnail[0].filename}` : undefined;
+
+    const post = await updateBlogPost(id, {
+      title: title?.trim(),
+      excerpt: excerpt?.trim(),
+      content: content?.trim(),
+      category: category?.trim(),
+      author: author?.trim(),
+      tags: parseTags(tags),
+      status,
+      ...(bannerUrl && { bannerUrl }),
+      ...(thumbnailUrl && { thumbnailUrl }),
+    });
+
+    return res.json({ success: true, post });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    console.error("[updateBlog]", err);
+    return res.status(500).json({ error: "Failed to update blog post" });
+  }
+}
+
+/**
+ * Deletes an existing blog post by its ID.
+ *
+ * This controller handles:
+ * - Validating the blog post ID from request parameters.
+ * - Removing the blog post using the delete service.
+ * - Returning a success response when deletion is completed.
+ * - Returning a not found response if the post does not exist.
+ *
+ * @async
+ * @function deleteBlog
+ * @param {Request} req - Express request object containing the blog post ID in params.
+ * @param {Response} res - Express response object used to send the deletion result.
+ *
+ * @returns {Promise<Response>} Returns a JSON response containing:
+ * - `success: true` and confirmation message when the post is deleted.
+ * - Error message with appropriate HTTP status code on failure.
+ *
+ * @throws {500} If an unexpected error occurs while deleting the blog post.
+ */
+export async function deleteBlog(req: Request, res: Response): Promise<Response> {
+  try {
+    const id = parseInt(req.params.id!);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid post id" });
+
+    const deleted = await deleteBlogPost(id);
+    if (!deleted) return res.status(404).json({ error: "Post not found" });
+
+    return res.json({ success: true, message: "Post deleted" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    console.error("[deleteBlog]", err);
+    return res.status(500).json({ error: "Failed to delete post" });
   }
 }

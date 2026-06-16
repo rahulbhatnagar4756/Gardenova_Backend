@@ -372,3 +372,161 @@ export async function getBlogPostBySlug(slug: string):Promise<BlogPost | null> {
   if (!rows[0]) return null;
   return withImageUrls(rows[0]);
 }
+
+
+
+
+// interface UpdateBlogPostInput {
+//   title?: string;
+//   excerpt?: string;
+//   content?: string;
+//   category?: string;
+//   author?: string;
+//   tags?: string[];
+//   bannerUrl?: string;
+//   thumbnailUrl?: string;
+//   status?: "draft" | "published";
+// }
+
+interface BlogPost {
+  id: number;
+  title: string;
+  excerpt: string| null;
+  content: string;
+  category: string| null;
+  author: string| null;
+  banner_url: string | null;
+  thumbnail_url: string | null;
+  status: "draft" | "published";
+  published_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * Updates an existing blog post and manages its related tags.
+ *
+ * This service handles:
+ * - Dynamically updating only the provided blog post fields.
+ * - Updating publication timestamp when status changes to "published".
+ * - Removing and recreating tag relationships when tags are provided.
+ * - Creating new tags or reusing existing tags.
+ * - Executing all database operations inside a transaction.
+ *
+ * @async
+ * @function updateBlogPost
+ *
+ * @param {number} id - The unique identifier of the blog post to update.
+ * @param {Object} input - The fields to update.
+ * @param {string} [input.title] - Updated blog post title.
+ * @param {string} [input.excerpt] - Updated blog post excerpt.
+ * @param {string} [input.content] - Updated blog post content.
+ * @param {string} [input.category] - Updated blog post category.
+ * @param {string} [input.author] - Updated blog post author.
+ * @param {string[]} [input.tags] - Updated list of tags associated with the post.
+ * @param {string} [input.bannerUrl] - Updated banner image URL.
+ * @param {string} [input.thumbnailUrl] - Updated thumbnail image URL.
+ * @param {"draft" | "published"} [input.status] - Updated publication status.
+ *
+ * @returns {Promise<Object>} The updated blog post with formatted image URLs.
+ *
+ * @throws {Error} If no fields are provided for update.
+ * @throws {Error} If the blog post does not exist.
+ * @throws {Error} If any database operation fails.
+ */
+export async function updateBlogPost(id: number, input: {
+  title?: string;
+  excerpt?: string;
+  content?: string;
+  category?: string;
+  author?: string;
+  tags?: string[];
+  bannerUrl?: string;
+  thumbnailUrl?: string;
+  status?: "draft" | "published";
+}):Promise<BlogPost> {
+  const pool = await connectDB();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+ 
+    const fields: string[] = [];
+    //eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const values: any[] = [];
+ 
+    if (input.title !== undefined)    { fields.push(`title = $${values.length + 1}`);         values.push(input.title); }
+    if (input.excerpt !== undefined)  { fields.push(`excerpt = $${values.length + 1}`);       values.push(input.excerpt); }
+    if (input.content !== undefined)  { fields.push(`content = $${values.length + 1}`);       values.push(input.content); }
+    if (input.category !== undefined) { fields.push(`category = $${values.length + 1}`);      values.push(input.category); }
+    if (input.author !== undefined)   { fields.push(`author = $${values.length + 1}`);        values.push(input.author); }
+    if (input.bannerUrl !== undefined)    { fields.push(`banner_url = $${values.length + 1}`);    values.push(input.bannerUrl); }
+    if (input.thumbnailUrl !== undefined) { fields.push(`thumbnail_url = $${values.length + 1}`); values.push(input.thumbnailUrl); }
+    if (input.status !== undefined) {
+      fields.push(`status = $${values.length + 1}`);
+      values.push(input.status);
+      if (input.status === "published") {
+        fields.push(`published_at = $${values.length + 1}`);
+        values.push(new Date());
+      }
+    }
+ 
+    if (fields.length === 0) throw new Error("No fields to update");
+ 
+    values.push(id);
+    const { rows } = await client.query(
+      `UPDATE blog_posts SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+ 
+    if (!rows[0]) throw new Error("Post not found");
+ 
+    if (input.tags !== undefined) {
+      await client.query("DELETE FROM blog_post_tags WHERE post_id = $1", [id]);
+      for (const name of input.tags) {
+        const { rows: tagRows } = await client.query(
+          `INSERT INTO blog_tags (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+          [name.toLowerCase().trim()]
+        );
+        await client.query(
+          `INSERT INTO blog_post_tags (post_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [id, tagRows[0].id]
+        );
+      }
+    }
+ 
+    await client.query("COMMIT");
+    return withImageUrls(rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+/**
+ * Deletes a blog post from the database by its ID.
+ *
+ * This service handles:
+ * - Connecting to the database.
+ * - Deleting the blog post with the specified identifier.
+ * - Returning the deleted post ID when deletion succeeds.
+ * - Returning null when no matching blog post is found.
+ *
+ * @async
+ * @function deleteBlogPost
+ *
+ * @param {number} id - The unique identifier of the blog post to delete.
+ *
+ * @returns {Promise<{ id: number } | null>} The deleted blog post ID,
+ * or null if the post does not exist.
+ *
+ * @throws {Error} If the database connection or deletion query fails.
+ */
+export async function deleteBlogPost(id: number):Promise<{ id: number } | null>  {
+  const pool = await connectDB();
+  const { rows } = await pool.query(
+    "DELETE FROM blog_posts WHERE id = $1 RETURNING id",
+    [id]
+  );
+  return rows[0] ?? null;
+}
