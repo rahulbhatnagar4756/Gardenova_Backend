@@ -27,6 +27,8 @@ import { connectDB } from "./core/config/db";
 import logger from "./core/config/logger";
 import detailedLogger from "./core/middleware/httpLogger";
 import contactRoutes from "./modules/contactus/contactRoutes";
+import blogRouter from "./modules/Blog/blogRoute";
+// import { createBlogTable } from "./db/createBlogTable";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
 
@@ -45,6 +47,8 @@ connectDB().catch((error) => {
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/plant-images', express.static(path.join(process.cwd(), 'plant_images')));
 app.use('/disease_images', express.static(path.join(process.cwd(), 'disease_images')));
+app.use("/blog_image", express.static(path.join(process.cwd(), "blog_image")));
+
 
 
 // Middleware
@@ -64,7 +68,7 @@ app.use(express.urlencoded({ extended: true }));
 
 
 // User Authentication Routes
-// createFcmTokensTable();
+// createBlogTable()
 // startReminderCron();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
@@ -102,6 +106,7 @@ app.use("/api/v1/landscape", landScapeDesignRoutes);
 // Reminder Routes
 app.use("/api/v1/reminders",reminderRoutes);
 
+app.use("/api/v1/blogs", blogRouter);
 
 app.use("/api/v1/contact", contactRoutes);
 // registerBlockExpiredTrialsCron();

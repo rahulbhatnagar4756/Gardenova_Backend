@@ -62,6 +62,7 @@ const options = {
     "./src/modules/suppliers/*.ts",
     "./src/modules/landScapeDesign/*.ts",
     "./src/modules/contactus/*.ts",
+    "./src/modules/Blog/*.ts",
   ],
 };
 
