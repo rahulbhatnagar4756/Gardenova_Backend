@@ -4,15 +4,17 @@ import { connectDB } from "../../core/config/db";
 
 // ── Types ────────────────────────────────────────────────────────────
 export interface CreateBlogInput {
-    title: string;
-    excerpt?: string;
-    content: string;
-    category?: string;
-    author?: string;
-    tags?: string[];   // ["indoor", "plant-care"]
-    bannerUrl?: string | undefined;     // "/uploads/blogs/123-banner.jpg"
-    thumbnailUrl?: string | undefined;     // "/uploads/blogs/123-thumb.jpg"
-    status: "draft" | "published";
+  title: string;
+  excerpt?: string;
+  content: string;
+  category?: string;
+  author?: string;
+  tags?: string[];
+  bannerUrl?: string;
+  thumbnailUrl?: string;
+  status: "draft" | "published";
+  slug?: string;           // add
+  metaDescription?: string; // add
 }
 interface BlogPost {
   id: number;
@@ -25,6 +27,7 @@ interface BlogPost {
   status: "draft" | "published";
   banner_url: string | null;
   thumbnail_url: string | null;
+  meta_description: string | null; // add
   published_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -192,26 +195,27 @@ export async function createBlogPost(input: CreateBlogInput):Promise<BlogPost> {
     try {
         await client.query("BEGIN");
 
-        const slug = await makeUniqueSlug(input.title);
+       const slug = input.slug?.trim() || await makeUniqueSlug(input.title);
 
         const { rows } = await client.query(
-            `INSERT INTO blog_posts
-         (title, slug, excerpt, content, category, author, status, banner_url, thumbnail_url, published_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, $10)
-       RETURNING *`,
-            [
-                input.title,
-                slug,
-                input.excerpt ?? null,
-                input.content,
-                input.category ?? null,
-                input.author ?? null,
-                input.status,
-                input.bannerUrl ?? null,
-                input.thumbnailUrl ?? null,
-                input.status === "published" ? new Date() : null,
-            ]
-        );
+  `INSERT INTO blog_posts
+     (title, slug, excerpt, content, category, author, status, banner_url, thumbnail_url, meta_description, published_at)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+   RETURNING *`,
+  [
+    input.title,
+    slug,
+    input.excerpt ?? null,
+    input.content,
+    input.category ?? null,
+    input.author ?? null,
+    input.status,
+    input.bannerUrl ?? null,
+    input.thumbnailUrl ?? null,
+    input.metaDescription ?? null,  // add
+    input.status === "published" ? new Date() : null,
+  ]
+);
 
         const post = rows[0];
 
@@ -427,7 +431,8 @@ interface BlogPost {
  * @param {string} [input.bannerUrl] - Updated banner image URL.
  * @param {string} [input.thumbnailUrl] - Updated thumbnail image URL.
  * @param {"draft" | "published"} [input.status] - Updated publication status.
- *
+ * @param {string} [input.slug] - Updated unique slug for the blog post.
+ * @param {string} [input.metaDescription] - Updated meta description for SEO.
  * @returns {Promise<Object>} The updated blog post with formatted image URLs.
  *
  * @throws {Error} If no fields are provided for update.
@@ -444,6 +449,8 @@ export async function updateBlogPost(id: number, input: {
   bannerUrl?: string;
   thumbnailUrl?: string;
   status?: "draft" | "published";
+  slug?: string;
+metaDescription?: string;
 }):Promise<BlogPost> {
   const pool = await connectDB();
   const client = await pool.connect();
@@ -469,6 +476,8 @@ export async function updateBlogPost(id: number, input: {
         values.push(new Date());
       }
     }
+    if (input.slug !== undefined)            { fields.push(`slug = $${values.length + 1}`);             values.push(input.slug); }
+    if (input.metaDescription !== undefined) { fields.push(`meta_description = $${values.length + 1}`); values.push(input.metaDescription); }
  
     if (fields.length === 0) throw new Error("No fields to update");
  

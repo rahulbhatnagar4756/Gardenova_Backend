@@ -91,7 +91,9 @@ function parseTags(raw: unknown): string[] {
  */
 export async function createBlog(req: Request, res: Response): Promise<Response> {
   try {
-    const { title, excerpt, content, category, author, tags } = req.body;
+const { title, excerpt, content, category, author, tags, status, slug, meta_description } = req.body;
+    // console.log("req.body", req.body);           // ← here
+    // console.log("meta_description:", meta_description);  // ← her
 
     if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
     if (!content?.trim()) return res.status(400).json({ error: "Content is required" });
@@ -101,17 +103,18 @@ export async function createBlog(req: Request, res: Response): Promise<Response>
     const thumbnailUrl = files?.thumbnail?.[0] ? `/blog_image/${files.thumbnail[0].filename}` : undefined;
 
     const post = await createBlogPost({
-      title: title.trim(),
-      excerpt: excerpt?.trim(),
-      content: content.trim(),
-      category: category?.trim(),
-      author: author?.trim(),
-      tags: parseTags(tags),
-      bannerUrl,
-      thumbnailUrl,
-      status: "published",
-    });
-
+  title: title.trim(),
+  excerpt: excerpt?.trim(),
+  content: content?.trim() ?? "",
+  category: category?.trim(),
+  author: author?.trim(),
+  tags: parseTags(tags),
+  status: status === "draft" ? "draft" : "published",
+  ...(bannerUrl            && { bannerUrl }),
+  ...(thumbnailUrl         && { thumbnailUrl }),
+  ...(slug?.trim()         && { slug: slug.trim().toLowerCase() }),
+  ...(meta_description?.trim() && { metaDescription: meta_description.trim() }),
+});
     return res.status(201).json({ success: true, post });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
@@ -157,8 +160,9 @@ export async function createBlog(req: Request, res: Response): Promise<Response>
  */
 export async function saveDraft(req: Request, res: Response): Promise<Response> {
   try {
-    const { title, excerpt, content, category, author, tags } = req.body;
-
+const { title, excerpt, content, category, author, tags, slug, meta_description } = req.body;
+    // console.log("req.body", req.body);           // ← here
+    // console.log("meta_description:", meta_description);  // ← her
     if (!title?.trim()) return res.status(400).json({ error: "Title is required to save draft" });
 
     const files = req.files as Record<string, Express.Multer.File[]>;
@@ -166,16 +170,18 @@ export async function saveDraft(req: Request, res: Response): Promise<Response> 
     const thumbnailUrl = files?.thumbnail?.[0] ? `/uploads/blogs/${files.thumbnail[0].filename}` : undefined;
 
     const post = await createBlogPost({
-      title: title.trim(),
-      excerpt: excerpt?.trim(),
-      content: content?.trim() ?? "",
-      category: category?.trim(),
-      author: author?.trim(),
-      tags: parseTags(tags),
-      bannerUrl,
-      thumbnailUrl,
-      status: "draft",
-    });
+  title: title.trim(),
+  excerpt: excerpt?.trim(),
+  content: content?.trim() ?? "",
+  category: category?.trim(),
+  author: author?.trim(),
+  tags: parseTags(tags),
+  status: "draft",
+  ...(bannerUrl            && { bannerUrl }),
+  ...(thumbnailUrl         && { thumbnailUrl }),
+  ...(slug?.trim()         && { slug: slug.trim().toLowerCase() }),  
+  ...(meta_description?.trim() && { metaDescription: meta_description.trim() }),
+});
 
     return res.status(201).json({ success: true, post });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,7 +296,9 @@ export async function updateBlog(req: Request, res: Response): Promise<Response>
     const id = parseInt(req.params.id!);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid post id" });
 
-    const { title, excerpt, content, category, author, tags, status } = req.body;
+    const { title, excerpt, content, category, author, tags, status, slug, meta_description } = req.body;
+    // console.log("req.body", req.body);           // ← here
+    // console.log("meta_description:", meta_description);  // ← here  
     const files = req.files as Record<string, Express.Multer.File[]>;
     const bannerUrl = files?.banner?.[0] ? `/blog_image/${files.banner[0].filename}` : undefined;
     const thumbnailUrl = files?.thumbnail?.[0] ? `/blog_image/${files.thumbnail[0].filename}` : undefined;
@@ -305,6 +313,8 @@ export async function updateBlog(req: Request, res: Response): Promise<Response>
       status,
       ...(bannerUrl && { bannerUrl }),
       ...(thumbnailUrl && { thumbnailUrl }),
+       ...(slug?.trim()            && { slug: slug.trim().toLowerCase() }),
+  ...(meta_description && { metaDescription: String(meta_description).trim() }),
     });
 
     return res.json({ success: true, post });
