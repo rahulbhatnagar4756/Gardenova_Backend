@@ -91,9 +91,9 @@ function parseTags(raw: unknown): string[] {
  */
 export async function createBlog(req: Request, res: Response): Promise<Response> {
   try {
-const { title, excerpt, content, category, author, tags, status, slug, meta_description } = req.body;
-    // console.log("req.body", req.body);           // ← here
-    // console.log("meta_description:", meta_description);  // ← her
+const { title, excerpt, content, category, author, tags, status } = req.body;
+    const slug = String(req.body.slug ?? "");
+    const meta_description = String(req.body.meta_description ?? "");
 
     if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
     if (!content?.trim()) return res.status(400).json({ error: "Content is required" });
