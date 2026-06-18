@@ -426,3 +426,48 @@ export interface PaginatedPlantsResponse {
     totalPages: number;
     totalItems: number;
 }
+
+
+export interface NotificationDetail {
+  id: string;
+  user_id: string;
+  added_at: Date;
+  watering_reminder_frequency: number;
+  last_watered_at: Date | null;
+  next_watered_at: Date | null;
+  watering_notification_enabled: boolean;
+  watering_preferred_time: string | null;
+
+  fertilizer_reminder_frequency: number;
+  last_fertilized_at: Date | null;
+  next_fertilized_at: Date | null;
+  fertilizer_notification_enabled: boolean;
+  fertilizer_preferred_time: string | null;
+
+  pruning_reminder_frequency: number;
+  last_pruned_at: Date | null;
+  next_pruned_at: Date | null;
+  pruning_notification_enabled: boolean;
+  pruning_preferred_time: string | null;
+
+  generic_care_reminder_frequency: number;
+  last_generic_care_at: Date | null;
+  next_generic_care_at: Date | null;
+  generic_notification_enabled: boolean;
+  generic_care_preferred_time: string | null;
+
+  health_status: string;
+
+  created_at: Date;
+  updated_at: Date;
+
+  plant_id: number;
+
+  watering_snooze_minutes: number;
+  fertilizer_snooze_minutes: number;
+  pruning_snooze_minutes: number;
+  generic_care_snooze_minutes: number;
+
+  common_name: string;
+  scientific_name: string;
+}

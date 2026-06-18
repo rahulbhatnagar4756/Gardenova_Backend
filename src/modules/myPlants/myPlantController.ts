@@ -8,6 +8,7 @@ import { addPlantToUserService,
     deleteUserPlantService, 
     getAllPlantsAdminService, 
     getAllPlantsService, 
+    getNotificationDetailService, 
     getUserPlantByIdService, 
     getUserPlantsService, 
     importPlantsService,
@@ -622,3 +623,51 @@ export const deleteUserPlantController= async (
         next(err);
     }
 };
+
+
+/**
+ * Retrieves notification details for the authenticated user.
+ *
+ * @param req - Express request object containing user authentication data and params.
+ * @param res - Express response object.
+ * @param next - Express next middleware function.
+ * @returns Promise<void>
+ */
+export const getNotificationDetailsController= async(
+    req:AuthRequest,
+    res:Response,
+    next:NextFunction
+    ):Promise<void> => {
+        const userPayload = req.user as AuthUserPayload | undefined;
+        if (!userPayload?.userEmail) {
+            res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+            return;
+        }
+        const user = await findUserByEmail(userPayload.userEmail);
+
+        if (!user) {
+            res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+            return;
+        }
+
+        try {
+            const activityType =( req.params.activityType as string).trim().toLocaleLowerCase();
+            const eventType = (req.params.eventType as string).trim().toLocaleLowerCase();
+            
+
+            const data = await getNotificationDetailService(user.id!, activityType,eventType);
+            res.status(HTTP_STATUS.OK).json(successResponse(
+                data,
+                "Notification details retrieved successfully"
+            ));
+        }
+        catch (err) {
+            if (err instanceof Error) {
+                res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+                return;
+            }
+            next(err);
+        }
+    }
+
+

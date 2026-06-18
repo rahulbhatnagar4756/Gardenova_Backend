@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getNotificationDetailsController, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
 import { reminderValidation } from "./myPlantValidation";
 import multer from "multer";
@@ -1035,5 +1035,80 @@ router.get("/admin/getAllPlants", auth, getAllPlantsAdmin);
  *                   example: Something went wrong
  */
 router.delete("/deletePlant/:userPlantId", auth, deleteUserPlantController);
+
+/**
+ * @swagger
+ * /api/v1/allplants/user/notification/{activityType}/{eventType}:
+ *   get:
+ *     summary: Get user plant notification details
+ *     description: |
+ *       Returns the user's plant notifications filtered by activity type and event type.
+ *
+ *       Activity Types:
+ *       - watering
+ *       - fertilizer
+ *       - pruning
+ *       - generic
+ *       - all
+ *
+ *       Event Types:
+ *       - missed
+ *       - upcoming
+ *       - all
+ *
+ *     tags:
+ *       - Notifications
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: activityType
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - watering
+ *             - fertilizer
+ *             - pruning
+ *             - generic
+ *             - all
+ *         description: Filter notifications by activity type.
+ *       - in: path
+ *         name: eventType
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - missed
+ *             - upcoming
+ *             - all
+ *         description: Filter notifications by event status.
+ *     responses:
+ *       200:
+ *         description: Notification details retrieved successfully.
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: Notification details retrieved successfully
+ *               data:
+ *                 - id: "d5bcbf83-1234-5678-90ab-cdef12345678"
+ *                   plant_id: 12
+ *                   common_name: "Snake Plant"
+ *                   scientific_name: "Dracaena trifasciata"
+ *                   next_watered_at: "2026-06-20T10:00:00.000Z"
+ *                   watering_notification_enabled: true
+ *       400:
+ *         description: Invalid request parameters.
+ *       401:
+ *         description: Unauthorized or user not found.
+ *       500:
+ *         description: Internal server error.
+ */
+router.get(
+  "/user/notification/:activityType/:eventType",
+  auth,
+  getNotificationDetailsController
+);
  
 export default router;

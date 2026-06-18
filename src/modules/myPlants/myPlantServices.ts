@@ -5,6 +5,7 @@ import {
     CareNotificationInput,
     CareUpdateFields,
     FlatUpdateUserPlantInput,
+    NotificationDetail,
     PaginatedUserPlants,
     PlantDetailsResponse,
     PlantResponse,
@@ -1793,4 +1794,110 @@ export const deleteUserPlantService = async (
         throw new Error("Plant not found for this user");
     }
 };
+/**
+ * Retrieves notification details for a user's plants based on activity and event type.
+ *
+ * @param userId - User ID to fetch notifications for.
+ * @param activityType - Notification activity type (watering, fertilizer, pruning, generic).
+ * @param eventType - Notification event type (missed or upcoming).
+ * @returns Promise containing notification details.
+ */
+export const getNotificationDetailService = async (
+  userId: string,
+  activityType: string | null,
+  eventType: string | null
+):Promise<NotificationDetail[]> => {
+  const pool = await getDB();
 
+  let query = `
+    SELECT
+      up.*,
+      p.common_name,
+      p.scientific_name
+    FROM user_plants up
+    INNER JOIN plant_table_final p
+      ON p.id = up.plant_id
+    WHERE up.user_id = $1
+  `;
+
+  const params: string[] = [userId];
+
+  if (activityType) {
+    switch (activityType) {
+      case "watering":
+        query += ` AND up.watering_notification_enabled = true`;
+
+        if (eventType === "missed") {
+          query += ` AND up.next_watered_at < NOW()`;
+        } else if (eventType === "upcoming") {
+          query += ` AND up.next_watered_at >= NOW()`;
+        }
+        break;
+
+      case "fertilizer":
+        query += ` AND up.fertilizer_notification_enabled = true`;
+
+        if (eventType === "missed") {
+          query += ` AND up.next_fertilized_at < NOW()`;
+        } else if (eventType === "upcoming") {
+          query += ` AND up.next_fertilized_at >= NOW()`;
+        }
+        break;
+
+      case "pruning":
+        query += ` AND up.pruning_notification_enabled = true`;
+
+        if (eventType === "missed") {
+          query += ` AND up.next_pruned_at < NOW()`;
+        } else if (eventType === "upcoming") {
+          query += ` AND up.next_pruned_at >= NOW()`;
+        }
+        break;
+
+      case "generic":
+        query += ` AND up.generic_notification_enabled = true`;
+
+        if (eventType === "missed") {
+          query += ` AND up.next_generic_care_at < NOW()`;
+        } else if (eventType === "upcoming") {
+          query += ` AND up.next_generic_care_at >= NOW()`;
+        }
+        break;
+    }
+  } else {
+    query += `
+      AND (
+        up.watering_notification_enabled = true
+        OR up.fertilizer_notification_enabled = true
+        OR up.pruning_notification_enabled = true
+        OR up.generic_notification_enabled = true
+      )
+    `;
+
+    if (eventType === "missed") {
+      query += `
+        AND (
+          (up.watering_notification_enabled = true AND up.next_watered_at < NOW())
+          OR (up.fertilizer_notification_enabled = true AND up.next_fertilized_at < NOW())
+          OR (up.pruning_notification_enabled = true AND up.next_pruned_at < NOW())
+          OR (up.generic_notification_enabled = true AND up.next_generic_care_at < NOW())
+        )
+      `;
+    } else if (eventType === "upcoming") {
+      query += `
+        AND (
+          (up.watering_notification_enabled = true AND up.next_watered_at >= NOW())
+          OR (up.fertilizer_notification_enabled = true AND up.next_fertilized_at >= NOW())
+          OR (up.pruning_notification_enabled = true AND up.next_pruned_at >= NOW())
+          OR (up.generic_notification_enabled = true AND up.next_generic_care_at >= NOW())
+        )
+      `;
+    }
+  }
+
+  query += ` ORDER BY up.created_at DESC`;
+
+  const result = await pool.query(query, params);
+
+  return result.rows;
+};

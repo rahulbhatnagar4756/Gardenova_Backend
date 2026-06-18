@@ -74,6 +74,7 @@ const upload = multer({
 
   limits: {
     fileSize: 10 * 1024 * 1024,
+    fieldSize: 20 * 1024 * 1024, 
   },
   /**
  * Filters uploaded files and allows only supported image formats.
