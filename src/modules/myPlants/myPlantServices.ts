@@ -739,11 +739,13 @@ export const getUserPlantsService = async (
             up.last_fertilized_at,
             up.next_fertilized_at,
             up.pruning_notification_enabled,
+            up.pruning_preferred_time,
             up.pruning_reminder_frequency,
             up.last_pruned_at,
             up.next_pruned_at,
             up.generic_notification_enabled,
             up.generic_care_reminder_frequency,
+            up.generic_care_preferred_time,
             up.last_generic_care_at,
             up.next_generic_care_at,
             up.added_at,
@@ -963,6 +965,8 @@ export const getUserPlantByIdService = async (
                 userPlant.pruning_notification_enabled,
             pruning_reminder_frequency:
                 userPlant.pruning_reminder_frequency,
+            pruning_preferred_time:
+                userPlant.pruning_preferred_time,
             next_pruned_at: userPlant.next_pruned_at,
             last_pruned_at: userPlant.last_pruned_at,
 
@@ -970,6 +974,8 @@ export const getUserPlantByIdService = async (
                 userPlant.generic_notification_enabled,
             generic_care_reminder_frequency:
                 userPlant.generic_care_reminder_frequency,
+            generic_care_preferred_time:
+                userPlant.generic_care_preferred_time,
             last_generic_care_at: userPlant.last_generic_care_at,
             next_generic_care_at: userPlant.next_generic_care_at,
         },

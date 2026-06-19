@@ -127,10 +127,12 @@ export interface UserPlant {
     next_fertilized_at: string | null;
     pruning_notification_enabled: boolean;
     pruning_reminder_frequency: number;
+    pruning_preferred_time: string | null;
     last_pruned_at: string | null;
     next_pruned_at: string | null;
     generic_notification_enabled: boolean;
     generic_care_reminder_frequency: number;
+    generic_care_preferred_time: string | null;
     last_generic_care_at: string | null;
     next_generic_care_at: string | null;
     added_at: string;
@@ -395,11 +397,13 @@ export interface ReminderforUserPlant{
   next_fertilized_at: string | null;
   last_fertilized_at: string | null;
   pruning_reminder_frequency: number | null;
+  pruning_preferred_time: string | null;
   puring_notification_enabled: boolean | null;
   next_pruned_at: string | null;
   last_pruned_at: string | null;
   generic_care_reminder_frequency: number | null;
   generic_notification_enabled: boolean | null;
+  generic_care_preferred_time: string | null;
   last_generic_care_at: string | null;
   next_generic_care_at: string | null;                                                     
 }
