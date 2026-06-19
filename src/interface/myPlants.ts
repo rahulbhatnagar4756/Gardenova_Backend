@@ -475,3 +475,39 @@ export interface NotificationDetail {
   common_name: string;
   scientific_name: string;
 }
+
+export type ActivityType = "watering" | "fertilizing" | "pruning" | "generic";
+export type EventType = "upcoming" | "missed" | "completed" | "all";
+ 
+export interface NotificationRow {
+  user_plant_id: string;
+  plant_id: number;
+  common_name: string;
+  scientific_name: string;
+  activity_type: ActivityType;
+  next_at: Date | null;
+  last_at: Date | null;
+  frequency_days: number;
+  snooze_minutes: number;
+  preferred_time: string | null;
+  event_type: "upcoming" | "missed" | "completed";
+  is_upcoming_in_5_hours: boolean;
+}
+ 
+export interface NotificationCounts {
+  all: number;
+  upcoming: number;
+  missed: number;
+  completed: number;
+}
+ 
+export interface NotificationResponse {
+  counts: NotificationCounts;
+  upcoming_in_5_hours: {
+    count: number;
+    tasks: NotificationRow[];
+  };
+  tasks: NotificationRow[];
+}
+
+

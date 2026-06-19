@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants, getNotificationDetailsController, getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants,  getNotificationsController,  getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
 import { reminderValidation } from "./myPlantValidation";
 import multer from "multer";
@@ -1108,7 +1108,7 @@ router.delete("/deletePlant/:userPlantId", auth, deleteUserPlantController);
 router.get(
   "/user/notification/:activityType/:eventType",
   auth,
-  getNotificationDetailsController
+  getNotificationsController
 );
  
 export default router;

@@ -1,11 +1,15 @@
 import { getDB } from "../../core/config/db";
 import {
+    ActivityType,
     AddUserPlantInput,
     AdminPlant,
     CareNotificationInput,
     CareUpdateFields,
+    EventType,
     FlatUpdateUserPlantInput,
-    NotificationDetail,
+    NotificationCounts,
+    NotificationResponse,
+    NotificationRow,
     PaginatedUserPlants,
     PlantDetailsResponse,
     PlantResponse,
@@ -1800,110 +1804,198 @@ export const deleteUserPlantService = async (
         throw new Error("Plant not found for this user");
     }
 };
+
+ 
+// ─────────────────────────────────────────────
+// Column map
+// ─────────────────────────────────────────────
+ interface ActivityColumns {
+  enabled: string;
+  next_at: string;
+  last_at: string;
+  frequency: string;
+  snooze: string;
+  preferred_time: string;
+}
 /**
- * Retrieves notification details for a user's plants based on activity and event type.
+ * Returns database column mappings for the specified activity type.
  *
- * @param userId - User ID to fetch notifications for.
- * @param activityType - Notification activity type (watering, fertilizer, pruning, generic).
- * @param eventType - Notification event type (missed or upcoming).
- * @returns Promise containing notification details.
+ * @param {ActivityType} activity - Activity type.
+ * @returns {ActivityColumns} Activity-specific column names.
  */
-export const getNotificationDetailService = async (
+function getColumns(activity: ActivityType): ActivityColumns {
+  switch (activity) {
+    case "watering":
+      return {
+        enabled: "watering_notification_enabled",
+        next_at: "next_watered_at",
+        last_at: "last_watered_at",
+        frequency: "watering_reminder_frequency",
+        snooze: "watering_snooze_minutes",
+        preferred_time: "watering_preferred_time",
+      };
+    case "fertilizing":
+      return {
+        enabled: "fertilizer_notification_enabled",
+        next_at: "next_fertilized_at",
+        last_at: "last_fertilized_at",
+        frequency: "fertilizer_reminder_frequency",
+        snooze: "fertilizer_snooze_minutes",
+        preferred_time: "fertilizer_preferred_time",
+      };
+    case "pruning":
+      return {
+        enabled: "pruning_notification_enabled",
+        next_at: "next_pruned_at",
+        last_at: "last_pruned_at",
+        frequency: "pruning_reminder_frequency",
+        snooze: "pruning_snooze_minutes",
+        preferred_time: "pruning_preferred_time",
+      };
+    case "generic":
+      return {
+        enabled: "generic_notification_enabled",
+        next_at: "next_generic_care_at",
+        last_at: "last_generic_care_at",
+        frequency: "generic_care_reminder_frequency",
+        snooze: "generic_care_snooze_minutes",
+        preferred_time: "generic_care_preferred_time",
+      };
+  }
+}
+ 
+const ALL_ACTIVITY_TYPES: ActivityType[] = [
+  "watering",
+  "fertilizing",
+  "pruning",
+  "generic",
+];
+ 
+// ─────────────────────────────────────────────
+// Core UNION ALL query builder
+// Fetches all rows — eventType filtering done in JS so counts
+// are always derived from the full set in one DB round-trip.
+// ─────────────────────────────────────────────
+ /**
+ * Builds a unified notification query for the given user and activities.
+ *
+ * @param {string} userId - User ID.
+ * @param {ActivityType[]} activities - Activity types to include.
+ * @returns {{ query: string; params: string[] }} SQL query and parameters.
+ */
+function buildUnionQuery(
+  userId: string,
+  activities: ActivityType[]
+): { query: string; params: string[] } {
+  const params: string[] = [userId]; // $1
+ 
+  const branches = activities.map((activity) => {
+    const cols = getColumns(activity);
+ 
+    // Plan B completed: last_at is within the current reminder cycle
+    const completedCond = `
+      up.${cols.last_at} IS NOT NULL
+      AND up.${cols.next_at} IS NOT NULL
+      AND up.${cols.frequency} > 0
+      AND up.${cols.last_at} >= (up.${cols.next_at} - (up.${cols.frequency} || ' days')::interval)
+    `;
+ 
+    const in5HoursCond = `
+      up.${cols.next_at} >= NOW()
+      AND up.${cols.next_at} <= NOW() + INTERVAL '5 hours'
+    `;
+ 
+    return `
+      SELECT
+        up.id                          AS user_plant_id,
+        up.plant_id,
+        p.common_name,
+        p.scientific_name,
+        '${activity}'::text            AS activity_type,
+        up.${cols.next_at}             AS next_at,
+        up.${cols.last_at}             AS last_at,
+        up.${cols.frequency}           AS frequency_days,
+        up.${cols.snooze}              AS snooze_minutes,
+        up.${cols.preferred_time}      AS preferred_time,
+        CASE
+          WHEN (${completedCond})         THEN 'completed'
+          WHEN up.${cols.next_at} < NOW() THEN 'missed'
+          ELSE 'upcoming'
+        END                            AS event_type,
+        (${in5HoursCond})              AS is_upcoming_in_5_hours
+      FROM user_plants up
+      INNER JOIN plant_table_final p ON p.id = up.plant_id
+      WHERE up.user_id = $1
+        AND up.${cols.enabled} = true
+        AND up.${cols.next_at} IS NOT NULL
+    `;
+  });
+ 
+  const query = `
+    ${branches.join("\nUNION ALL\n")}
+    ORDER BY next_at ASC NULLS LAST
+  `;
+ 
+  return { query, params };
+}
+ 
+// ─────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────
+/**
+ * Fetch notifications for a user with optional activity and event filters.
+ *
+ * @param {string} userId - User ID.
+ * @param {string|null} activityType - Activity type filter.
+ * @param {string|null} eventType - Event type filter.
+ * @returns {Promise<NotificationResponse>} Notifications, counts, and upcoming tasks.
+ */
+export const getNotificationsService = async (
   userId: string,
   activityType: string | null,
   eventType: string | null
-):Promise<NotificationDetail[]> => {
+): Promise<NotificationResponse> => {
   const pool = await getDB();
-
-  let query = `
-    SELECT
-      up.*,
-      p.common_name,
-      p.scientific_name
-    FROM user_plants up
-    INNER JOIN plant_table_final p
-      ON p.id = up.plant_id
-    WHERE up.user_id = $1
-  `;
-
-  const params: string[] = [userId];
-
-  if (activityType) {
-    switch (activityType) {
-      case "watering":
-        query += ` AND up.watering_notification_enabled = true`;
-
-        if (eventType === "missed") {
-          query += ` AND up.next_watered_at < NOW()`;
-        } else if (eventType === "upcoming") {
-          query += ` AND up.next_watered_at >= NOW()`;
-        }
-        break;
-
-      case "fertilizer":
-        query += ` AND up.fertilizer_notification_enabled = true`;
-
-        if (eventType === "missed") {
-          query += ` AND up.next_fertilized_at < NOW()`;
-        } else if (eventType === "upcoming") {
-          query += ` AND up.next_fertilized_at >= NOW()`;
-        }
-        break;
-
-      case "pruning":
-        query += ` AND up.pruning_notification_enabled = true`;
-
-        if (eventType === "missed") {
-          query += ` AND up.next_pruned_at < NOW()`;
-        } else if (eventType === "upcoming") {
-          query += ` AND up.next_pruned_at >= NOW()`;
-        }
-        break;
-
-      case "generic":
-        query += ` AND up.generic_notification_enabled = true`;
-
-        if (eventType === "missed") {
-          query += ` AND up.next_generic_care_at < NOW()`;
-        } else if (eventType === "upcoming") {
-          query += ` AND up.next_generic_care_at >= NOW()`;
-        }
-        break;
-    }
-  } else {
-    query += `
-      AND (
-        up.watering_notification_enabled = true
-        OR up.fertilizer_notification_enabled = true
-        OR up.pruning_notification_enabled = true
-        OR up.generic_notification_enabled = true
-      )
-    `;
-
-    if (eventType === "missed") {
-      query += `
-        AND (
-          (up.watering_notification_enabled = true AND up.next_watered_at < NOW())
-          OR (up.fertilizer_notification_enabled = true AND up.next_fertilized_at < NOW())
-          OR (up.pruning_notification_enabled = true AND up.next_pruned_at < NOW())
-          OR (up.generic_notification_enabled = true AND up.next_generic_care_at < NOW())
-        )
-      `;
-    } else if (eventType === "upcoming") {
-      query += `
-        AND (
-          (up.watering_notification_enabled = true AND up.next_watered_at >= NOW())
-          OR (up.fertilizer_notification_enabled = true AND up.next_fertilized_at >= NOW())
-          OR (up.pruning_notification_enabled = true AND up.next_pruned_at >= NOW())
-          OR (up.generic_notification_enabled = true AND up.next_generic_care_at >= NOW())
-        )
-      `;
-    }
-  }
-
-  query += ` ORDER BY up.created_at DESC`;
-
+ 
+  // Always fetch ALL activity types — counts must never change with filter
+  const { query, params } = buildUnionQuery(userId, ALL_ACTIVITY_TYPES);
   const result = await pool.query(query, params);
-
-  return result.rows;
+  const allRows: NotificationRow[] = result.rows;
+ 
+  // ── Counts: always across all activity types, all event types ──
+  const counts: NotificationCounts = {
+    all: allRows.length,
+    upcoming: allRows.filter((r) => r.event_type === "upcoming").length,
+    missed: allRows.filter((r) => r.event_type === "missed").length,
+    completed: allRows.filter((r) => r.event_type === "completed").length,
+  };
+ 
+  // ── Apply activityType filter for tasks and upcoming_in_5_hours ──
+  const resolvedActivity =
+    activityType && ALL_ACTIVITY_TYPES.includes(activityType as ActivityType)
+      ? (activityType as ActivityType)
+      : null;
+ 
+  const filteredByActivity = resolvedActivity
+    ? allRows.filter((r) => r.activity_type === resolvedActivity)
+    : allRows;
+ 
+  // ── Upcoming in 5 hours: respects activityType filter ──
+  const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
+ 
+  // ── Tasks: apply eventType filter on top of activityType filter ──
+  const validEventTypes: EventType[] = ["upcoming", "missed", "completed"];
+  const tasks =
+    eventType && validEventTypes.includes(eventType as EventType)
+      ? filteredByActivity.filter((r) => r.event_type === eventType)
+      : filteredByActivity; // "all" or null → return everything
+ 
+  return {
+    counts,
+    upcoming_in_5_hours: {
+      count: in5HoursTasks.length,
+      tasks: in5HoursTasks,
+    },
+    tasks,
+  };
 };

@@ -8,7 +8,8 @@ import { addPlantToUserService,
     deleteUserPlantService, 
     getAllPlantsAdminService, 
     getAllPlantsService, 
-    getNotificationDetailService, 
+     
+    getNotificationsService, 
     getUserPlantByIdService, 
     getUserPlantsService, 
     importPlantsService,
@@ -633,41 +634,47 @@ export const deleteUserPlantController= async (
  * @param next - Express next middleware function.
  * @returns Promise<void>
  */
-export const getNotificationDetailsController= async(
-    req:AuthRequest,
-    res:Response,
-    next:NextFunction
-    ):Promise<void> => {
-        const userPayload = req.user as AuthUserPayload | undefined;
-        if (!userPayload?.userEmail) {
-            res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
-            return;
-        }
-        const user = await findUserByEmail(userPayload.userEmail);
-
-        if (!user) {
-            res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
-            return;
-        }
-
-        try {
-            const activityType =( req.params.activityType as string).trim().toLocaleLowerCase();
-            const eventType = (req.params.eventType as string).trim().toLocaleLowerCase();
-            
-
-            const data = await getNotificationDetailService(user.id!, activityType,eventType);
-            res.status(HTTP_STATUS.OK).json(successResponse(
-                data,
-                "Notification details retrieved successfully"
-            ));
-        }
-        catch (err) {
-            if (err instanceof Error) {
-                res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
-                return;
-            }
-            next(err);
-        }
+export const getNotificationsController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userPayload = req.user as AuthUserPayload | undefined;
+    if (!userPayload?.userEmail) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
     }
+ 
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+      return;
+    }
+ 
+    const activityType = (req.params.activityType as string).trim().toLowerCase();
+    const eventType = (req.params.eventType as string).trim().toLowerCase();
+ 
+    // "all" → null so the service returns every type / every event
+    const resolvedActivity = activityType === "all" ? null : activityType;
+    const resolvedEvent = eventType === "all" ? null : eventType;
+ 
+    const data = await getNotificationsService(
+      user.id!,
+      resolvedActivity,
+      resolvedEvent
+    );
+ 
+    res.status(HTTP_STATUS.OK).json(
+      successResponse(data, "Notifications retrieved successfully")
+    );
+  } catch (err) {
+    if (err instanceof Error) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+      return;
+    }
+    next(err);
+  }
+};
 
 
