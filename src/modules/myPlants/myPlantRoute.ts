@@ -493,7 +493,6 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *       - If notification is disabled → next_* field will be null
  *       - Frequency defaults to 0 if not provided
  *       - Preferred time defaults to "09:00:00" if not provided
- *       - Snooze duration defaults to 30 minutes if not provided
  *
  *     tags: [My Plants]
  *     security:
@@ -523,11 +522,11 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *                 type: integer
  *                 example: 3
  *                 description: Days between watering reminders
- *               watering_snooze_minutes:
- *                 type: integer
- *                 example: 30
- *                 default: 30
- *                 description: Snooze duration for watering reminders (minutes)
+ *               watering_note:
+ *                 type: string
+ *                 example: "Water at base, avoid leaves"
+ *                 description: Optional note for watering care (max 500 chars)
+ *                 maxLength: 500
  *
  *               fertilizer_notification_enabled:
  *                 type: boolean
@@ -540,11 +539,11 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *                 type: integer
  *                 example: 14
  *                 description: Days between fertilizer reminders
- *               fertilizer_snooze_minutes:
- *                 type: integer
- *                 example: 30
- *                 default: 30
- *                 description: Snooze duration for fertilizer reminders (minutes)
+ *               fertilizer_note:
+ *                 type: string
+ *                 example: "Use liquid fertilizer, half dose"
+ *                 description: Optional note for fertilizer care (max 500 chars)
+ *                 maxLength: 500
  *
  *               pruning_notification_enabled:
  *                 type: boolean
@@ -557,11 +556,11 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *                 type: integer
  *                 example: 30
  *                 description: Days between pruning reminders
- *               pruning_snooze_minutes:
- *                 type: integer
- *                 example: 30
- *                 default: 30
- *                 description: Snooze duration for pruning reminders (minutes)
+ *               pruning_note:
+ *                 type: string
+ *                 example: "Trim dead branches only"
+ *                 description: Optional note for pruning care (max 500 chars)
+ *                 maxLength: 500
  *
  *               generic_notification_enabled:
  *                 type: boolean
@@ -574,11 +573,11 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *                 type: integer
  *                 example: 7
  *                 description: Days between generic care reminders
- *               generic_care_snooze_minutes:
- *                 type: integer
- *                 example: 30
- *                 default: 30
- *                 description: Snooze duration for generic care reminders (minutes)
+ *               generic_care_note:
+ *                 type: string
+ *                 example: "Rotate pot weekly for even sunlight"
+ *                 description: Optional note for generic care (max 500 chars)
+ *                 maxLength: 500
  *
  *     responses:
  *       201:

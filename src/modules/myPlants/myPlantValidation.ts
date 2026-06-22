@@ -38,12 +38,7 @@ const frequencyField = (label: string):NumberSchema  =>
  * @param label - Human-readable field name used in validation messages.
  * @returns Joi number validator.
  */
-const snoozeField = (label: string):NumberSchema  =>
-  Joi.number().integer().min(1).messages({
-    "number.base": `${label} snooze must be a number`,
-    "number.integer": `${label} snooze must be an integer`,
-    "number.min": `${label} snooze must be at least 1 minute`,
-  });
+
 
 /**
  * Joi schema for validating plant reminder settings updates.
@@ -69,28 +64,40 @@ export const reminderValidation: ObjectSchema = Joi.object({
   }),
 
   // ── Watering ──────────────────────────────────────────────────────────────
-  watering_notification_enabled:  Joi.boolean(),
-  watering_preferred_time:        timeField("Watering preferred time"),
-  watering_reminder_frequency:    frequencyField("Watering"),
-  watering_snooze_minutes:        snoozeField("Watering"),
+  watering_notification_enabled: Joi.boolean(),
+  watering_preferred_time:       timeField("Watering preferred time"),
+  watering_reminder_frequency:   frequencyField("Watering"),
+  watering_note:                 Joi.string().max(500).optional().messages({
+    "string.base": "Watering note must be a string",
+    "string.max":  "Watering note cannot exceed 500 characters",
+  }),
 
   // ── Fertilizer ────────────────────────────────────────────────────────────
   fertilizer_notification_enabled: Joi.boolean(),
   fertilizer_preferred_time:       timeField("Fertilizer preferred time"),
   fertilizer_reminder_frequency:   frequencyField("Fertilizer"),
-  fertilizer_snooze_minutes:       snoozeField("Fertilizer"),
+  fertilizer_note:                 Joi.string().max(500).optional().messages({
+    "string.base": "Fertilizer note must be a string",
+    "string.max":  "Fertilizer note cannot exceed 500 characters",
+  }),
 
   // ── Pruning ───────────────────────────────────────────────────────────────
-  pruning_notification_enabled:   Joi.boolean(),
-  pruning_preferred_time:         timeField("Pruning preferred time"),
-  pruning_reminder_frequency:     frequencyField("Pruning"),
-  pruning_snooze_minutes:         snoozeField("Pruning"),
+  pruning_notification_enabled:  Joi.boolean(),
+  pruning_preferred_time:        timeField("Pruning preferred time"),
+  pruning_reminder_frequency:    frequencyField("Pruning"),
+  pruning_note:                  Joi.string().max(500).optional().messages({
+    "string.base": "Pruning note must be a string",
+    "string.max":  "Pruning note cannot exceed 500 characters",
+  }),
 
   // ── Generic Care ──────────────────────────────────────────────────────────
-  generic_notification_enabled:      Joi.boolean(),
-  generic_care_preferred_time:       timeField("Generic care preferred time"),
-  generic_care_reminder_frequency:   frequencyField("Generic care"),
-  generic_care_snooze_minutes:       snoozeField("Generic care"),
+  generic_notification_enabled:    Joi.boolean(),
+  generic_care_preferred_time:     timeField("Generic care preferred time"),
+  generic_care_reminder_frequency: frequencyField("Generic care"),
+  generic_care_note:               Joi.string().max(500).optional().messages({
+    "string.base": "Generic care note must be a string",
+    "string.max":  "Generic care note cannot exceed 500 characters",
+  }),
 })
   .required()
   .unknown(false);

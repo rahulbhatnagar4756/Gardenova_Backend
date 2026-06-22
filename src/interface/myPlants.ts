@@ -155,29 +155,29 @@ export interface UserPlantsResult {
 }
 
 // ─── Add plant input ──────────────────────────────────────────────────────────
-export interface AddUserPlantInput {
+export type AddUserPlantInput = {
     plant_id: number;
- 
+
     watering_notification_enabled?: boolean;
-    watering_preferred_time?: string;       // "HH:mm:ss"
-    watering_reminder_frequency?: number;   // days
-    watering_snooze_minutes?: number;       // default 30
- 
+    watering_preferred_time?: string;
+    watering_reminder_frequency?: number;
+    watering_note?: string | null;
+
     fertilizer_notification_enabled?: boolean;
     fertilizer_preferred_time?: string;
     fertilizer_reminder_frequency?: number;
-    fertilizer_snooze_minutes?: number;
- 
+    fertilizer_note?: string | null;
+
     pruning_notification_enabled?: boolean;
     pruning_preferred_time?: string;
     pruning_reminder_frequency?: number;
-    pruning_snooze_minutes?: number;
- 
+    pruning_note?: string | null;
+
     generic_notification_enabled?: boolean;
     generic_care_preferred_time?: string;
     generic_care_reminder_frequency?: number;
-    generic_care_snooze_minutes?: number;
-}
+    generic_care_note?: string | null;
+};
 
 export interface PlantRow {
   common_name?: string;
@@ -332,80 +332,90 @@ export interface UpdateUserPlantRemindersResult {
 //     // recalculate_next?: boolean; // only used for update, forces next_*_at recalculation based on last_*_at when true
 // }
 
-export interface UpdateUserPlantInput {
-    watering?:   CareNotificationInput;
-    fertilizer?: CareNotificationInput;
-    pruning?:    CareNotificationInput;
-    generic?:    CareNotificationInput;
-}
+// export interface UpdateUserPlantInput {
+//     watering?:   CareNotificationInput;
+//     fertilizer?: CareNotificationInput;
+//     pruning?:    CareNotificationInput;
+//     generic?:    CareNotificationInput;
+// }
 
-export interface CareUpdateFields {
+export type CareUpdateFields = {
     notification_enabled: boolean;
     preferred_time: string | null;
     reminder_frequency: number;
-    snooze_minutes: number | null;  // null = skip update, keep existing DB value
-    next_at: Date | null;
+    next_at:Date | null;
     recalculate_next: boolean;
-}
+    note: string | null;
+};
 
-export interface FlatUpdateUserPlantInput {
+
+
+export type FlatUpdateUserPlantInput = {
     watering_notification_enabled?: boolean;
-    watering_preferred_time?: string;
+    watering_preferred_time?: string | null;
     watering_reminder_frequency?: number;
-    watering_snooze_minutes?: number;
- 
+    watering_note?: string | null;
+
     fertilizer_notification_enabled?: boolean;
-    fertilizer_preferred_time?: string;
+    fertilizer_preferred_time?: string | null;
     fertilizer_reminder_frequency?: number;
-    fertilizer_snooze_minutes?: number;
- 
+    fertilizer_note?: string | null;
+
     pruning_notification_enabled?: boolean;
-    pruning_preferred_time?: string;
+    pruning_preferred_time?: string | null;
     pruning_reminder_frequency?: number;
-    pruning_snooze_minutes?: number;
- 
+    pruning_note?: string | null;
+
     generic_notification_enabled?: boolean;
-    generic_care_preferred_time?: string;
+    generic_care_preferred_time?: string | null;
     generic_care_reminder_frequency?: number;
-    generic_care_snooze_minutes?: number;
-}
+    generic_care_note?: string | null;
+};
  
 
 // ── Existing nested shape (keep as-is, service uses this) ────────────────────
-export interface CareNotificationInput {
+export type CareNotificationInput = {
     notification_enabled: boolean;
     preferred_time?: string | null;
-    reminder_frequency?: number | null;
-    snooze_minutes?: number | null;
-}
+    reminder_frequency?: number;
+    note?: string | null;
+};
 
-export interface UpdateUserPlantInput {
-    watering?:   CareNotificationInput;
+export type UpdateUserPlantInput = {
+    watering?: CareNotificationInput;
     fertilizer?: CareNotificationInput;
-    pruning?:    CareNotificationInput;
-    generic?:    CareNotificationInput;
-}
-export interface ReminderforUserPlant{
-  watering_reminder_frequency: number | null;
-  watering_preferred_time: string | null;
-  watering_notification_enabled: boolean | null;
-  next_watered_at: string | null;
-  last_watered_at: string | null;
-  fertilizer_reminder_frequency: number | null;
-  fertilizer_preferred_time: string | null;
-  fertilizer_notification_enabled: boolean | null;
-  next_fertilized_at: string | null;
-  last_fertilized_at: string | null;
-  pruning_reminder_frequency: number | null;
-  pruning_preferred_time: string | null;
-  puring_notification_enabled: boolean | null;
-  next_pruned_at: string | null;
-  last_pruned_at: string | null;
-  generic_care_reminder_frequency: number | null;
-  generic_notification_enabled: boolean | null;
-  generic_care_preferred_time: string | null;
-  last_generic_care_at: string | null;
-  next_generic_care_at: string | null;                                                     
+    pruning?: CareNotificationInput;
+    generic?: CareNotificationInput;
+    note?: string | null;
+};
+export interface ReminderforUserPlant {
+    watering_notification_enabled: boolean | null;
+    watering_reminder_frequency: number | null;
+    watering_preferred_time: string | null;
+    next_watered_at: string | null;
+    last_watered_at: string | null;
+    watering_note: string | null;
+
+    fertilizer_notification_enabled: boolean | null;
+    fertilizer_reminder_frequency: number | null;
+    fertilizer_preferred_time: string | null;
+    next_fertilized_at: string | null;
+    last_fertilized_at: string | null;
+    fertilizer_note: string | null;
+
+    pruning_notification_enabled: boolean | null;   // ← fixed typo: was puring_
+    pruning_reminder_frequency: number | null;
+    pruning_preferred_time: string | null;
+    next_pruned_at: string | null;
+    last_pruned_at: string | null;
+    pruning_note: string | null;
+
+    generic_notification_enabled: boolean | null;
+    generic_care_reminder_frequency: number | null;
+    generic_care_preferred_time: string | null;
+    last_generic_care_at: string | null;
+    next_generic_care_at: string | null;
+    generic_care_note: string | null;
 }
 export type PlantDetailsResponse = {
     user_plant_id?: number;     
