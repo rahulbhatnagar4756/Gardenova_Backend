@@ -951,9 +951,8 @@ export const getUserPlantByIdService = async (
             watering_notification_enabled:
                 userPlant.watering_notification_enabled,
             watering_reminder_frequency:
-                userPlant.watering_notification_enabled
-                    ? userPlant.watering_reminder_frequency
-                    : "",
+                userPlant.watering_notification_enabled,
+                    
             watering_preferred_time:
                 userPlant.watering_notification_enabled
                     ? userPlant.watering_preferred_time
@@ -970,9 +969,8 @@ export const getUserPlantByIdService = async (
             fertilizer_notification_enabled:
                 userPlant.fertilizer_notification_enabled,
             fertilizer_reminder_frequency:
-                userPlant.fertilizer_notification_enabled
-                    ? userPlant.fertilizer_reminder_frequency
-                    : "",
+                userPlant.fertilizer_notification_enabled,
+                    
             fertilizer_preferred_time:
                 userPlant.fertilizer_notification_enabled
                     ? userPlant.fertilizer_preferred_time
@@ -989,9 +987,7 @@ export const getUserPlantByIdService = async (
             puring_notification_enabled:
                 userPlant.pruning_notification_enabled,
             pruning_reminder_frequency:
-                userPlant.pruning_notification_enabled
-                    ? userPlant.pruning_reminder_frequency
-                    : "",
+                     userPlant.pruning_reminder_frequency,
             pruning_preferred_time:
                 userPlant.pruning_notification_enabled
                     ? userPlant.pruning_preferred_time
@@ -1008,9 +1004,8 @@ export const getUserPlantByIdService = async (
             generic_notification_enabled:
                 userPlant.generic_notification_enabled,
             generic_care_reminder_frequency:
-                userPlant.generic_notification_enabled
-                    ? userPlant.generic_care_reminder_frequency
-                    : "",
+                     userPlant.generic_care_reminder_frequency,
+                    
             generic_care_preferred_time:
                 userPlant.generic_notification_enabled
                     ? userPlant.generic_care_preferred_time
