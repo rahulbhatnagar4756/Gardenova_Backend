@@ -951,7 +951,7 @@ export const getUserPlantByIdService = async (
             watering_notification_enabled:
                 userPlant.watering_notification_enabled,
             watering_reminder_frequency:
-                userPlant.watering_notification_enabled,
+                userPlant.watering_reminder_frequency,
                     
             watering_preferred_time:
                 userPlant.watering_notification_enabled
@@ -969,7 +969,7 @@ export const getUserPlantByIdService = async (
             fertilizer_notification_enabled:
                 userPlant.fertilizer_notification_enabled,
             fertilizer_reminder_frequency:
-                userPlant.fertilizer_notification_enabled,
+                userPlant.fertilizer_reminder_frequency,
                     
             fertilizer_preferred_time:
                 userPlant.fertilizer_notification_enabled
