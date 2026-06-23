@@ -202,23 +202,23 @@ export async function getLogWithPlant(
  * Returns the updated notification log if the operation succeeds,
  * otherwise returns null if no matching active log was found.
  */
-export async function snoozeLog(
-  logId: string,
-  snoozedUntil: Date
-): Promise<NotificationLog | null> {
-    const pool = await connectDB();
-  const { rows } = await pool.query<NotificationLog>(
-    `
-    UPDATE notification_log
-    SET status = 'snoozed', snoozed_until = $2, updated_at = NOW()
-    WHERE id = $1
-      AND status = 'sent'           -- can only snooze an active notification
-    RETURNING *
-    `,
-    [logId, snoozedUntil]
-  );
-  return rows[0] ?? null;
-}
+// export async function snoozeLog(
+//   logId: string,
+//   snoozedUntil: Date
+// ): Promise<NotificationLog | null> {
+//     const pool = await connectDB();
+//   const { rows } = await pool.query<NotificationLog>(
+//     `
+//     UPDATE notification_log
+//     SET status = 'snoozed', snoozed_until = $2, updated_at = NOW()
+//     WHERE id = $1
+//       AND status = 'sent'           -- can only snooze an active notification
+//     RETURNING *
+//     `,
+//     [logId, snoozedUntil]
+//   );
+//   return rows[0] ?? null;
+// }
 
 // ─── Mark log as completed ───────────────────────────────────────────────────
 /**
@@ -267,15 +267,12 @@ export async function updatePlantAfterCompletion(
 ): Promise<void> {
   // Map type → columns
   const pool = await connectDB();
-  const colMap: Record<
-    ReminderType,
-    { last: string; next: string; freq: string }
-  > = {
-    watering:     { last: 'last_watered_at',     next: 'next_watered_at',     freq: 'watering_reminder_frequency' },
-    fertilizer:   { last: 'last_fertilized_at',  next: 'next_fertilized_at',  freq: 'fertilizer_reminder_frequency' },
-    pruning:      { last: 'last_pruned_at',       next: 'next_pruned_at',      freq: 'pruning_reminder_frequency' },
-    generic_care: { last: 'last_generic_care_at', next: 'next_generic_care_at', freq: 'generic_care_reminder_frequency' },
-  };
+  const colMap: Record<ReminderType, { last: string; next: string; freq: string }> = {
+    water:     { last: "last_watered_at",     next: "next_watered_at",     freq: "watering_reminder_frequency" },
+    fertilize: { last: "last_fertilized_at",  next: "next_fertilized_at",  freq: "fertilizer_reminder_frequency" },
+    prune:     { last: "last_pruned_at",       next: "next_pruned_at",      freq: "pruning_reminder_frequency" },
+    generic:   { last: "last_generic_care_at", next: "next_generic_care_at", freq: "generic_care_reminder_frequency" },
+};
 
   const { last, next, freq } = colMap[reminderType];
 
@@ -305,24 +302,24 @@ export async function updatePlantAfterCompletion(
  * @returns {Promise<(NotificationLog & { plant: UserPlant })[]>}
  * List of due snoozed logs with embedded plant data.
  */
-export async function getDueSnoozedLogs(): Promise<
-  (NotificationLog & { plant: UserPlant })[]
-> {
-    const pool = await connectDB();
-  const { rows } = await pool.query(
-    `
-    SELECT
-      nl.*,
-      row_to_json(up.*) AS plant
-    FROM notification_log nl
-    JOIN user_plants up ON up.id = nl.user_plant_id
-    WHERE nl.status       = 'snoozed'
-      AND nl.snoozed_until <= NOW()
-    FOR UPDATE OF nl SKIP LOCKED
-    `
-  );
-  return rows.map((r) => ({ ...r, plant: r.plant }));
-}
+// export async function getDueSnoozedLogs(): Promise<
+//   (NotificationLog & { plant: UserPlant })[]
+// > {
+//     const pool = await connectDB();
+//   const { rows } = await pool.query(
+//     `
+//     SELECT
+//       nl.*,
+//       row_to_json(up.*) AS plant
+//     FROM notification_log nl
+//     JOIN user_plants up ON up.id = nl.user_plant_id
+//     WHERE nl.status       = 'snoozed'
+//       AND nl.snoozed_until <= NOW()
+//     FOR UPDATE OF nl SKIP LOCKED
+//     `
+//   );
+//   return rows.map((r) => ({ ...r, plant: r.plant }));
+// }
 
 // ─── Reset snoozed log back to sent (after re-firing) ───────────────────────
 /**
@@ -335,25 +332,25 @@ export async function getDueSnoozedLogs(): Promise<
  * @param newMessageId - New FCM message ID (optional)
  * @returns {Promise<void>}
  */
-export async function resetSnoozedLog(
-  logId: string,
-  newMessageId: string | null
-): Promise<void> {
-    const pool = await connectDB();
-  await pool.query(
-    `
-    UPDATE notification_log
-    SET
-      status         = 'sent',
-      snoozed_until  = NULL,
-      fcm_message_id = COALESCE($2, fcm_message_id),
-      sent_at        = NOW(),
-      updated_at     = NOW()
-    WHERE id = $1
-    `,
-    [logId, newMessageId]
-  );
-}
+// export async function resetSnoozedLog(
+//   logId: string,
+//   newMessageId: string | null
+// ): Promise<void> {
+//     const pool = await connectDB();
+//   await pool.query(
+//     `
+//     UPDATE notification_log
+//     SET
+//       status         = 'sent',
+//       snoozed_until  = NULL,
+//       fcm_message_id = COALESCE($2, fcm_message_id),
+//       sent_at        = NOW(),
+//       updated_at     = NOW()
+//     WHERE id = $1
+//     `,
+//     [logId, newMessageId]
+//   );
+// }
 
 // ─── FCM token queries ───────────────────────────────────────────────────────
 /**
@@ -366,11 +363,14 @@ export async function resetSnoozedLog(
  */
 export async function getTokensForUser(userId: string): Promise<string[]> {
     const pool = await connectDB();
-  const { rows } = await pool.query<{ token: string }>(
-    `SELECT token FROM fcm_tokens WHERE user_id = $1`,
-    [userId]
-  );
-  return rows.map((r) => r.token);
+    const { rows } = await pool.query<{ token: string }>(
+        `SELECT token FROM user_push_tokens
+         WHERE user_id = $1
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [userId]
+    );
+    return rows.map((r) => r.token);
 }
 /**
  * Deletes invalid or expired FCM tokens from the database.
@@ -382,11 +382,11 @@ export async function getTokensForUser(userId: string): Promise<string[]> {
  */
 export async function deleteInvalidTokens(tokens: string[]): Promise<void> {
     const pool = await connectDB();
-  if (!tokens.length) return;
-  await pool.query(
-    `DELETE FROM fcm_tokens WHERE token = ANY($1::text[])`,
-    [tokens]
-  );
+    if (!tokens.length) return;
+    await pool.query(
+        `DELETE FROM user_push_tokens WHERE token = ANY($1::text[])`,
+        [tokens]
+    );
 }
 /**
  * Inserts or updates an FCM token for a user.
@@ -400,14 +400,12 @@ export async function deleteInvalidTokens(tokens: string[]): Promise<void> {
  */
 export async function upsertFcmToken(userId: string, token: string): Promise<void> {
     const pool = await connectDB();
-  await pool.query(
-    `
-    INSERT INTO fcm_tokens (user_id, token)
-    VALUES ($1, $2)
-    ON CONFLICT (user_id, token) DO UPDATE SET updated_at = NOW()
-    `,
-    [userId, token]
-  );
+    await pool.query(
+        `INSERT INTO user_push_tokens (user_id, token)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, token) DO UPDATE SET updated_at = NOW()`,
+        [userId, token]
+    );
 }
 /**
  * Deletes a specific FCM token for a user.
@@ -420,8 +418,76 @@ export async function upsertFcmToken(userId: string, token: string): Promise<voi
  */
 export async function deleteFcmToken(userId: string, token: string): Promise<void> {
     const pool = await connectDB();
-  await pool.query(
-    `DELETE FROM fcm_tokens WHERE user_id = $1 AND token = $2`,
-    [userId, token]
-  );
+    await pool.query(
+        `DELETE FROM user_push_tokens WHERE user_id = $1 AND token = $2`,
+        [userId, token]
+    );
+}
+
+/**
+ * Reschedules a plant reminder by updating the next scheduled
+ * occurrence timestamp for the specified reminder type.
+ *
+ * Updates the corresponding reminder date column on the user's plant
+ * record and refreshes the `updated_at` timestamp.
+ *
+ * @param userPlantId - The ID of the user's plant record.
+ * @param reminderType - The type of reminder to reschedule.
+ * @param rescheduleTo - The new date and time when the reminder should occur.
+ * @returns A promise that resolves when the reminder has been updated.
+ */
+export async function rescheduleReminder(
+    userPlantId: string,
+    reminderType: ReminderType,
+    rescheduleTo: Date
+): Promise<void> {
+    const pool = await connectDB();
+
+    const nextColMap: Record<ReminderType, string> = {
+        water:     "next_watered_at",
+        fertilize: "next_fertilized_at",
+        prune:     "next_pruned_at",
+        generic:   "next_generic_care_at",
+    };
+
+    await pool.query(
+        `UPDATE user_plants
+         SET ${nextColMap[reminderType]} = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [rescheduleTo, userPlantId]
+    );
+}
+/**
+ * Disables a plant reminder by turning off notifications and
+ * clearing the next scheduled reminder date for the specified
+ * reminder type.
+ *
+ * Updates the corresponding notification-enabled flag to `false`,
+ * sets the next reminder timestamp to `NULL`, and refreshes the
+ * `updated_at` timestamp.
+ *
+ * @param userPlantId - The ID of the user's plant record.
+ * @param reminderType - The type of reminder to disable.
+ * @returns A promise that resolves when the reminder has been disabled.
+ */
+export async function disableReminder(
+    userPlantId: string,
+    reminderType: ReminderType
+): Promise<void> {
+    const pool = await connectDB();
+
+    const colMap: Record<ReminderType, { enabled: string; next_at: string }> = {
+        water:     { enabled: "watering_notification_enabled",   next_at: "next_watered_at" },
+        fertilize: { enabled: "fertilizer_notification_enabled", next_at: "next_fertilized_at" },
+        prune:     { enabled: "pruning_notification_enabled",    next_at: "next_pruned_at" },
+        generic:   { enabled: "generic_notification_enabled",    next_at: "next_generic_care_at" },
+    };
+
+    const cols = colMap[reminderType];
+    await pool.query(
+        `UPDATE user_plants
+         SET ${cols.enabled} = false, ${cols.next_at} = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [userPlantId]
+    );
 }

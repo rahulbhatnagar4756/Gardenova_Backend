@@ -2,10 +2,8 @@ import { UserPlant, ReminderType, DueReminder } from '../../interface/reminder';
 import { sendReminderNotification } from './FCM.service';
 import {
   getDuePlants,
-  getDueSnoozedLogs,
   getActiveLog,
   insertNotificationLog,
-  resetSnoozedLog,
   getTokensForUser,
   deleteInvalidTokens,
 } from './reminder.queries';
@@ -45,32 +43,13 @@ function getDueTypes(plant: UserPlant, now: Date): DueReminder[] {
     nextAt: Date | null;
     preferredTime: string | null;
     type: ReminderType;
+    note: string | null;
   }> = [
-    {
-      enabled: plant.watering_notification_enabled,
-      nextAt: plant.next_watered_at,
-      preferredTime: plant.watering_preferred_time,
-      type: 'watering',
-    },
-    {
-      enabled: plant.fertilizer_notification_enabled,
-      nextAt: plant.next_fertilized_at,
-      preferredTime: plant.fertilizer_preferred_time,
-      type: 'fertilizer',
-    },
-    {
-      enabled: plant.pruning_notification_enabled,
-      nextAt: plant.next_pruned_at,
-      preferredTime: plant.pruning_preferred_time,
-      type: 'pruning',
-    },
-    {
-      enabled: plant.generic_notification_enabled,
-      nextAt: plant.next_generic_care_at,
-      preferredTime: plant.generic_care_preferred_time,
-      type: 'generic_care',
-    },
-  ];
+      { enabled: plant.watering_notification_enabled, nextAt: plant.next_watered_at, preferredTime: plant.watering_preferred_time, type: "water", note: plant.watering_note },
+      { enabled: plant.fertilizer_notification_enabled, nextAt: plant.next_fertilized_at, preferredTime: plant.fertilizer_preferred_time, type: "fertilize", note: plant.fertilizer_note },
+      { enabled: plant.pruning_notification_enabled, nextAt: plant.next_pruned_at, preferredTime: plant.pruning_preferred_time, type: "prune", note: plant.pruning_note },
+      { enabled: plant.generic_notification_enabled, nextAt: plant.next_generic_care_at, preferredTime: plant.generic_care_preferred_time, type: "generic", note: plant.generic_care_note },
+    ];
 
   for (const check of checks) {
     if (
@@ -79,7 +58,7 @@ function getDueTypes(plant: UserPlant, now: Date): DueReminder[] {
       check.nextAt <= now &&
       isPreferredTimeReached(check.preferredTime)
     ) {
-      due.push({ plant, type: check.type, scheduledFor: check.nextAt });
+      due.push({ plant, type: check.type, scheduledFor: check.nextAt, note: check.note });
     }
   }
 
@@ -138,11 +117,13 @@ async function processReminder(reminder: DueReminder): Promise<void> {
   // 4. Send FCM
   try {
     const result = await sendReminderNotification({
-      tokens,
-      reminderType: type,
-      userPlantId: plant.id,
-      notificationLogId: log.id,
-    });
+    tokens,
+    reminderType:      type,
+    userPlantId:       plant.id,
+    notificationLogId: log.id,
+    plantName:         plant.common_name,
+    note:              reminder.note,
+});
 
     // console.log(
     //   `[Reminder]   ✅ FCM sent plant=${plant.id} type=${type} | success=${result.successCount} fail=${result.failureCount} messageId=${result.messageId ?? 'N/A'}`
@@ -210,52 +191,52 @@ export async function processDueReminders(): Promise<void> {
  *
  * @returns {Promise<void>} Resolves when all snoozed reminders are processed
  */
-export async function processSnoozedReminders(): Promise<void> {
-  let snoozed: Awaited<ReturnType<typeof getDueSnoozedLogs>>;
-  try {
-    snoozed = await getDueSnoozedLogs();
-  } catch (err) {
-    console.error('[Snooze] ❌ Failed to fetch snoozed logs from DB:', err);
-    return;
-  }
+// export async function processSnoozedReminders(): Promise<void> {
+//   let snoozed: Awaited<ReturnType<typeof getDueSnoozedLogs>>;
+//   try {
+//     snoozed = await getDueSnoozedLogs();
+//   } catch (err) {
+//     console.error('[Snooze] ❌ Failed to fetch snoozed logs from DB:', err);
+//     return;
+//   }
 
-  if (!snoozed.length) {
-    // console.log('[Snooze] ✔  No snoozed reminders due');
-    return;
-  }
+//   if (!snoozed.length) {
+//     // console.log('[Snooze] ✔  No snoozed reminders due');
+//     return;
+//   }
 
-  // console.log(`[Snooze] ⏰ Found ${snoozed.length} snoozed reminder(s) to re-fire`);
+//   // console.log(`[Snooze] ⏰ Found ${snoozed.length} snoozed reminder(s) to re-fire`);
 
-  for (const log of snoozed) {
-    // console.log(`[Snooze]   → Re-firing log=${log.id} type=${log.reminder_type} user=${log.user_id}`);
-    try {
-      const tokens = await getTokensForUser(log.user_id);
+//   for (const log of snoozed) {
+//     // console.log(`[Snooze]   → Re-firing log=${log.id} type=${log.reminder_type} user=${log.user_id}`);
+//     try {
+//       const tokens = await getTokensForUser(log.user_id);
 
-      if (!tokens.length) {
-        // console.warn(`[Snooze]   ⚠️  No tokens for user=${log.user_id} — marking as sent anyway`);
-        await resetSnoozedLog(log.id, null);
-        continue;
-      }
+//       if (!tokens.length) {
+//         // console.warn(`[Snooze]   ⚠️  No tokens for user=${log.user_id} — marking as sent anyway`);
+//         await resetSnoozedLog(log.id, null);
+//         continue;
+//       }
 
-      const result = await sendReminderNotification({
-        tokens,
-        reminderType: log.reminder_type as ReminderType,
-        userPlantId: log.user_plant_id,
-        notificationLogId: log.id,
-      });
+//       const result = await sendReminderNotification({
+//         tokens,
+//         reminderType: log.reminder_type as ReminderType,
+//         userPlantId: log.user_plant_id,
+//         notificationLogId: log.id,
+//       });
 
-      await resetSnoozedLog(log.id, result.messageId);
+//       await resetSnoozedLog(log.id, result.messageId);
 
-      if (result.invalidTokens.length) {
-        // console.warn(`[Snooze]   🗑  Removing ${result.invalidTokens.length} invalid token(s)`);
-        await deleteInvalidTokens(result.invalidTokens);
-      }
+//       if (result.invalidTokens.length) {
+//         // console.warn(`[Snooze]   🗑  Removing ${result.invalidTokens.length} invalid token(s)`);
+//         await deleteInvalidTokens(result.invalidTokens);
+//       }
 
-      // console.log(`[Snooze]   ✅ Re-fired log=${log.id} success=${result.successCount} fail=${result.failureCount}`);
-    } catch (err) {
-      console.error(`[Snooze]   ❌ Failed to re-fire log=${log.id}:`, err);
-    }
-  }
+//       // console.log(`[Snooze]   ✅ Re-fired log=${log.id} success=${result.successCount} fail=${result.failureCount}`);
+//     } catch (err) {
+//       console.error(`[Snooze]   ❌ Failed to re-fire log=${log.id}:`, err);
+//     }
+//   }
 
-  // console.log(`[Snooze] ✔  Done processing snoozed reminders`);
-}
+//   // console.log(`[Snooze] ✔  Done processing snoozed reminders`);
+// }

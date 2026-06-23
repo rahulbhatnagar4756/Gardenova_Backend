@@ -39,21 +39,22 @@ const messaging = admin.messaging();
 
 // ─── Titles & Bodies ────────────────────────────────────────────────────────
 
-const REMINDER_COPY: Record<ReminderType, { title: string; body: string }> = {
-  watering:     { title: '💧 Time to Water!',   body: "Your plant is thirsty — give it some love." },
-  fertilizer:   { title: '🌿 Fertilizer Time!', body: "Boost your plant with some nutrients today." },
-  pruning:      { title: '✂️ Time to Prune!',   body: "Keep your plant healthy with a trim." },
-  generic_care: { title: '🌱 Plant Care Time!', body: "Your plant needs some attention today." },
+const REMINDER_COPY: Record<ReminderType, { title: string; defaultBody: string }> = {
+    water:     { title: "💧 Time to Water!",   defaultBody: "Your plant is thirsty — give it some love." },
+    fertilize: { title: "🌱 Fertilizer Time!", defaultBody: "Boost your plant with some nutrients today." },
+    prune:     { title: "✂️ Time to Prune!",   defaultBody: "Keep your plant healthy with a trim." },
+    generic:   { title: "🌿 Plant Care Time!", defaultBody: "Your plant needs some attention today." },
 };
 
 // ─── Send to multiple tokens ─────────────────────────────────────────────────
 
 export interface SendReminderPayload {
-  tokens: string[];
-  reminderType: ReminderType;
-  userPlantId: string;
-  notificationLogId: string;
-  plantName?: string;
+    tokens:            string[];
+    reminderType:      ReminderType;
+    userPlantId:       string;
+    notificationLogId: string;
+    plantName?:        string;
+    note?:             string | null;   // ← added
 }
 
 export interface SendResult {
@@ -83,23 +84,27 @@ export interface SendResult {
 export async function sendReminderNotification(
   payload: SendReminderPayload
 ): Promise<SendResult> {
-  const { tokens, reminderType, userPlantId, notificationLogId, plantName } = payload;
+  const { tokens, reminderType, userPlantId, notificationLogId, plantName,note } = payload;
 
   if (!tokens.length) {
     return { successCount: 0, failureCount: 0, messageId: null, invalidTokens: [] };
   }
 
   const copy = REMINDER_COPY[reminderType];
-  const body = plantName ? `${plantName}: ${copy.body}` : copy.body;
+  const body = note
+    ? `${note} — ${plantName ?? "your plant"}`
+    : plantName
+        ? `${plantName}: ${copy.defaultBody}`
+        : copy.defaultBody;
 
   const message: admin.messaging.MulticastMessage = {
     tokens,
     notification: { title: copy.title, body },
     data: {
-      notification_log_id: notificationLogId,
-      user_plant_id:       userPlantId,
-      reminder_type:       reminderType,
-      action:              'plant_reminder',
+        notification_log_id: notificationLogId,
+        user_plant_id:       userPlantId,
+        reminder_type:       reminderType,
+        action:              "plant_reminder",
     },
     android: {
       priority: 'high',

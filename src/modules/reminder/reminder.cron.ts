@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { processDueReminders, processSnoozedReminders } from './reminder.processor';
+import { processDueReminders } from './reminder.processor';
 
 let isRunning = false;
 let tickCount = 0;
@@ -16,35 +16,24 @@ let tickCount = 0;
  *
  * @returns {Promise<void>} Resolves when the tick processing completes
  */
-async function cronTick(): Promise<void>  {
-  tickCount++;
-  const tick = tickCount;
-  // const startedAt = new Date().toISOString();
+async function cronTick(): Promise<void> {
+    tickCount++;
+    const tick = tickCount;
 
-  // console.log(`\n[Cron] ─────────── Tick #${tick} started at ${startedAt} ───────────`);
+    if (isRunning) {
+        // console.warn(`[Cron] ⚠️ Previous tick still running — skipping tick #${tick}`);
+        return;
+    }
 
-  if (isRunning) {
-    // console.warn(`[Cron] ⚠️  Previous tick still running — skipping tick #${tick}`);
-    return;
-  }
+    isRunning = true;
 
-  isRunning = true;
-  // const start = Date.now();
-
-  try {
-    // console.log(`[Cron] ▶ Running due reminders check...`);
-    await processDueReminders();
-
-    // console.log(`[Cron] ▶ Running snoozed reminders check...`);
-    await processSnoozedReminders();
-
-  } catch (err) {
-    console.error(`[Cron] ❌ Tick #${tick} threw an unexpected error:`, err);
-  } finally {
-    isRunning = false;
-    // console.log(`[Cron] ✅ Tick #${tick} done in ${Date.now() - start}ms`);
-    // console.log(`[Cron] ─────────────────────────────────────────────────────────\n`);
-  }
+    try {
+        await processDueReminders();
+    } catch (err) {
+        console.error(`[Cron] ❌ Tick #${tick} threw an unexpected error:`, err);
+    } finally {
+        isRunning = false;
+    }
 }
 /**
  * Starts the reminder cron job.
@@ -55,6 +44,6 @@ async function cronTick(): Promise<void>  {
  * @returns {void}
  */
 export function startReminderCron(): void {
-  // console.log('[Cron] 🚀 Reminder cron started — runs every minute');
-  cron.schedule('* * * * *', cronTick, { timezone: 'UTC' });
+    cron.schedule("* * * * *", cronTick, { timezone: "UTC" });
+    // console.log("[Cron] 🚀 Reminder cron started — runs every minute");
 }

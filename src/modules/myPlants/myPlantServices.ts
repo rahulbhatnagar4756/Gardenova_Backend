@@ -1157,28 +1157,15 @@ const buildCareFields = (block: CareNotificationInput): CareUpdateFields => ({
     note: block.note ?? null,
 });
 
-
-
-
-
-
+const noteColMap: Record<string, string> = {
+    watering:   "watering_note",
+    fertilizer: "fertilizer_note",
+    pruning:    "pruning_note",
+    generic:    "generic_care_note",
+};
 
 /**
  * Updates the notification settings for a user's plant.
- *
- * This service performs the following steps:
- * 1. Validates the input payload using `validateUpdateUserPlantInput`.
- * 2. Checks that the `userPlantId` belongs to the specified `userId`.
- * 3. Dynamically builds SQL `SET` clauses for each care type included in the payload:
- *    - `watering`, `fertilizer`, `pruning`, `generic`
- *    - Updates `notification_enabled`, `preferred_time` (if applicable), and `reminder_frequency`.
- *    - Recalculates `next_*_at` only if the notification is being enabled.
- * 4. Executes the `UPDATE` query and returns the updated row.
- *
- * Rules:
- * - Only care types included in the payload are updated; others are left untouched.
- * - Toggling a notification off does **not** change the `next_*_at` column.
- *
  * @param {string} userId - The UUID of the user performing the update.
  * @param {string} userPlantId - The UUID of the user_plant record to update.
  * @param {UpdateUserPlantInput} payload - Object containing optional care type blocks to update.
@@ -1188,16 +1175,6 @@ const buildCareFields = (block: CareNotificationInput): CareUpdateFields => ({
  * @throws {Error} If:
  *   - The payload is empty or invalid.
  *   - The specified `userPlantId` does not exist for the given `userId`.
- *
- * @example
- * const updatedPlant = await updateUserPlantService(
- *   "d4e5f6a1-b2c3-4567-89ab-cdef01234567",
- *   "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
- *   {
- *     watering: { notification_enabled: true, reminder_frequency: 3, preferred_time: "08:00:00" },
- *     pruning: { notification_enabled: false, reminder_frequency: 0 }
- *   }
- * );
  * console.log(updatedPlant.next_watered_at); // ISO date string of next watering
  */
 // Remove snoozeColMap entirely — no longer needed
@@ -1229,33 +1206,35 @@ export const updateUserPlantService = async (
  * @param fields - Updated reminder configuration values.
  */
     const appendFields = (prefix: string, fields: CareUpdateFields): void => {
-        setClauses.push(`${prefix}_notification_enabled = $${paramIndex++}`);
-        values.push(fields.notification_enabled);
+    setClauses.push(`${prefix}_notification_enabled = $${paramIndex++}`);
+    values.push(fields.notification_enabled);
 
-        if (CARE_TYPES_WITH_PREFERRED_TIME.has(prefix)) {
-            setClauses.push(`${preferredTimeColMap[prefix]} = $${paramIndex++}`);
-            values.push(fields.preferred_time);
-        }
+    if (CARE_TYPES_WITH_PREFERRED_TIME.has(prefix)) {
+        setClauses.push(`${preferredTimeColMap[prefix]} = $${paramIndex++}`);
+        values.push(fields.preferred_time);
+    }
 
-        setClauses.push(`${reminderFreqColMap[prefix]} = $${paramIndex++}`);
-        values.push(fields.reminder_frequency);
+    setClauses.push(`${reminderFreqColMap[prefix]} = $${paramIndex++}`);
+    values.push(fields.reminder_frequency);
 
-        if (fields.recalculate_next) {
-            setClauses.push(`${nextColMap[prefix]} = $${paramIndex++}`);
-            values.push(fields.next_at);
-        }
-    };
+    // note — always update per care type (even null to allow clearing)
+    if (fields.note !== undefined) {
+        setClauses.push(`${noteColMap[prefix]} = $${paramIndex++}`);
+        values.push(fields.note ?? null);
+    }
+
+    if (fields.recalculate_next) {
+        setClauses.push(`${nextColMap[prefix]} = $${paramIndex++}`);
+        values.push(fields.next_at);
+    }
+};
 
     if (payload.watering !== undefined) appendFields("watering", buildCareFields(payload.watering));
     if (payload.fertilizer !== undefined) appendFields("fertilizer", buildCareFields(payload.fertilizer));
     if (payload.pruning !== undefined) appendFields("pruning", buildCareFields(payload.pruning));
     if (payload.generic !== undefined) appendFields("generic", buildCareFields(payload.generic));
 
-    // note — always update if provided (even if null, to allow clearing it)
-    if (payload.note !== undefined) {
-        setClauses.push(`note = $${paramIndex++}`);
-        values.push(payload.note ?? null);
-    }
+    
 
     values.push(userPlantId, userId);
 
