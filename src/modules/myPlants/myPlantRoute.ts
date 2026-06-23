@@ -923,22 +923,15 @@ router.delete("/deletePlant/:userPlantId", auth, deleteUserPlantController);
  * @swagger
  * /api/v1/allplants/user/notification/{activityType}/{eventType}:
  *   get:
- *     summary: Get user plant notification details
+ *     summary: Get user plant notifications
  *     description: |
- *       Returns the user's plant notifications filtered by activity type and event type.
+ *       Returns plant notifications filtered by activity type and event type.
+ *       Counts and upcoming_in_5_hours always reflect the full unfiltered dataset.
+ *       Only the `tasks` array is paginated.
  *
- *       Activity Types:
- *       - watering
- *       - fertilizer
- *       - pruning
- *       - generic
- *       - all
+ *       **Activity Types:** `water` | `fertilize` | `prune` | `generic` | `all`
  *
- *       Event Types:
- *       - missed
- *       - upcoming
- *       - all
- *
+ *       **Event Types:** `upcoming` | `missed` | `completed` | `all`
  *     tags:
  *       - Notifications
  *     security:
@@ -949,42 +942,115 @@ router.delete("/deletePlant/:userPlantId", auth, deleteUserPlantController);
  *         required: true
  *         schema:
  *           type: string
- *           enum:
- *             - watering
- *             - fertilizer
- *             - pruning
- *             - generic
- *             - all
- *         description: Filter notifications by activity type.
+ *           enum: [water, fertilize, prune, generic, all]
+ *         description: Filter tasks by care activity type. Use `all` to skip filtering.
  *       - in: path
  *         name: eventType
  *         required: true
  *         schema:
  *           type: string
- *           enum:
- *             - missed
- *             - upcoming
- *             - all
- *         description: Filter notifications by event status.
+ *           enum: [upcoming, missed, completed, all]
+ *         description: Filter tasks by event status. Use `all` to skip filtering.
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number for paginated tasks.
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         description: Number of tasks per page.
  *     responses:
  *       200:
- *         description: Notification details retrieved successfully.
+ *         description: Notifications retrieved successfully.
  *         content:
  *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     counts:
+ *                       type: object
+ *                       properties:
+ *                         all:       { type: integer }
+ *                         upcoming:  { type: integer }
+ *                         missed:    { type: integer }
+ *                         completed: { type: integer }
+ *                     upcoming_in_5_hours:
+ *                       type: object
+ *                       properties:
+ *                         count: { type: integer }
+ *                         tasks:
+ *                           type: array
+ *                           items:
+ *                             $ref: '#/components/schemas/NotificationRow'
+ *                     tasks:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/NotificationRow'
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         page:        { type: integer }
+ *                         limit:       { type: integer }
+ *                         total:       { type: integer }
+ *                         total_pages: { type: integer }
+ *                         has_next:    { type: boolean }
+ *                         has_prev:    { type: boolean }
  *             example:
  *               success: true
- *               message: Notification details retrieved successfully
+ *               message: Notifications retrieved successfully
  *               data:
- *                 - id: "d5bcbf83-1234-5678-90ab-cdef12345678"
- *                   plant_id: 12
- *                   common_name: "Snake Plant"
- *                   scientific_name: "Dracaena trifasciata"
- *                   next_watered_at: "2026-06-20T10:00:00.000Z"
- *                   watering_notification_enabled: true
+ *                 counts:
+ *                   all: 47
+ *                   upcoming: 12
+ *                   missed: 30
+ *                   completed: 5
+ *                 upcoming_in_5_hours:
+ *                   count: 2
+ *                   tasks:
+ *                     - id: "d5bcbf83-1234-5678-90ab-cdef12345678"
+ *                       plant_id: 12
+ *                       common_name: "Snake Plant"
+ *                       scientific_name: "Dracaena trifasciata"
+ *                       activity_type: "Watering"
+ *                       event_type: "upcoming"
+ *                       next_activity_at: "2026-06-23T08:30:00.000Z"
+ *                       is_upcoming_in_5_hours: true
+ *                 tasks:
+ *                   - id: "a1b2c3d4-5678-90ab-cdef-111122223333"
+ *                     plant_id: 7
+ *                     common_name: "Pothos"
+ *                     scientific_name: "Epipremnum aureum"
+ *                     activity_type: "Watering"
+ *                     event_type: "upcoming"
+ *                     next_activity_at: "2026-06-24T10:00:00.000Z"
+ *                     is_upcoming_in_5_hours: false
+ *                 pagination:
+ *                   page: 1
+ *                   limit: 20
+ *                   total: 12
+ *                   total_pages: 1
+ *                   has_next: false
+ *                   has_prev: false
  *       400:
- *         description: Invalid request parameters.
+ *         description: Invalid activityType or eventType value.
  *       401:
- *         description: Unauthorized or user not found.
+ *         description: Unauthorized — missing or invalid token, or user not found.
  *       500:
  *         description: Internal server error.
  */

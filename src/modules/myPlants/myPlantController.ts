@@ -645,26 +645,30 @@ export const getNotificationsController = async (
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
       return;
     }
- 
+
     const user = await findUserByEmail(userPayload.userEmail);
     if (!user) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
       return;
     }
- 
+
     const activityType = (req.params.activityType as string).trim().toLowerCase();
     const eventType = (req.params.eventType as string).trim().toLowerCase();
- 
-    // "all" → null so the service returns every type / every event
+
     const resolvedActivity = activityType === "all" ? null : activityType;
     const resolvedEvent = eventType === "all" ? null : eventType;
- 
+
+    const page = Math.max(1, parseInt((req.query.page as string) ?? "1", 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) ?? "20", 10) || 20));
+
     const data = await getNotificationsService(
       user.id!,
       resolvedActivity,
-      resolvedEvent
+      resolvedEvent,
+      page,
+      limit
     );
- 
+
     res.status(HTTP_STATUS.OK).json(
       successResponse(data, "Notifications retrieved successfully")
     );
@@ -676,5 +680,4 @@ export const getNotificationsController = async (
     next(err);
   }
 };
-
 

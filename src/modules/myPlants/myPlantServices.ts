@@ -1915,54 +1915,70 @@ function buildUnionQuery(
  * @param {string} userId - User ID.
  * @param {string|null} activityType - Activity type filter.
  * @param {string|null} eventType - Event type filter.
+ * @param page
+ * @param limit
  * @returns {Promise<NotificationResponse>} Notifications, counts, and upcoming tasks.
  */
 export const getNotificationsService = async (
-    userId: string,
-    activityType: string | null,
-    eventType: string | null
+  userId: string,
+  activityType: string | null,
+  eventType: string | null,
+  page: number,
+  limit: number
 ): Promise<NotificationResponse> => {
-    const pool = await getDB();
+  const pool = await getDB();
+  const offset = (page - 1) * limit;
 
-    // Always fetch ALL activity types — counts must never change with filter
-    const { query, params } = buildUnionQuery(userId, ALL_ACTIVITY_TYPES);
-    const result = await pool.query(query, params);
-    const allRows: NotificationRow[] = result.rows;
+  // ── Counts + upcoming_in_5_hours: always full scan, no pagination ──
+  const { query: countQuery, params: countParams } = buildUnionQuery(userId, ALL_ACTIVITY_TYPES);
+  const countResult = await pool.query(countQuery, countParams);
+  const allRows: NotificationRow[] = countResult.rows;
 
-    // ── Counts: always across all activity types, all event types ──
-    const counts: NotificationCounts = {
-        all: allRows.length,
-        upcoming: allRows.filter((r) => r.event_type === "upcoming").length,
-        missed: allRows.filter((r) => r.event_type === "missed").length,
-        completed: allRows.filter((r) => r.event_type === "completed").length,
-    };
+  const counts: NotificationCounts = {
+    all: allRows.length,
+    upcoming: allRows.filter((r) => r.event_type === "upcoming").length,
+    missed: allRows.filter((r) => r.event_type === "missed").length,
+    completed: allRows.filter((r) => r.event_type === "completed").length,
+  };
 
-    // ── Apply activityType filter for tasks and upcoming_in_5_hours ──
-    const resolvedActivityLabel =
+  const resolvedActivityLabel =
     activityType && ALL_ACTIVITY_TYPES.includes(activityType as ActivityType)
-        ? ACTIVITY_LABELS[activityType as ActivityType]
-        : null;
+      ? ACTIVITY_LABELS[activityType as ActivityType]
+      : null;
 
-    const filteredByActivity = resolvedActivityLabel
+  const filteredByActivity = resolvedActivityLabel
     ? allRows.filter((r) => r.activity_type === resolvedActivityLabel)
     : allRows;
 
-    // ── Upcoming in 5 hours: respects activityType filter ──
-    const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
+  const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
 
-    // ── Tasks: apply eventType filter on top of activityType filter ──
-    const validEventTypes: EventType[] = ["upcoming", "missed", "completed"];
-    const tasks =
-        eventType && validEventTypes.includes(eventType as EventType)
-            ? filteredByActivity.filter((r) => r.event_type === eventType)
-            : filteredByActivity; // "all" or null → return everything
+  // ── Total count for the paginated tasks slice ──
+  const validEventTypes: EventType[] = ["upcoming", "missed", "completed"];
+  const filteredForTasks =
+    eventType && validEventTypes.includes(eventType as EventType)
+      ? filteredByActivity.filter((r) => r.event_type === eventType)
+      : filteredByActivity;
 
-    return {
-        counts,
-        upcoming_in_5_hours: {
-            count: in5HoursTasks.length,
-            tasks: in5HoursTasks,
-        },
-        tasks,
-    };
+  const totalTasks = filteredForTasks.length;
+  const totalPages = Math.ceil(totalTasks / limit);
+
+  // ── Paginated slice of tasks (in-memory since we already fetched everything for counts) ──
+  const tasks = filteredForTasks.slice(offset, offset + limit);
+
+  return {
+    counts,
+    upcoming_in_5_hours: {
+      count: in5HoursTasks.length,
+      tasks: in5HoursTasks,
+    },
+    tasks,
+    pagination: {
+      page,
+      limit,
+      total: totalTasks,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_prev: page > 1,
+    },
+  };
 };

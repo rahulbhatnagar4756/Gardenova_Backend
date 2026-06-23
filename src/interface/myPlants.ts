@@ -485,7 +485,14 @@ export interface NotificationDetail {
   common_name: string;
   scientific_name: string;
 }
-
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+}
 export type ActivityType = "watering" | "fertilizing" | "pruning" | "generic";
 export type EventType = "upcoming" | "missed" | "completed" | "all";
  
@@ -518,6 +525,8 @@ export interface NotificationResponse {
     tasks: NotificationRow[];
   };
   tasks: NotificationRow[];
+  pagination: Pagination;   // ← new
+
 }
 
 
