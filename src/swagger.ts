@@ -63,6 +63,7 @@ const options = {
     "./src/modules/landScapeDesign/*.ts",
     "./src/modules/contactus/*.ts",
     "./src/modules/Blog/*.ts",
+    "./src/modules/reminder/*.ts",
   ],
 };
 

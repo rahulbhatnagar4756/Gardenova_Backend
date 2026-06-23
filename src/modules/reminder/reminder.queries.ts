@@ -1,5 +1,5 @@
 
-import { connectDB } from '../../core/config/db';
+import {  getDB } from '../../core/config/db';
 import { UserPlant, ReminderType, NotificationLog } from '../../interface/reminder';
 
 // ─── Fetch all due plants ────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ import { UserPlant, ReminderType, NotificationLog } from '../../interface/remind
  */
 export async function getDuePlants(): Promise<UserPlant[]> {
   const now = new Date();
-    const pool = await connectDB();
+    const pool = await getDB();
 
   const { rows } = await pool.query<UserPlant>(
     `
@@ -89,7 +89,7 @@ export async function getActiveLog(
   reminderType: ReminderType,
   scheduledFor: Date
 ): Promise<NotificationLog | null> {
-    const pool = await connectDB();
+    const pool = await getDB();
   const { rows } = await pool.query<NotificationLog>(
     `
     SELECT * FROM notification_log
@@ -132,7 +132,7 @@ export async function insertNotificationLog(data: {
   scheduledFor: Date;
   fcmMessageId: string | null;
 }): Promise<NotificationLog| undefined> {
-    const pool = await connectDB();
+    const pool = await getDB();
   const { rows } = await pool.query<NotificationLog>(
     `
     INSERT INTO notification_log
@@ -168,7 +168,7 @@ export async function insertNotificationLog(data: {
 export async function getLogWithPlant(
   logId: string
 ): Promise<(NotificationLog & { plant: UserPlant }) | null> {
-    const pool = await connectDB();
+    const pool = await getDB();
   const { rows } = await pool.query(
     `
     SELECT
@@ -232,7 +232,7 @@ export async function getLogWithPlant(
  * Returns the updated log if successful, otherwise null if no valid log was found.
  */
 export async function completeLog(logId: string): Promise<NotificationLog | null> {
-    const pool = await connectDB();
+    const pool = await getDB();
   const { rows } = await pool.query<NotificationLog>(
     `
     UPDATE notification_log
@@ -266,7 +266,7 @@ export async function updatePlantAfterCompletion(
   now: Date
 ): Promise<void> {
   // Map type → columns
-  const pool = await connectDB();
+  const pool = await getDB();
   const colMap: Record<ReminderType, { last: string; next: string; freq: string }> = {
     water:     { last: "last_watered_at",     next: "next_watered_at",     freq: "watering_reminder_frequency" },
     fertilize: { last: "last_fertilized_at",  next: "next_fertilized_at",  freq: "fertilizer_reminder_frequency" },
@@ -362,7 +362,7 @@ export async function updatePlantAfterCompletion(
  * @returns {Promise<string[]>} List of FCM tokens
  */
 export async function getTokensForUser(userId: string): Promise<string[]> {
-    const pool = await connectDB();
+    const pool = await getDB();
     const { rows } = await pool.query<{ token: string }>(
         `SELECT token FROM user_push_tokens
          WHERE user_id = $1
@@ -381,7 +381,7 @@ export async function getTokensForUser(userId: string): Promise<string[]> {
  * @returns {Promise<void>}
  */
 export async function deleteInvalidTokens(tokens: string[]): Promise<void> {
-    const pool = await connectDB();
+    const pool = await getDB();
     if (!tokens.length) return;
     await pool.query(
         `DELETE FROM user_push_tokens WHERE token = ANY($1::text[])`,
@@ -399,7 +399,7 @@ export async function deleteInvalidTokens(tokens: string[]): Promise<void> {
  * @returns {Promise<void>}
  */
 export async function upsertFcmToken(userId: string, token: string): Promise<void> {
-    const pool = await connectDB();
+    const pool = await getDB();
     await pool.query(
         `INSERT INTO user_push_tokens (user_id, token)
          VALUES ($1, $2)
@@ -417,7 +417,7 @@ export async function upsertFcmToken(userId: string, token: string): Promise<voi
  * @returns {Promise<void>}
  */
 export async function deleteFcmToken(userId: string, token: string): Promise<void> {
-    const pool = await connectDB();
+    const pool = await getDB();
     await pool.query(
         `DELETE FROM user_push_tokens WHERE user_id = $1 AND token = $2`,
         [userId, token]
@@ -441,7 +441,7 @@ export async function rescheduleReminder(
     reminderType: ReminderType,
     rescheduleTo: Date
 ): Promise<void> {
-    const pool = await connectDB();
+    const pool = await getDB();
 
     const nextColMap: Record<ReminderType, string> = {
         water:     "next_watered_at",
@@ -474,7 +474,7 @@ export async function disableReminder(
     userPlantId: string,
     reminderType: ReminderType
 ): Promise<void> {
-    const pool = await connectDB();
+    const pool = await getDB();
 
     const colMap: Record<ReminderType, { enabled: string; next_at: string }> = {
         water:     { enabled: "watering_notification_enabled",   next_at: "next_watered_at" },

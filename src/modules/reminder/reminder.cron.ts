@@ -45,5 +45,5 @@ async function cronTick(): Promise<void> {
  */
 export function startReminderCron(): void {
     cron.schedule("* * * * *", cronTick, { timezone: "UTC" });
-    // console.log("[Cron] 🚀 Reminder cron started — runs every minute");
+    console.error("[Cron]  Reminder cron started — runs every minute");
 }

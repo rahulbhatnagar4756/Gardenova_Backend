@@ -28,6 +28,7 @@ import logger from "./core/config/logger";
 import detailedLogger from "./core/middleware/httpLogger";
 import contactRoutes from "./modules/contactus/contactRoutes";
 import blogRouter from "./modules/Blog/blogRoute";
+import { startReminderCron } from "./modules/reminder/reminder.cron";
 // import { createBlogTable } from "./db/createBlogTable";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
@@ -69,7 +70,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // User Authentication Routes
 // createBlogTable()
-// startReminderCron();
+startReminderCron();
 app.use("/api/v1/auth", authRoutes);
 // User Role Routes
 app.use("/api/v1/roles", roleRoutes);

@@ -448,12 +448,21 @@ export const getPlantDetailsByIdService = async (
  * Calculates the date that is a specified number of days ahead of the current date.
  *
  * @param {number | null} days - The number of days to add to the current date. If `null`, the function will return `null`.
+ * @param preferredTime
  * @returns {Date | null} - The resulting date after adding the specified number of days. If `days` is `null`, returns `null`.
  */
-const calculateNextDate = (days: number | null): Date | null => {
+const calculateNextDate = (days: number | null, preferredTime?: string | null): Date | null => {
     if (days === null || days === undefined) return null;
+
     const next = new Date();
     next.setDate(next.getDate() + days);
+
+    // ── Apply preferred time if provided ──────────────────────────────────
+    if (preferredTime) {
+        const [hours, minutes, seconds] = preferredTime.split(":").map(Number);
+        next.setHours(hours!, minutes ?? 0, seconds ?? 0, 0);
+    }
+
     return next;
 };
 
@@ -1151,7 +1160,10 @@ const buildCareFields = (block: CareNotificationInput): CareUpdateFields => ({
         ? (block.reminder_frequency ?? 0)
         : 0,
     next_at: block.notification_enabled
-        ? calculateNextDate(block.reminder_frequency ?? null)
+        ? calculateNextDate(
+            block.reminder_frequency ?? null,
+            block.preferred_time ?? "09:00:00"   // ← pass preferred_time
+          )
         : null,
     recalculate_next: block.notification_enabled,
     note: block.note ?? null,
