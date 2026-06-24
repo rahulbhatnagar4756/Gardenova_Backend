@@ -5,6 +5,7 @@ import {
     registerToken,
     removeToken,
 } from "./reminder.controller";
+import { processDueReminders } from "./reminder.processor";
 
 const router = Router();
 
@@ -85,5 +86,10 @@ const router = Router();
  */
 router.post("/token",   auth, registerToken);
 router.delete("/token", auth, removeToken);
+
+router.post("/test-trigger", async (req, res) => {
+  await processDueReminders();
+  res.json({ success: true });
+});
 
 export default router;

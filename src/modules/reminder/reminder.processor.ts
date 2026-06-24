@@ -45,8 +45,19 @@ function getDueTypes(plant: UserPlant, now: Date): DueReminder[] {
     type: ReminderType;
     note: string | null;
   }> = [
-      { enabled: plant.watering_notification_enabled, nextAt: plant.next_watered_at, preferredTime: plant.watering_preferred_time, type: "water", note: plant.watering_note },
-      { enabled: plant.fertilizer_notification_enabled, nextAt: plant.next_fertilized_at, preferredTime: plant.fertilizer_preferred_time, type: "fertilize", note: plant.fertilizer_note },
+      {
+        enabled: plant.watering_notification_enabled,
+        nextAt: plant.next_watered_at,
+        preferredTime: plant.watering_preferred_time,
+        type: "water", note: plant.watering_note
+      },
+      {
+        enabled: plant.fertilizer_notification_enabled,
+        nextAt: plant.next_fertilized_at,
+        preferredTime: plant.fertilizer_preferred_time,
+        type: "fertilize",
+        note: plant.fertilizer_note
+      },
       { enabled: plant.pruning_notification_enabled, nextAt: plant.next_pruned_at, preferredTime: plant.pruning_preferred_time, type: "prune", note: plant.pruning_note },
       { enabled: plant.generic_notification_enabled, nextAt: plant.next_generic_care_at, preferredTime: plant.generic_care_preferred_time, type: "generic", note: plant.generic_care_note },
     ];
@@ -80,60 +91,67 @@ function getDueTypes(plant: UserPlant, now: Date): DueReminder[] {
 async function processReminder(reminder: DueReminder): Promise<void> {
   const { plant, type, scheduledFor } = reminder;
 
-  // console.log(`[Reminder]   → Processing plant=${plant.id} type=${type}`);
+  // console.log(`[Reminder] → Processing plant=${plant.id} type=${type} scheduledFor=${scheduledFor}`);
 
   // 1. Idempotency check
   const existing = await getActiveLog(plant.id, type, scheduledFor);
   if (existing) {
-    // console.log(`[Reminder]   ⏭  Already active (status=${existing.status}) for plant=${plant.id} type=${type} — skipping`);
+    // console.log(`[Reminder] ⏭  Already active (status=${existing.status}) plant=${plant.id} type=${type} — skipping`);
     return;
   }
 
   // 2. Fetch FCM tokens
   const tokens = await getTokensForUser(plant.user_id);
   if (!tokens.length) {
-    // console.warn(`[Reminder]   ⚠️  No FCM tokens for user=${plant.user_id} — skipping`);
+    // console.warn(`[Reminder] ⚠️  No FCM tokens for user=${plant.user_id} — skipping`);
     return;
   }
+  // console.log(`[Reminder] 📱 Found ${tokens.length} token(s) for user=${plant.user_id}`);
 
-  // console.log(`[Reminder]   📱 Found ${tokens.length} token(s) for user=${plant.user_id}`);
+  // 3. Insert log
+  // console.log(`[Reminder] 📝 Inserting log for plant=${plant.id} type=${type}...`);
 
-  // 3. Insert log first (prevents duplicate sends on cron overlap)
-  const log = await insertNotificationLog({
-    userPlantId: plant.id,
-    userId: plant.user_id,
-    reminderType: type,
-    scheduledFor,
-    fcmMessageId: null,
-  });
+  let log;
+  try {
+    log = await insertNotificationLog({
+      userPlantId: plant.id,
+      userId: plant.user_id,
+      reminderType: type,
+      scheduledFor,
+      fcmMessageId: null,
+    });
+    // console.log(`[Reminder] 📝 Log insert result:`, log ?? 'UNDEFINED');
+  } catch (err) {
+    console.error(`[Reminder] ❌ insertNotificationLog THREW:`, err);
+    return;
+  }
 
   if (!log) {
-    //console.log(`[Reminder]   ⏭  Conflict on insert for plant=${plant.id} type=${type} — another instance handled it`);
+    // console.log(`[Reminder] ⏭  Conflict on insert — skipping`);
     return;
   }
+  // console.log(`[Reminder] 📝 Log inserted id=${log.id}`);
 
-  
   // 4. Send FCM
   try {
     const result = await sendReminderNotification({
-    tokens,
-    reminderType:      type,
-    userPlantId:       plant.id,
-    notificationLogId: log.id,
-    plantName:         plant.common_name,
-    note:              reminder.note,
-});
+      tokens,
+      reminderType: type,
+      userPlantId: plant.id,
+      notificationLogId: log.id,
+      plantName: plant.common_name,
+      note: reminder.note,
+      scheduledFor: scheduledFor,  // ← add karo
+    });
 
-    // console.log(
-    //   `[Reminder]   ✅ FCM sent plant=${plant.id} type=${type} | success=${result.successCount} fail=${result.failureCount} messageId=${result.messageId ?? 'N/A'}`
-    // );
+    // console.log(`[Reminder] ✅ FCM sent plant=${plant.id} type=${type} | success=${result.successCount} fail=${result.failureCount} messageId=${result.messageId ?? 'N/A'}`);
 
     if (result.invalidTokens.length) {
-      // console.warn(`[Reminder]   🗑  Removing ${result.invalidTokens.length} invalid/expired token(s)`);
+      // console.warn(`[Reminder] 🗑  Removing ${result.invalidTokens.length} invalid token(s)`);
       await deleteInvalidTokens(result.invalidTokens);
     }
   } catch (err) {
-    console.error(`[Reminder]   ❌ FCM send failed for plant=${plant.id} type=${type}:`, err);
+    console.error(`[Reminder] ❌ FCM failed plant=${plant.id} type=${type}:`, err);
   }
 }
 
@@ -149,6 +167,7 @@ async function processReminder(reminder: DueReminder): Promise<void> {
  */
 export async function processDueReminders(): Promise<void> {
   const now = new Date();
+  // console.log(`[Reminder] 🕐 processDueReminders fired at ${now.toISOString()}`);
 
   let plants: UserPlant[];
   try {
@@ -164,7 +183,6 @@ export async function processDueReminders(): Promise<void> {
   }
 
   const allDue: DueReminder[] = plants.flatMap((p) => getDueTypes(p, now));
-
   // console.log(`[Reminder] 🌱 Found ${plants.length} plant(s) → ${allDue.length} reminder(s) to process`);
 
   const BATCH = 10;
@@ -172,6 +190,5 @@ export async function processDueReminders(): Promise<void> {
     const batch = allDue.slice(i, i + BATCH);
     await Promise.allSettled(batch.map(processReminder));
   }
-
 }
 

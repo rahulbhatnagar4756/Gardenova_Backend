@@ -2,6 +2,13 @@
 import {  getDB } from '../../core/config/db';
 import { UserPlant, ReminderType, NotificationLog } from '../../interface/reminder';
 
+
+const dbReminderTypeMap: Record<ReminderType, string> = {
+    water:     'watering',
+    fertilize: 'fertilizer',
+    prune:     'pruning',
+    generic:   'generic_care',
+};
 /**
  * Fetches all user plants that have at least one due reminder.
  *
@@ -18,38 +25,62 @@ import { UserPlant, ReminderType, NotificationLog } from '../../interface/remind
  */
 export async function getDuePlants(): Promise<UserPlant[]> {
   const now = new Date();
-    const pool = await getDB();
+  const pool = await getDB();
 
   const { rows } = await pool.query<UserPlant>(
     `
-    SELECT up.*
+    SELECT up.*, p.common_name
     FROM user_plants up
+    LEFT JOIN plant_table_final p ON p.id = up.plant_id
     WHERE
-      -- At least one reminder type is enabled and overdue
       (
         (
           up.watering_notification_enabled = true
           AND up.next_watered_at IS NOT NULL
           AND up.next_watered_at <= $1
-          AND (up.watering_preferred_time IS NULL OR CURRENT_TIME >= up.watering_preferred_time)
+          AND (
+            up.watering_preferred_time IS NULL
+            OR (
+              CURRENT_TIME >= up.watering_preferred_time
+              AND CURRENT_TIME < up.watering_preferred_time + INTERVAL '1 minute'
+            )
+          )
         ) OR (
           up.fertilizer_notification_enabled = true
           AND up.next_fertilized_at IS NOT NULL
           AND up.next_fertilized_at <= $1
-          AND (up.fertilizer_preferred_time IS NULL OR CURRENT_TIME >= up.fertilizer_preferred_time)
+          AND (
+            up.fertilizer_preferred_time IS NULL
+            OR (
+              CURRENT_TIME >= up.fertilizer_preferred_time
+              AND CURRENT_TIME < up.fertilizer_preferred_time + INTERVAL '1 minute'
+            )
+          )
         ) OR (
           up.pruning_notification_enabled = true
           AND up.next_pruned_at IS NOT NULL
           AND up.next_pruned_at <= $1
-          AND (up.pruning_preferred_time IS NULL OR CURRENT_TIME >= up.pruning_preferred_time)
+          AND (
+            up.pruning_preferred_time IS NULL
+            OR (
+              CURRENT_TIME >= up.pruning_preferred_time
+              AND CURRENT_TIME < up.pruning_preferred_time + INTERVAL '1 minute'
+            )
+          )
         ) OR (
           up.generic_notification_enabled = true
           AND up.next_generic_care_at IS NOT NULL
           AND up.next_generic_care_at <= $1
-          AND (up.generic_care_preferred_time IS NULL OR CURRENT_TIME >= up.generic_care_preferred_time)
+          AND (
+            up.generic_care_preferred_time IS NULL
+            OR (
+              CURRENT_TIME >= up.generic_care_preferred_time
+              AND CURRENT_TIME < up.generic_care_preferred_time + INTERVAL '1 minute'
+            )
+          )
         )
       )
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF up SKIP LOCKED
     `,
     [now]
   );
@@ -83,18 +114,16 @@ export async function getActiveLog(
   scheduledFor: Date
 ): Promise<NotificationLog | null> {
     const pool = await getDB();
-  const { rows } = await pool.query<NotificationLog>(
-    `
-    SELECT * FROM notification_log
-    WHERE user_plant_id  = $1
-      AND reminder_type  = $2
-      AND scheduled_for  = $3
-      AND status IN ('sent', 'snoozed')
-    LIMIT 1
-    `,
-    [userPlantId, reminderType, scheduledFor]
-  );
-  return rows[0] ?? null;
+    const { rows } = await pool.query<NotificationLog>(
+        `SELECT * FROM notification_log
+         WHERE user_plant_id = $1
+           AND reminder_type = $2
+           AND scheduled_for = $3
+           AND status IN ('sent', 'snoozed')
+         LIMIT 1`,
+        [userPlantId, dbReminderTypeMap[reminderType], scheduledFor]  // ✅
+    );
+    return rows[0] ?? null;
 }
 
 // ─── Insert notification log ─────────────────────────────────────────────────
@@ -117,6 +146,7 @@ export async function getActiveLog(
  * @returns {Promise<NotificationLog | undefined>}
  * Returns the created notification log row if insert succeeded,
  * otherwise `undefined` if a conflict prevented insertion.
+ * 
  */
 export async function insertNotificationLog(data: {
   userPlantId: string;
@@ -124,25 +154,37 @@ export async function insertNotificationLog(data: {
   reminderType: ReminderType;
   scheduledFor: Date;
   fcmMessageId: string | null;
-}): Promise<NotificationLog| undefined> {
+}): Promise<NotificationLog | undefined> {
     const pool = await getDB();
-  const { rows } = await pool.query<NotificationLog>(
-    `
-    INSERT INTO notification_log
-      (user_plant_id, user_id, reminder_type, scheduled_for, fcm_message_id, status)
-    VALUES ($1, $2, $3, $4, $5, 'sent')
-    ON CONFLICT ON CONSTRAINT idx_notif_log_idempotency DO NOTHING
-    RETURNING *
-    `,
+
+    // Manual idempotency check — partial index ke saath ON CONFLICT kaam nahi karta
+    const { rows: existing } = await pool.query<NotificationLog>(
+        `SELECT * FROM notification_log
+         WHERE user_plant_id = $1
+           AND reminder_type = $2
+           AND scheduled_for = $3
+           AND status IN ('sent', 'snoozed')
+         LIMIT 1`,
+        [data.userPlantId, data.reminderType, data.scheduledFor]
+    );
+
+    if (existing[0]) return undefined; // already exists
+
+    const { rows } = await pool.query<NotificationLog>(
+    `INSERT INTO notification_log
+       (user_plant_id, user_id, reminder_type, scheduled_for, fcm_message_id, status)
+     VALUES ($1, $2, $3, $4, $5, 'sent')
+     RETURNING *`,
     [
-      data.userPlantId,
-      data.userId,
-      data.reminderType,
-      data.scheduledFor,
-      data.fcmMessageId,
+        data.userPlantId,
+        data.userId,
+        dbReminderTypeMap[data.reminderType],  // ✅ mapped value
+        data.scheduledFor,
+        data.fcmMessageId,
     ]
-  );
-  return rows[0];
+);;
+
+    return rows[0];
 }
 
 
@@ -200,7 +242,8 @@ export async function upsertFcmToken(userId: string, token: string): Promise<voi
     await pool.query(
         `INSERT INTO user_push_tokens (user_id, token)
          VALUES ($1, $2)
-         ON CONFLICT (user_id, token) DO UPDATE SET updated_at = NOW()`,
+         ON CONFLICT ON CONSTRAINT uq_user_push_tokens_user_token 
+         DO UPDATE SET updated_at = NOW()`,
         [userId, token]
     );
 }

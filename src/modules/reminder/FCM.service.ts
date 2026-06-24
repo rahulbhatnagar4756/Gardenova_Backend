@@ -1,60 +1,44 @@
 import * as admin from 'firebase-admin';
 import { ReminderType } from '../../interface/reminder';
-import path from 'path';
-import fs from 'fs';
+
 
 // Initialize once
 if (!admin.apps.length) {
-  let serviceAccount: admin.ServiceAccount;
-
-  // Option 1: JSON file path (recommended for local dev)
-  const filePath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
-  // Option 2: Inline JSON string (recommended for production)
-  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
-  if (filePath) {
-    const resolved = path.resolve(filePath);
-    if (!fs.existsSync(resolved)) {
-      throw new Error(`[FCM] Service account file not found at: ${resolved}`);
-    }
-    serviceAccount = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
-  } else if (rawJson) {
-    try {
-      serviceAccount = JSON.parse(rawJson);
-    } catch {
-      throw new Error('[FCM] GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
-    }
-  } else {
-    throw new Error('[FCM] Set either GOOGLE_SERVICE_ACCOUNT_PATH or GOOGLE_SERVICE_ACCOUNT_JSON in .env');
-  }
-
+  // console.log('PROJECT_ID:', process.env.FIREBASE_PROJECT_ID);
+  // console.log('CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL);
+  // console.log('PRIVATE_KEY starts:', process.env.FIREBASE_PRIVATE_KEY?.substring(0, 40));
+  // console.log('PRIVATE_KEY ends:', process.env.FIREBASE_PRIVATE_KEY?.slice(-20));
+  
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID!,
+      privateKey:  process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, '\n').replace(/^"|"$/g, ''),
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
+    }),
   });
-
-  // console.log('[FCM] Firebase initialized successfully');
 }
 
 const messaging = admin.messaging();
 
 // ─── Titles & Bodies ────────────────────────────────────────────────────────
 
-const REMINDER_COPY: Record<ReminderType, { title: string; defaultBody: string }> = {
-    water:     { title: "💧 Time to Water!",   defaultBody: "Your plant is thirsty — give it some love." },
-    fertilize: { title: "🌱 Fertilizer Time!", defaultBody: "Boost your plant with some nutrients today." },
-    prune:     { title: "✂️ Time to Prune!",   defaultBody: "Keep your plant healthy with a trim." },
-    generic:   { title: "🌿 Plant Care Time!", defaultBody: "Your plant needs some attention today." },
+const REMINDER_COPY: Record<ReminderType, { actionTitle: string }> = {
+  water:     { actionTitle: "Watering Time" },
+  fertilize: { actionTitle: "Fertilizer Time" },
+  prune:     { actionTitle: "Pruning Time" },
+  generic:   { actionTitle: "Care Time" },
 };
 
 // ─── Send to multiple tokens ─────────────────────────────────────────────────
 
 export interface SendReminderPayload {
-    tokens:            string[];
-    reminderType:      ReminderType;
-    userPlantId:       string;
-    notificationLogId: string;
-    plantName?:        string;
-    note?:             string | null;   // ← added
+  tokens:            string[];
+  reminderType:      ReminderType;
+  userPlantId:       string;
+  notificationLogId: string;
+  plantName?:        string;
+  note?:             string | null;
+  scheduledFor?:     Date;  // ← add karo
 }
 
 export interface SendResult {
@@ -84,27 +68,36 @@ export interface SendResult {
 export async function sendReminderNotification(
   payload: SendReminderPayload
 ): Promise<SendResult> {
-  const { tokens, reminderType, userPlantId, notificationLogId, plantName,note } = payload;
+  const { tokens, reminderType, userPlantId, notificationLogId, plantName, note, scheduledFor } = payload;
 
   if (!tokens.length) {
     return { successCount: 0, failureCount: 0, messageId: null, invalidTokens: [] };
   }
 
   const copy = REMINDER_COPY[reminderType];
+
+  // Time format
+  const scheduledTime = new Date(scheduledFor ?? Date.now())
+    .toLocaleTimeString('en-IN', {
+      hour:     'numeric',
+      minute:   '2-digit',
+      hour12:   true,
+      timeZone: 'Asia/Kolkata',
+    }); // "3:35 PM"
+
+  const title = `🌿 ${plantName ?? 'Your Plant'} – ${copy.actionTitle}`;
   const body = note
-    ? `${note} — ${plantName ?? "your plant"}`
-    : plantName
-        ? `${plantName}: ${copy.defaultBody}`
-        : copy.defaultBody;
+  ? `Scheduled for ${scheduledTime} today\n${note}`
+  : `Scheduled for ${scheduledTime} today`;
 
   const message: admin.messaging.MulticastMessage = {
     tokens,
-    notification: { title: copy.title, body },
+    notification: { title, body },
     data: {
-        notification_log_id: notificationLogId,
-        user_plant_id:       userPlantId,
-        reminder_type:       reminderType,
-        action:              "plant_reminder",
+      notification_log_id: notificationLogId,
+      user_plant_id:       userPlantId,
+      reminder_type:       reminderType,
+      action:              "plant_reminder",
     },
     android: {
       priority: 'high',
