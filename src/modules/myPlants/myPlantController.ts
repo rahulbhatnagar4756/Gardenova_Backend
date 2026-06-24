@@ -722,11 +722,18 @@ export const rescheduleNotificationController = async (
         if (!user) return;
  
         const { userPlantId } = req.params;
-        const { activityType, next_at } = req.body;
+        const { activityType, preferred_time, frequency } = req.body;
  
-        if (!activityType || !next_at) {
+        if (!activityType || !preferred_time || frequency === undefined) {
             res.status(HTTP_STATUS.BAD_REQUEST).json(
-                errorResponse("activityType and next_at are required")
+                errorResponse("activityType, preferred_time and frequency are required")
+            );
+            return;
+        }
+ 
+        if (typeof frequency !== "number" || frequency <= 0) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(
+                errorResponse("frequency must be a positive number")
             );
             return;
         }
@@ -735,7 +742,8 @@ export const rescheduleNotificationController = async (
             user.id!,
             userPlantId!,
             activityType.trim().toLowerCase(),
-            next_at
+            preferred_time.trim(),
+            frequency
         );
  
         res.status(HTTP_STATUS.OK).json(

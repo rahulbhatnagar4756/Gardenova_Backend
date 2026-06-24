@@ -1092,11 +1092,14 @@ router.get(
  *                 type: string
  *                 enum: [water, fertilize, prune, generic]
  *                 description: The care activity to reschedule
- *               next_at:
+ *               preferred_time:
  *                 type: string
- *                 format: date-time
- *                 example: "2025-06-15T09:00:00.000Z"
- *                 description: New scheduled datetime (ISO 8601)
+ *                 example: "09:00:00"
+ *                 description: Preferred time of day in HH:MM:SS format
+ *               frequency:
+ *                 type: integer
+ *                 example: 3
+ *                 description: Reminder frequency in days. If preferred_time > now, today counts as day 1 (next_at = today + frequency-1 days). Otherwise today is not counted (next_at = today + frequency days).
  *     responses:
  *       200:
  *         description: Task rescheduled successfully

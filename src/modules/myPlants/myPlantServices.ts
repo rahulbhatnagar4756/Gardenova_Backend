@@ -1955,13 +1955,6 @@ export const getNotificationsService = async (
   const countResult = await pool.query(countQuery, countParams);
   const allRows: NotificationRow[] = countResult.rows;
 
-  const counts: NotificationCounts = {
-    all: allRows.length,
-    upcoming: allRows.filter((r) => r.event_type === "upcoming").length,
-    missed: allRows.filter((r) => r.event_type === "missed").length,
-    completed: allRows.filter((r) => r.event_type === "completed").length,
-  };
-
   const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
     Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
 );
@@ -1971,10 +1964,22 @@ const resolvedActivityLabel =
         ? activityType
         : null;
 
-  const filteredByActivity = resolvedActivityLabel
+const filteredByActivity = resolvedActivityLabel
     ? allRows.filter((r) => r.activity_type === resolvedActivityLabel)
     : allRows;
 
+
+  const counts: NotificationCounts = {
+    all: filteredByActivity.length,
+    upcoming: filteredByActivity.filter((r) => r.event_type === "upcoming").length,
+    missed: filteredByActivity.filter((r) => r.event_type === "missed").length,
+    completed: filteredByActivity.filter((r) => r.event_type === "completed").length,
+};
+
+  
+
+
+  
   const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
 
   // ── Total count for the paginated tasks slice ──
@@ -2021,7 +2026,6 @@ const resolvedActivityLabel =
  * @throws Error When the provided activity type does not exist.
  */
 function resolveActivity(activityType: string): ActivityType {
-     
     const activity = LABEL_TO_ACTIVITY[activityType];
     if (!activity) throw new Error(`Invalid activity type: ${activityType}`);
     return activity;
@@ -2039,6 +2043,7 @@ function getActionColumns(activity: ActivityType): {
     next_at: string;
     last_at: string;
     frequency: string;
+    preferred_time: string;
 } {
     switch (activity) {
         case "watering":
@@ -2047,6 +2052,7 @@ function getActionColumns(activity: ActivityType): {
                 next_at: "next_watered_at",
                 last_at: "last_watered_at",
                 frequency: "watering_reminder_frequency",
+                preferred_time: "watering_preferred_time",
             };
         case "fertilizing":
             return {
@@ -2054,6 +2060,7 @@ function getActionColumns(activity: ActivityType): {
                 next_at: "next_fertilized_at",
                 last_at: "last_fertilized_at",
                 frequency: "fertilizer_reminder_frequency",
+                preferred_time: "fertilizer_preferred_time",
             };
         case "pruning":
             return {
@@ -2061,6 +2068,7 @@ function getActionColumns(activity: ActivityType): {
                 next_at: "next_pruned_at",
                 last_at: "last_pruned_at",
                 frequency: "pruning_reminder_frequency",
+                preferred_time: "pruning_preferred_time",
             };
         case "generic":
             return {
@@ -2068,6 +2076,7 @@ function getActionColumns(activity: ActivityType): {
                 next_at: "next_generic_care_at",
                 last_at: "last_generic_care_at",
                 frequency: "generic_care_reminder_frequency",
+                preferred_time: "generic_care_preferred_time",
             };
     }
 }
@@ -2102,14 +2111,17 @@ async function assertUserPlantExists(
  * @param userPlantId - ID of the user's plant to update.
  * @param activityType - Activity label used to identify the notification type.
  * @param newNextAt - New scheduled notification date and time in ISO format.
+ * @param preferredTime - Preferred time of day for the notification in "HH:MM:SS" format.
+ * @param frequency - Reminder frequency in days for the activity.
  * @returns Promise<void>
  * @throws Error When the plant does not belong to the user or activity type is invalid.
  */
 export const rescheduleNotificationService = async (
     userId: string,
     userPlantId: string,
-    activityType: string,  // label: "water" | "prune" | "fertilize" | "generic"
-    newNextAt: string      // ISO datetime string
+    activityType: string,   // label: "water" | "prune" | "fertilize" | "generic"
+    preferredTime: string,  // "HH:MM:SS"
+    frequency: number       // days
 ): Promise<void> => {
     const pool = await getDB();
     await assertUserPlantExists( userId, userPlantId);
@@ -2117,11 +2129,26 @@ export const rescheduleNotificationService = async (
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
  
+    // If preferred_time > NOW()::time → today is day 1, so add (frequency - 1) days
+    // If preferred_time <= NOW()::time → today not counted, so add frequency days
     await pool.query(
         `UPDATE user_plants
-         SET ${cols.next_at} = $1, updated_at = NOW()
-         WHERE id = $2 AND user_id = $3`,
-        [newNextAt, userPlantId, userId]
+         SET
+           ${cols.next_at} = (
+             CURRENT_DATE + $1::time
+             + (
+                 CASE
+                   WHEN $1::time > NOW()::time
+                   THEN ($2 - 1)
+                   ELSE $2
+                 END
+               ) * INTERVAL '1 day'
+           ),
+           ${cols.preferred_time} = $1,
+           ${cols.frequency}      = $2,
+           updated_at             = NOW()
+         WHERE id = $3 AND user_id = $4`,
+        [preferredTime, frequency, userPlantId, userId]
     );
 };
  
