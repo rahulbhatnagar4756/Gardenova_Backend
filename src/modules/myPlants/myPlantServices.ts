@@ -455,12 +455,21 @@ const calculateNextDate = (days: number | null, preferredTime?: string | null): 
     if (days === null || days === undefined) return null;
 
     const next = new Date();
-    next.setDate(next.getDate() + days);
 
-    // ── Apply preferred time if provided ──────────────────────────────────
+    // ── Apply preferred time first ────────────────────────────────────────
     if (preferredTime) {
         const [hours, minutes, seconds] = preferredTime.split(":").map(Number);
         next.setHours(hours!, minutes ?? 0, seconds ?? 0, 0);
+    }
+
+    // ── If preferred time is still in the future today, include today ─────
+    const now = new Date();
+    if (next > now) {
+        // preferred time hasn't passed yet today → start count from today
+        next.setDate(next.getDate() + (days - 1));
+    } else {
+        // preferred time already passed today → start count from tomorrow
+        next.setDate(next.getDate() + days);
     }
 
     return next;
@@ -1953,10 +1962,14 @@ export const getNotificationsService = async (
     completed: allRows.filter((r) => r.event_type === "completed").length,
   };
 
-  const resolvedActivityLabel =
-    activityType && ALL_ACTIVITY_TYPES.includes(activityType as ActivityType)
-      ? ACTIVITY_LABELS[activityType as ActivityType]
-      : null;
+  const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
+    Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
+);
+
+const resolvedActivityLabel =
+    activityType && LABEL_TO_ACTIVITY[activityType]
+        ? activityType
+        : null;
 
   const filteredByActivity = resolvedActivityLabel
     ? allRows.filter((r) => r.activity_type === resolvedActivityLabel)
@@ -1993,4 +2006,200 @@ export const getNotificationsService = async (
       has_prev: page > 1,
     },
   };
+};
+
+// Reverse map: "water" → "watering", "prune" → "pruning" etc.
+ const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
+  Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
+);
+/**
+ * Resolves a valid activity type from the provided activity label.
+ * Throws an error if the activity type is invalid or not supported.
+ *
+ * @param activityType - Activity label used to identify the corresponding activity type.
+ * @returns The resolved activity type enum value.
+ * @throws Error When the provided activity type does not exist.
+ */
+function resolveActivity(activityType: string): ActivityType {
+     
+    const activity = LABEL_TO_ACTIVITY[activityType];
+    if (!activity) throw new Error(`Invalid activity type: ${activityType}`);
+    return activity;
+}
+/**
+ * Returns the database column mappings for a specific plant care activity.
+ * Maps activity types to their notification status, scheduling, last action,
+ * and reminder frequency columns.
+ *
+ * @param activity - The activity type used to determine corresponding column names.
+ * @returns An object containing database column names for the activity.
+ */
+function getActionColumns(activity: ActivityType): {
+    enabled: string;
+    next_at: string;
+    last_at: string;
+    frequency: string;
+} {
+    switch (activity) {
+        case "watering":
+            return {
+                enabled: "watering_notification_enabled",
+                next_at: "next_watered_at",
+                last_at: "last_watered_at",
+                frequency: "watering_reminder_frequency",
+            };
+        case "fertilizing":
+            return {
+                enabled: "fertilizer_notification_enabled",
+                next_at: "next_fertilized_at",
+                last_at: "last_fertilized_at",
+                frequency: "fertilizer_reminder_frequency",
+            };
+        case "pruning":
+            return {
+                enabled: "pruning_notification_enabled",
+                next_at: "next_pruned_at",
+                last_at: "last_pruned_at",
+                frequency: "pruning_reminder_frequency",
+            };
+        case "generic":
+            return {
+                enabled: "generic_notification_enabled",
+                next_at: "next_generic_care_at",
+                last_at: "last_generic_care_at",
+                frequency: "generic_care_reminder_frequency",
+            };
+    }
+}
+/**
+ * Verifies that a plant belongs to the specified user.
+ * Throws an error if the plant does not exist or is not associated with the user.
+ *
+ * @param pool - Database connection pool used to execute the query.
+ * @param userId - ID of the authenticated user.
+ * @param userPlantId - ID of the plant to verify ownership for.
+ * @returns Promise<void>
+ * @throws Error When the plant is not found for the given user.
+ */
+async function assertUserPlantExists(
+    userId: string,
+    userPlantId: string
+): Promise<void> {
+    const pool = await getDB();
+    const res = await pool.query(
+        `SELECT id FROM user_plants WHERE id = $1 AND user_id = $2`,
+        [userPlantId, userId]
+    );
+    if (!res.rows.length) throw new Error("Plant not found for this user");
+}
+ 
+/**
+ * Reschedules a notification for a specific plant care activity.
+ * Validates plant ownership, resolves the activity type, and updates
+ * the corresponding next notification date in the database.
+ *
+ * @param userId - ID of the authenticated user.
+ * @param userPlantId - ID of the user's plant to update.
+ * @param activityType - Activity label used to identify the notification type.
+ * @param newNextAt - New scheduled notification date and time in ISO format.
+ * @returns Promise<void>
+ * @throws Error When the plant does not belong to the user or activity type is invalid.
+ */
+export const rescheduleNotificationService = async (
+    userId: string,
+    userPlantId: string,
+    activityType: string,  // label: "water" | "prune" | "fertilize" | "generic"
+    newNextAt: string      // ISO datetime string
+): Promise<void> => {
+    const pool = await getDB();
+    await assertUserPlantExists( userId, userPlantId);
+ 
+    const activity = resolveActivity(activityType);
+    const cols = getActionColumns(activity);
+ 
+    await pool.query(
+        `UPDATE user_plants
+         SET ${cols.next_at} = $1, updated_at = NOW()
+         WHERE id = $2 AND user_id = $3`,
+        [newNextAt, userPlantId, userId]
+    );
+};
+ 
+/**
+ * Marks a plant care notification as completed and schedules the next notification.
+ * Validates plant ownership, resolves the activity type, retrieves the reminder
+ * frequency, and updates the completion and next scheduled dates.
+ *
+ * @param userId - ID of the authenticated user.
+ * @param userPlantId - ID of the user's plant to update.
+ * @param activityType - Activity label used to identify the notification type.
+ * @returns Promise<void>
+ * @throws Error When the plant does not belong to the user, activity type is invalid,
+ * or reminder frequency is not configured.
+ */
+export const completeNotificationService = async (
+    userId: string,
+    userPlantId: string,
+    activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
+): Promise<void> => {
+    const pool = await getDB();
+    await assertUserPlantExists( userId, userPlantId);
+ 
+    const activity = resolveActivity(activityType);
+    const cols = getActionColumns(activity);
+ 
+    // Fetch frequency to calculate next_at
+    const freqRes = await pool.query(
+        `SELECT ${cols.frequency} AS frequency FROM user_plants WHERE id = $1`,
+        [userPlantId]
+    );
+    const frequency: number = freqRes.rows[0]?.frequency ?? 0;
+ 
+    if (frequency <= 0) {
+        throw new Error(
+            `Cannot complete: reminder frequency is not set for ${activityType}`
+        );
+    }
+ 
+    await pool.query(
+        `UPDATE user_plants
+         SET
+           ${cols.last_at} = NOW(),
+           ${cols.next_at} = NOW() + ($1 || ' days')::interval,
+           updated_at = NOW()
+         WHERE id = $2 AND user_id = $3`,
+        [frequency, userPlantId, userId]
+    );
+};
+/**
+ * Disables a plant care notification for a specific activity.
+ * Validates plant ownership, resolves the activity type, and updates
+ * the notification status by disabling it and clearing the next schedule.
+ *
+ * @param userId - ID of the authenticated user.
+ * @param userPlantId - ID of the user's plant to update.
+ * @param activityType - Activity label used to identify the notification type.
+ * @returns Promise<void>
+ * @throws Error When the plant does not belong to the user or activity type is invalid.
+ */
+export const disableNotificationService = async (
+    userId: string,
+    userPlantId: string,
+    activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
+): Promise<void> => {
+    const pool = await getDB();
+    await assertUserPlantExists( userId, userPlantId);
+ 
+    const activity = resolveActivity(activityType);
+    const cols = getActionColumns(activity);
+ 
+    await pool.query(
+        `UPDATE user_plants
+         SET
+           ${cols.enabled} = false,
+           ${cols.next_at} = NULL,
+           updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [userPlantId, userId]
+    );
 };

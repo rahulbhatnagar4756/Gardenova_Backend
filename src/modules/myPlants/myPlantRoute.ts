@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, deleteUserPlantController, getAllPlants, getAllPlantsAdmin, getAllUserPlants,  getNotificationsController,  getPlantById,  getUserPlantById,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, completeNotificationController, deleteUserPlantController, disableNotificationController, getAllPlants, getAllPlantsAdmin, getAllUserPlants,  getNotificationsController,  getPlantById,  getUserPlantById,  rescheduleNotificationController,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
 import { reminderValidation } from "./myPlantValidation";
 import multer from "multer";
@@ -1059,5 +1059,146 @@ router.get(
   auth,
   getNotificationsController
 );
+
+ 
+/**
+ * @swagger
+ * /api/v1/allplants/user/notifications/{userPlantId}/reschedule:
+ *   patch:
+ *     summary: Reschedule a plant care task to a new datetime
+ *     tags:
+ *       - Notifications
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userPlantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: ID of the user_plant record
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - activityType
+ *               - next_at
+ *             properties:
+ *               activityType:
+ *                 type: string
+ *                 enum: [water, fertilize, prune, generic]
+ *                 description: The care activity to reschedule
+ *               next_at:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2025-06-15T09:00:00.000Z"
+ *                 description: New scheduled datetime (ISO 8601)
+ *     responses:
+ *       200:
+ *         description: Task rescheduled successfully
+ *       400:
+ *         description: Invalid activityType or missing fields
+ *       401:
+ *         description: Unauthorized
+ */
+router.patch(
+    "/user/notifications/:userPlantId/reschedule",
+    auth,
+    rescheduleNotificationController
+);
+ 
+/**
+ * @swagger
+ * /api/v1/allplants/user/notifications/{userPlantId}/complete:
+ *   patch:
+ *     summary: Mark a plant care task as completed
+ *     description: Sets last_at to NOW() and advances next_at by the reminder frequency. Uses Plan B completion logic.
+ *     tags:
+ *       - Notifications
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userPlantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: ID of the user_plant record
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - activityType
+ *             properties:
+ *               activityType:
+ *                 type: string
+ *                 enum: [water, fertilize, prune, generic]
+ *                 description: The care activity to mark as completed
+ *     responses:
+ *       200:
+ *         description: Task marked as completed successfully
+ *       400:
+ *         description: Invalid activityType or frequency not set
+ *       401:
+ *         description: Unauthorized
+ */
+router.patch(
+    "/user/notifications/:userPlantId/complete",
+    auth,
+    completeNotificationController
+);
+/**
+ * @swagger
+ * /api/v1/allplants/user/notifications/{userPlantId}/disable:
+ *   patch:
+ *     summary: Disable notifications for a specific care activity
+ *     description: Sets notification_enabled to false and clears next_at. Task will no longer appear in notifications.
+ *     tags:
+ *       - Notifications
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userPlantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: ID of the user_plant record
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - activityType
+ *             properties:
+ *               activityType:
+ *                 type: string
+ *                 enum: [water, fertilize, prune, generic]
+ *                 description: The care activity to disable
+ *     responses:
+ *       200:
+ *         description: Notification disabled successfully
+ *       400:
+ *         description: Invalid activityType or plant not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.patch(
+    "/user/notifications/:userPlantId/disable",
+    auth,
+    disableNotificationController
+);
+
  
 export default router;

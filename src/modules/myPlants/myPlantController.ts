@@ -5,7 +5,9 @@ import { errorResponse, successResponse } from "../../core/utils/responseFormatt
 import { HTTP_STATUS } from "../../core/utils/constants";
 import { findUserByEmail } from "../auth/authRepository";
 import { addPlantToUserService, 
+    completeNotificationService, 
     deleteUserPlantService, 
+    disableNotificationService, 
     getAllPlantsAdminService, 
     getAllPlantsService, 
      
@@ -14,6 +16,7 @@ import { addPlantToUserService,
     getUserPlantsService, 
     importPlantsService,
     mapFlatToNested,
+    rescheduleNotificationService,
     updateUserPlantService, 
  } from "./myPlantServices";
 import { ZodError } from "zod";
@@ -680,4 +683,163 @@ export const getNotificationsController = async (
     next(err);
   }
 };
+/**
+ * Retrieves the authenticated user based on the JWT payload attached to the request.
+ * Sends a 401 response if the user is not authenticated or does not exist.
+ *
+ * @param req - Authenticated request containing user information.
+ * @param res - Express response object.
+ * @returns Promise resolving to the user entity or null.
+ */
+async function resolveUser(req: AuthRequest, res: Response):Promise<any | null> { //eslint-disable-line @typescript-eslint/no-explicit-any
+    const userPayload = req.user as AuthUserPayload | undefined;
+    if (!userPayload?.userEmail) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+        return null;
+    }
+    const user = await findUserByEmail(userPayload.userEmail);
+    if (!user) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+        return null;
+    }
+    return user;
+}
+ 
 
+/**
+ * Reschedules a plant activity notification.
+ * @param req Request containing userPlantId, activityType, and next_at.
+ * @param res Express response object.
+ * @param next Express next middleware function.
+ */
+export const rescheduleNotificationController = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    try {
+        const user = await resolveUser(req, res);
+        if (!user) return;
+ 
+        const { userPlantId } = req.params;
+        const { activityType, next_at } = req.body;
+ 
+        if (!activityType || !next_at) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(
+                errorResponse("activityType and next_at are required")
+            );
+            return;
+        }
+ 
+        await rescheduleNotificationService(
+            user.id!,
+            userPlantId!,
+            activityType.trim().toLowerCase(),
+            next_at
+        );
+ 
+        res.status(HTTP_STATUS.OK).json(
+            successResponse(null, "Task rescheduled successfully")
+        );
+    } catch (err) {
+        if (err instanceof Error) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+            return;
+        }
+        next(err);
+    }
+};
+ 
+
+/**
+ * Reschedules a plant care task notification for the authenticated user.
+ *
+ * @param req - Request containing userPlantId, activityType, and next_at.
+ * @param res - Express response object.
+ * @param next - Express next middleware function.
+ * @returns Promise<void>
+ */
+export const completeNotificationController = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    try {
+        const user = await resolveUser(req, res);
+        if (!user) return;
+ 
+        const { userPlantId } = req.params;
+        const { activityType } = req.body;
+ 
+        if (!activityType) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(
+                errorResponse("activityType is required")
+            );
+            return;
+        }
+ 
+        await completeNotificationService(
+            user.id!,
+            userPlantId!,
+            activityType.trim().toLowerCase()
+        );
+ 
+        res.status(HTTP_STATUS.OK).json(
+            successResponse(null, "Task marked as completed successfully")
+        );
+    } catch (err) {
+        if (err instanceof Error) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+            return;
+        }
+        next(err);
+    }
+};
+ 
+
+/**
+ * Disables a scheduled notification for a specific plant care activity.
+ * Validates the authenticated user and activity type before updating
+ * the notification status.
+ *
+ * @param req - Authenticated request containing the userPlantId parameter and activityType in the request body.
+ * @param res - Express response object used to send success or error responses.
+ * @param next - Express middleware function for forwarding unexpected errors.
+ * @returns Promise<void>
+ */
+export const disableNotificationController = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    try {
+        const user = await resolveUser(req, res);
+        if (!user) return;
+ 
+        const { userPlantId } = req.params;
+        const { activityType } = req.body;
+ 
+        if (!activityType) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(
+                errorResponse("activityType is required")
+            );
+            return;
+        }
+ 
+        await disableNotificationService(
+            user.id!,
+            userPlantId!,
+            activityType.trim().toLowerCase()
+        );
+ 
+        res.status(HTTP_STATUS.OK).json(
+            successResponse(null, "Notification disabled successfully")
+        );
+    } catch (err) {
+        if (err instanceof Error) {
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+            return;
+        }
+        next(err);
+    }
+};
