@@ -112,8 +112,7 @@ async function processReminder(reminder: DueReminder): Promise<void> {
     return;
   }
 
-  // console.log(`[Reminder]   📝 Log created id=${log.id}`);
-
+  
   // 4. Send FCM
   try {
     const result = await sendReminderNotification({
@@ -138,7 +137,6 @@ async function processReminder(reminder: DueReminder): Promise<void> {
   }
 }
 
-// ─── Main: process new due reminders ────────────────────────────────────────
 /**
  * Fetches all plants with due reminders and processes them in batches.
  *
@@ -175,68 +173,5 @@ export async function processDueReminders(): Promise<void> {
     await Promise.allSettled(batch.map(processReminder));
   }
 
-  // console.log(`[Reminder] ✔  Done processing due reminders`);
 }
 
-// ─── Main: re-fire snoozed reminders ────────────────────────────────────────
-/**
- * Processes snoozed reminder logs that are ready to be re-fired.
- *
- * Steps:
- * - Fetch snoozed logs due for re-processing
- * - Retrieve user FCM tokens
- * - Send push notifications again
- * - Reset snooze state or update log status
- * - Clean up invalid tokens
- *
- * @returns {Promise<void>} Resolves when all snoozed reminders are processed
- */
-// export async function processSnoozedReminders(): Promise<void> {
-//   let snoozed: Awaited<ReturnType<typeof getDueSnoozedLogs>>;
-//   try {
-//     snoozed = await getDueSnoozedLogs();
-//   } catch (err) {
-//     console.error('[Snooze] ❌ Failed to fetch snoozed logs from DB:', err);
-//     return;
-//   }
-
-//   if (!snoozed.length) {
-//     // console.log('[Snooze] ✔  No snoozed reminders due');
-//     return;
-//   }
-
-//   // console.log(`[Snooze] ⏰ Found ${snoozed.length} snoozed reminder(s) to re-fire`);
-
-//   for (const log of snoozed) {
-//     // console.log(`[Snooze]   → Re-firing log=${log.id} type=${log.reminder_type} user=${log.user_id}`);
-//     try {
-//       const tokens = await getTokensForUser(log.user_id);
-
-//       if (!tokens.length) {
-//         // console.warn(`[Snooze]   ⚠️  No tokens for user=${log.user_id} — marking as sent anyway`);
-//         await resetSnoozedLog(log.id, null);
-//         continue;
-//       }
-
-//       const result = await sendReminderNotification({
-//         tokens,
-//         reminderType: log.reminder_type as ReminderType,
-//         userPlantId: log.user_plant_id,
-//         notificationLogId: log.id,
-//       });
-
-//       await resetSnoozedLog(log.id, result.messageId);
-
-//       if (result.invalidTokens.length) {
-//         // console.warn(`[Snooze]   🗑  Removing ${result.invalidTokens.length} invalid token(s)`);
-//         await deleteInvalidTokens(result.invalidTokens);
-//       }
-
-//       // console.log(`[Snooze]   ✅ Re-fired log=${log.id} success=${result.successCount} fail=${result.failureCount}`);
-//     } catch (err) {
-//       console.error(`[Snooze]   ❌ Failed to re-fire log=${log.id}:`, err);
-//     }
-//   }
-
-//   // console.log(`[Snooze] ✔  Done processing snoozed reminders`);
-// }

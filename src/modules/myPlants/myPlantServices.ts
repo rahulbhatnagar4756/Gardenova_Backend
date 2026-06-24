@@ -1172,17 +1172,17 @@ const buildCareFields = (block: CareNotificationInput): CareUpdateFields => ({
         ? calculateNextDate(
             block.reminder_frequency ?? null,
             block.preferred_time ?? "09:00:00"   // ← pass preferred_time
-          )
+        )
         : null,
     recalculate_next: block.notification_enabled,
     note: block.note ?? null,
 });
 
 const noteColMap: Record<string, string> = {
-    watering:   "watering_note",
+    watering: "watering_note",
     fertilizer: "fertilizer_note",
-    pruning:    "pruning_note",
-    generic:    "generic_care_note",
+    pruning: "pruning_note",
+    generic: "generic_care_note",
 };
 
 /**
@@ -1220,42 +1220,42 @@ export const updateUserPlantService = async (
     const setClauses: string[] = ["updated_at = NOW()"];
     const values: unknown[] = [];
     let paramIndex = 1;
-/**
- * Appends SQL UPDATE clauses and parameter values for a care type's reminder settings.
- *
- * @param prefix - Care type prefix used to determine column names.
- * @param fields - Updated reminder configuration values.
- */
+    /**
+     * Appends SQL UPDATE clauses and parameter values for a care type's reminder settings.
+     *
+     * @param prefix - Care type prefix used to determine column names.
+     * @param fields - Updated reminder configuration values.
+     */
     const appendFields = (prefix: string, fields: CareUpdateFields): void => {
-    setClauses.push(`${prefix}_notification_enabled = $${paramIndex++}`);
-    values.push(fields.notification_enabled);
+        setClauses.push(`${prefix}_notification_enabled = $${paramIndex++}`);
+        values.push(fields.notification_enabled);
 
-    if (CARE_TYPES_WITH_PREFERRED_TIME.has(prefix)) {
-        setClauses.push(`${preferredTimeColMap[prefix]} = $${paramIndex++}`);
-        values.push(fields.preferred_time);
-    }
+        if (CARE_TYPES_WITH_PREFERRED_TIME.has(prefix)) {
+            setClauses.push(`${preferredTimeColMap[prefix]} = $${paramIndex++}`);
+            values.push(fields.preferred_time);
+        }
 
-    setClauses.push(`${reminderFreqColMap[prefix]} = $${paramIndex++}`);
-    values.push(fields.reminder_frequency);
+        setClauses.push(`${reminderFreqColMap[prefix]} = $${paramIndex++}`);
+        values.push(fields.reminder_frequency);
 
-    // note — always update per care type (even null to allow clearing)
-    if (fields.note !== undefined) {
-        setClauses.push(`${noteColMap[prefix]} = $${paramIndex++}`);
-        values.push(fields.note ?? null);
-    }
+        // note — always update per care type (even null to allow clearing)
+        if (fields.note !== undefined) {
+            setClauses.push(`${noteColMap[prefix]} = $${paramIndex++}`);
+            values.push(fields.note ?? null);
+        }
 
-    if (fields.recalculate_next) {
-        setClauses.push(`${nextColMap[prefix]} = $${paramIndex++}`);
-        values.push(fields.next_at);
-    }
-};
+        if (fields.recalculate_next) {
+            setClauses.push(`${nextColMap[prefix]} = $${paramIndex++}`);
+            values.push(fields.next_at);
+        }
+    };
 
     if (payload.watering !== undefined) appendFields("watering", buildCareFields(payload.watering));
     if (payload.fertilizer !== undefined) appendFields("fertilizer", buildCareFields(payload.fertilizer));
     if (payload.pruning !== undefined) appendFields("pruning", buildCareFields(payload.pruning));
     if (payload.generic !== undefined) appendFields("generic", buildCareFields(payload.generic));
 
-    
+
 
     values.push(userPlantId, userId);
 
@@ -1927,9 +1927,7 @@ function buildUnionQuery(
     return { query, params };
 }
 
-// ─────────────────────────────────────────────
-// Service
-// ─────────────────────────────────────────────
+
 /**
  * Fetch notifications for a user with optional activity and event filters.
  *
@@ -1941,81 +1939,76 @@ function buildUnionQuery(
  * @returns {Promise<NotificationResponse>} Notifications, counts, and upcoming tasks.
  */
 export const getNotificationsService = async (
-  userId: string,
-  activityType: string | null,
-  eventType: string | null,
-  page: number,
-  limit: number
+    userId: string,
+    activityType: string | null,
+    eventType: string | null,
+    page: number,
+    limit: number
 ): Promise<NotificationResponse> => {
-  const pool = await getDB();
-  const offset = (page - 1) * limit;
+    const pool = await getDB();
+    const offset = (page - 1) * limit;
 
-  // ── Counts + upcoming_in_5_hours: always full scan, no pagination ──
-  const { query: countQuery, params: countParams } = buildUnionQuery(userId, ALL_ACTIVITY_TYPES);
-  const countResult = await pool.query(countQuery, countParams);
-  const allRows: NotificationRow[] = countResult.rows;
+    // ── Counts + upcoming_in_5_hours: always full scan, no pagination ──
+    const { query: countQuery, params: countParams } = buildUnionQuery(userId, ALL_ACTIVITY_TYPES);
+    const countResult = await pool.query(countQuery, countParams);
+    const allRows: NotificationRow[] = countResult.rows;
 
-  const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
-    Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
-);
+    const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
+        Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
+    );
 
-const resolvedActivityLabel =
-    activityType && LABEL_TO_ACTIVITY[activityType]
-        ? activityType
-        : null;
+    const resolvedActivityLabel =
+        activityType && LABEL_TO_ACTIVITY[activityType]
+            ? activityType
+            : null;
 
-const filteredByActivity = resolvedActivityLabel
-    ? allRows.filter((r) => r.activity_type === resolvedActivityLabel)
-    : allRows;
-
-
-  const counts: NotificationCounts = {
-    all: filteredByActivity.length,
-    upcoming: filteredByActivity.filter((r) => r.event_type === "upcoming").length,
-    missed: filteredByActivity.filter((r) => r.event_type === "missed").length,
-    completed: filteredByActivity.filter((r) => r.event_type === "completed").length,
-};
-
-  
+    const filteredByActivity = resolvedActivityLabel
+        ? allRows.filter((r) => r.activity_type === resolvedActivityLabel)
+        : allRows;
 
 
-  
-  const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
+    const counts: NotificationCounts = {
+        all: filteredByActivity.length,
+        upcoming: filteredByActivity.filter((r) => r.event_type === "upcoming").length,
+        missed: filteredByActivity.filter((r) => r.event_type === "missed").length,
+        completed: filteredByActivity.filter((r) => r.event_type === "completed").length,
+    };
+    const in5HoursTasks = filteredByActivity.filter((r) => r.is_upcoming_in_5_hours);
 
-  // ── Total count for the paginated tasks slice ──
-  const validEventTypes: EventType[] = ["upcoming", "missed", "completed"];
-  const filteredForTasks =
-    eventType && validEventTypes.includes(eventType as EventType)
-      ? filteredByActivity.filter((r) => r.event_type === eventType)
-      : filteredByActivity;
+    // ── Total count for the paginated tasks slice ──
+    const validEventTypes: EventType[] = ["upcoming", "missed", "completed"];
+    const filteredForTasks =
+        eventType && validEventTypes.includes(eventType as EventType)
+            ? filteredByActivity.filter((r) => r.event_type === eventType)
+            : filteredByActivity;
 
-  const totalTasks = filteredForTasks.length;
-  const totalPages = Math.ceil(totalTasks / limit);
+    const totalTasks = filteredForTasks.length;
+    const totalPages = Math.ceil(totalTasks / limit);
 
-  // ── Paginated slice of tasks (in-memory since we already fetched everything for counts) ──
-  const tasks = filteredForTasks.slice(offset, offset + limit);
+    // ── Paginated slice of tasks (in-memory since we already fetched everything for counts) ──
+    const tasks = filteredForTasks.slice(offset, offset + limit);
 
-  return {
-    counts,
-    upcoming_in_5_hours: {
-      count: in5HoursTasks.length,
-      tasks: in5HoursTasks,
-    },
-    tasks,
-    pagination: {
-      page,
-      limit,
-      total: totalTasks,
-      total_pages: totalPages,
-      has_next: page < totalPages,
-      has_prev: page > 1,
-    },
-  };
+    return {
+        counts,
+        upcoming_in_5_hours: {
+            count: in5HoursTasks.length,
+            tasks: in5HoursTasks,
+        },
+        tasks,
+        pagination: {
+            page,
+            limit,
+            total: totalTasks,
+            total_pages: totalPages,
+            has_next: page < totalPages,
+            has_prev: page > 1,
+        },
+    };
 };
 
 // Reverse map: "water" → "watering", "prune" → "pruning" etc.
- const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
-  Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
+const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
+    Object.entries(ACTIVITY_LABELS).map(([k, v]) => [v, k as ActivityType])
 );
 /**
  * Resolves a valid activity type from the provided activity label.
@@ -2101,7 +2094,7 @@ async function assertUserPlantExists(
     );
     if (!res.rows.length) throw new Error("Plant not found for this user");
 }
- 
+
 /**
  * Reschedules a notification for a specific plant care activity.
  * Validates plant ownership, resolves the activity type, and updates
@@ -2124,11 +2117,11 @@ export const rescheduleNotificationService = async (
     frequency: number       // days
 ): Promise<void> => {
     const pool = await getDB();
-    await assertUserPlantExists( userId, userPlantId);
- 
+    await assertUserPlantExists(userId, userPlantId);
+
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
- 
+
     // If preferred_time > NOW()::time → today is day 1, so add (frequency - 1) days
     // If preferred_time <= NOW()::time → today not counted, so add frequency days
     await pool.query(
@@ -2151,7 +2144,7 @@ export const rescheduleNotificationService = async (
         [preferredTime, frequency, userPlantId, userId]
     );
 };
- 
+
 /**
  * Marks a plant care notification as completed and schedules the next notification.
  * Validates plant ownership, resolves the activity type, retrieves the reminder
@@ -2170,24 +2163,24 @@ export const completeNotificationService = async (
     activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
 ): Promise<void> => {
     const pool = await getDB();
-    await assertUserPlantExists( userId, userPlantId);
- 
+    await assertUserPlantExists(userId, userPlantId);
+
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
- 
+
     // Fetch frequency to calculate next_at
     const freqRes = await pool.query(
         `SELECT ${cols.frequency} AS frequency FROM user_plants WHERE id = $1`,
         [userPlantId]
     );
     const frequency: number = freqRes.rows[0]?.frequency ?? 0;
- 
+
     if (frequency <= 0) {
         throw new Error(
             `Cannot complete: reminder frequency is not set for ${activityType}`
         );
     }
- 
+
     await pool.query(
         `UPDATE user_plants
          SET
@@ -2215,11 +2208,11 @@ export const disableNotificationService = async (
     activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
 ): Promise<void> => {
     const pool = await getDB();
-    await assertUserPlantExists( userId, userPlantId);
- 
+    await assertUserPlantExists(userId, userPlantId);
+
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
- 
+
     await pool.query(
         `UPDATE user_plants
          SET
