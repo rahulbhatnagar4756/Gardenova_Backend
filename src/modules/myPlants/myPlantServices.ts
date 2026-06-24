@@ -454,25 +454,24 @@ export const getPlantDetailsByIdService = async (
 const calculateNextDate = (days: number | null, preferredTime?: string | null): Date | null => {
     if (days === null || days === undefined) return null;
 
-    const next = new Date();
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const nowUTC = Date.now();
+    const nowIST = new Date(nowUTC + IST_OFFSET_MS);
+    const nextIST = new Date(nowUTC + IST_OFFSET_MS);
 
-    // ── Apply preferred time first ────────────────────────────────────────
     if (preferredTime) {
         const [hours, minutes, seconds] = preferredTime.split(":").map(Number);
-        next.setHours(hours!, minutes ?? 0, seconds ?? 0, 0);
+        nextIST.setHours(hours!, minutes ?? 0, seconds ?? 0, 0);
     }
 
-    // ── If preferred time is still in the future today, include today ─────
-    const now = new Date();
-    if (next > now) {
-        // preferred time hasn't passed yet today → start count from today
-        next.setDate(next.getDate() + (days - 1));
+    if (nextIST > nowIST) {
+        nextIST.setDate(nextIST.getDate() + (days - 1));
     } else {
-        // preferred time already passed today → start count from tomorrow
-        next.setDate(next.getDate() + days);
+        nextIST.setDate(nextIST.getDate() + days);
     }
 
-    return next;
+    // IST → UTC convert karke store karo
+    return new Date(nextIST.getTime() - IST_OFFSET_MS);
 };
 
 

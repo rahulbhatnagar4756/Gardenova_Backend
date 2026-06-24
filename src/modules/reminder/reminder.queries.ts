@@ -41,8 +41,8 @@ export async function getDuePlants(): Promise<UserPlant[]> {
           AND (
             up.watering_preferred_time IS NULL
             OR (
-              CURRENT_TIME >= up.watering_preferred_time
-              AND CURRENT_TIME < up.watering_preferred_time + INTERVAL '1 minute'
+              CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' >= up.watering_preferred_time
+              AND CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' < up.watering_preferred_time + INTERVAL '1 minute'
             )
           )
         ) OR (
@@ -52,8 +52,8 @@ export async function getDuePlants(): Promise<UserPlant[]> {
           AND (
             up.fertilizer_preferred_time IS NULL
             OR (
-              CURRENT_TIME >= up.fertilizer_preferred_time
-              AND CURRENT_TIME < up.fertilizer_preferred_time + INTERVAL '1 minute'
+              CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' >= up.fertilizer_preferred_time
+              AND CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' < up.fertilizer_preferred_time + INTERVAL '1 minute'
             )
           )
         ) OR (
@@ -63,8 +63,8 @@ export async function getDuePlants(): Promise<UserPlant[]> {
           AND (
             up.pruning_preferred_time IS NULL
             OR (
-              CURRENT_TIME >= up.pruning_preferred_time
-              AND CURRENT_TIME < up.pruning_preferred_time + INTERVAL '1 minute'
+              CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' >= up.pruning_preferred_time
+              AND CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' < up.pruning_preferred_time + INTERVAL '1 minute'
             )
           )
         ) OR (
@@ -74,8 +74,8 @@ export async function getDuePlants(): Promise<UserPlant[]> {
           AND (
             up.generic_care_preferred_time IS NULL
             OR (
-              CURRENT_TIME >= up.generic_care_preferred_time
-              AND CURRENT_TIME < up.generic_care_preferred_time + INTERVAL '1 minute'
+              CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' >= up.generic_care_preferred_time
+              AND CURRENT_TIME AT TIME ZONE 'Asia/Kolkata' < up.generic_care_preferred_time + INTERVAL '1 minute'
             )
           )
         )
@@ -83,7 +83,7 @@ export async function getDuePlants(): Promise<UserPlant[]> {
     FOR UPDATE OF up SKIP LOCKED
     `,
     [now]
-  );
+);
 
   return rows;
 }

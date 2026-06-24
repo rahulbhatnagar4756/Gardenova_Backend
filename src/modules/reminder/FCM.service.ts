@@ -70,25 +70,30 @@ export async function sendReminderNotification(
 ): Promise<SendResult> {
   const { tokens, reminderType, userPlantId, notificationLogId, plantName, note, scheduledFor } = payload;
 
+  // console.log(`[FCM] 📤 Sending to plant=${userPlantId} type=${reminderType} tokens=${tokens.length}`);
+
   if (!tokens.length) {
+    // console.warn(`[FCM] ⚠️ No tokens — skipping`);
     return { successCount: 0, failureCount: 0, messageId: null, invalidTokens: [] };
   }
 
   const copy = REMINDER_COPY[reminderType];
 
-  // Time format
   const scheduledTime = new Date(scheduledFor ?? Date.now())
     .toLocaleTimeString('en-IN', {
       hour:     'numeric',
       minute:   '2-digit',
       hour12:   true,
       timeZone: 'Asia/Kolkata',
-    }); // "3:35 PM"
+    });
 
   const title = `🌿 ${plantName ?? 'Your Plant'} – ${copy.actionTitle}`;
-  const body = note
-  ? `Scheduled for ${scheduledTime} today\n${note}`
-  : `Scheduled for ${scheduledTime} today`;
+  const body  = note
+    ? `Scheduled for ${scheduledTime} today\n${note}`
+    : `Scheduled for ${scheduledTime} today`;
+
+  // console.log(`[FCM] 📋 title="${title}"`);
+  // console.log(`[FCM] 📋 body="${body}"`);
 
   const message: admin.messaging.MulticastMessage = {
     tokens,
@@ -119,20 +124,27 @@ export async function sendReminderNotification(
   };
 
   const response = await messaging.sendEachForMulticast(message);
+  // console.log(`[FCM] ✅ Result: success=${response.successCount} fail=${response.failureCount}`);
 
   const invalidTokens: string[] = [];
   response.responses.forEach((resp, idx) => {
     if (!resp.success) {
       const code = resp.error?.code;
+      console.error(`[FCM] ❌ token[${idx}] error: ${code} — ${resp.error?.message}`);
       if (
         code === 'messaging/invalid-registration-token' ||
         code === 'messaging/registration-token-not-registered'
       ) {
         invalidTokens.push(tokens[idx]!);
       }
-      console.error(`FCM error for token[${idx}]:`, code, resp.error?.message);
+    } else {
+      // console.log(`[FCM] ✅ token[${idx}] messageId=${resp.messageId}`);
     }
   });
+
+  if (invalidTokens.length) {
+    // console.warn(`[FCM] 🗑  ${invalidTokens.length} invalid token(s) to remove`);
+  }
 
   const firstSuccess = response.responses.find((r) => r.success);
 
