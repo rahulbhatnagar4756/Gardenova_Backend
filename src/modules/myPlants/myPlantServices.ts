@@ -456,22 +456,40 @@ const calculateNextDate = (days: number | null, preferredTime?: string | null): 
 
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
     const nowUTC = Date.now();
+
+    // Aaj ki date IST mein
     const nowIST = new Date(nowUTC + IST_OFFSET_MS);
-    const nextIST = new Date(nowUTC + IST_OFFSET_MS);
+    const todayYear  = nowIST.getUTCFullYear();
+    const todayMonth = nowIST.getUTCMonth();
+    const todayDate  = nowIST.getUTCDate();
 
+    let [hours, minutes, seconds] = [9, 0, 0];
     if (preferredTime) {
-        const [hours, minutes, seconds] = preferredTime.split(":").map(Number);
-        nextIST.setHours(hours!, minutes ?? 0, seconds ?? 0, 0);
+        [hours, minutes, seconds] = preferredTime.split(":").map(Number) as [number, number, number];
     }
 
-    if (nextIST > nowIST) {
-        nextIST.setDate(nextIST.getDate() + (days - 1));
+    // IST mein preferred time set karo — UTC Date banao
+    // IST time → UTC = IST - 5:30
+    const nextUTC = new Date(Date.UTC(
+        todayYear,
+        todayMonth,
+        todayDate,
+        hours - 5,        // IST to UTC hours
+        (minutes ?? 0) - 30,  // IST to UTC minutes
+        seconds ?? 0
+    ));
+
+    // Agar negative minutes fix karo
+    // Date.UTC handles overflow automatically ✅
+
+    // Agar preferred time aaj ke liye future mein hai
+    if (nextUTC.getTime() > nowUTC) {
+        nextUTC.setUTCDate(nextUTC.getUTCDate() + (days - 1));
     } else {
-        nextIST.setDate(nextIST.getDate() + days);
+        nextUTC.setUTCDate(nextUTC.getUTCDate() + days);
     }
 
-    // IST → UTC convert karke store karo
-    return new Date(nextIST.getTime() - IST_OFFSET_MS);
+    return nextUTC;
 };
 
 
