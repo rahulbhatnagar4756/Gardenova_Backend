@@ -2139,6 +2139,14 @@ export const rescheduleNotificationService = async (
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
 
+
+    const dbTypeMap: Record<string, string> = {
+        watering:    'watering',
+        fertilizing: 'fertilizer',
+        pruning:     'pruning',
+        generic:     'generic_care',
+    };
+
     // If preferred_time > NOW()::time → today is day 1, so add (frequency - 1) days
     // If preferred_time <= NOW()::time → today not counted, so add frequency days
     await pool.query(
@@ -2160,6 +2168,15 @@ export const rescheduleNotificationService = async (
        updated_at             = NOW()
      WHERE id = $3 AND user_id = $4`,
         [preferredTime, frequency, userPlantId, userId]
+    );
+
+    await pool.query(
+        `UPDATE notification_log
+         SET status = 'rescheduled', updated_at = NOW()
+         WHERE user_plant_id = $1
+           AND reminder_type = $2
+           AND status IN ('sent', 'snoozed')`,
+        [userPlantId, dbTypeMap[activity]]
     );
 
 };
@@ -2224,7 +2241,7 @@ export const completeNotificationService = async (
 export const disableNotificationService = async (
     userId: string,
     userPlantId: string,
-    activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
+    activityType: string
 ): Promise<void> => {
     const pool = await getDB();
     await assertUserPlantExists(userId, userPlantId);
@@ -2235,9 +2252,11 @@ export const disableNotificationService = async (
     await pool.query(
         `UPDATE user_plants
          SET
-           ${cols.enabled} = false,
-           ${cols.next_at} = NULL,
-           updated_at = NOW()
+           ${cols.enabled}        = false,
+           ${cols.next_at}        = NULL,
+           ${cols.preferred_time} = NULL,
+           ${cols.frequency}      = 0,
+           updated_at             = NOW()
          WHERE id = $1 AND user_id = $2`,
         [userPlantId, userId]
     );

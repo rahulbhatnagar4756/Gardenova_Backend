@@ -3,7 +3,7 @@ import {  getDB } from '../../core/config/db';
 import { UserPlant, ReminderType, NotificationLog } from '../../interface/reminder';
 
 
-const dbReminderTypeMap: Record<ReminderType, string> = {
+export const dbReminderTypeMap: Record<ReminderType, string> = {
     water:     'watering',
     fertilize: 'fertilizer',
     prune:     'pruning',
@@ -26,66 +26,66 @@ const dbReminderTypeMap: Record<ReminderType, string> = {
 export async function getDuePlants(): Promise<UserPlant[]> {
   const now = new Date();
   const pool = await getDB();
+  const client = await pool.connect();
 
-  const { rows } = await pool.query<UserPlant>(
-    `
-    SELECT up.*, p.common_name
-    FROM user_plants up
-    LEFT JOIN plant_table_final p ON p.id = up.plant_id
-    WHERE
-      (
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query<UserPlant>(  // pool → client
+      `
+      SELECT up.*, p.common_name
+      FROM user_plants up
+      LEFT JOIN plant_table_final p ON p.id = up.plant_id
+      WHERE
         (
-          up.watering_notification_enabled = true
-          AND up.next_watered_at IS NOT NULL
-          AND up.next_watered_at <= $1
-          AND (
-            up.watering_preferred_time IS NULL
-            OR (
-              (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.watering_preferred_time
-              AND (NOW() AT TIME ZONE 'Asia/Kolkata')::time < up.watering_preferred_time + INTERVAL '1 minute'
+          (
+            up.watering_notification_enabled = true
+            AND up.next_watered_at IS NOT NULL
+            AND up.next_watered_at <= $1
+            AND (
+              up.watering_preferred_time IS NULL
+              OR (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.watering_preferred_time
             )
-          )
-        ) OR (
-          up.fertilizer_notification_enabled = true
-          AND up.next_fertilized_at IS NOT NULL
-          AND up.next_fertilized_at <= $1
-          AND (
-            up.fertilizer_preferred_time IS NULL
-            OR (
-              (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.fertilizer_preferred_time
-              AND (NOW() AT TIME ZONE 'Asia/Kolkata')::time < up.fertilizer_preferred_time + INTERVAL '1 minute'
+          ) OR (
+            up.fertilizer_notification_enabled = true
+            AND up.next_fertilized_at IS NOT NULL
+            AND up.next_fertilized_at <= $1
+            AND (
+              up.fertilizer_preferred_time IS NULL
+              OR (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.fertilizer_preferred_time
             )
-          )
-        ) OR (
-          up.pruning_notification_enabled = true
-          AND up.next_pruned_at IS NOT NULL
-          AND up.next_pruned_at <= $1
-          AND (
-            up.pruning_preferred_time IS NULL
-            OR (
-              (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.pruning_preferred_time
-              AND (NOW() AT TIME ZONE 'Asia/Kolkata')::time < up.pruning_preferred_time + INTERVAL '1 minute'
+          ) OR (
+            up.pruning_notification_enabled = true
+            AND up.next_pruned_at IS NOT NULL
+            AND up.next_pruned_at <= $1
+            AND (
+              up.pruning_preferred_time IS NULL
+              OR (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.pruning_preferred_time
             )
-          )
-        ) OR (
-          up.generic_notification_enabled = true
-          AND up.next_generic_care_at IS NOT NULL
-          AND up.next_generic_care_at <= $1
-          AND (
-            up.generic_care_preferred_time IS NULL
-            OR (
-              (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.generic_care_preferred_time
-              AND (NOW() AT TIME ZONE 'Asia/Kolkata')::time < up.generic_care_preferred_time + INTERVAL '1 minute'
+          ) OR (
+            up.generic_notification_enabled = true
+            AND up.next_generic_care_at IS NOT NULL
+            AND up.next_generic_care_at <= $1
+            AND (
+              up.generic_care_preferred_time IS NULL
+              OR (NOW() AT TIME ZONE 'Asia/Kolkata')::time >= up.generic_care_preferred_time
             )
           )
         )
-      )
-    FOR UPDATE OF up SKIP LOCKED
-    `,
-    [now]
-);
+      FOR UPDATE OF up SKIP LOCKED
+      `,
+      [now]
+    );
 
-  return rows;
+    await client.query('COMMIT');
+    return rows;
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();  // connection pool wapas
+  }
 }
 
 // ─── Idempotency check ───────────────────────────────────────────────────────
@@ -205,8 +205,7 @@ export async function getTokensForUser(userId: string): Promise<string[]> {
     const { rows } = await pool.query<{ token: string }>(
         `SELECT token FROM user_push_tokens
          WHERE user_id = $1
-         ORDER BY updated_at DESC
-         LIMIT 1`,
+         ORDER BY updated_at DESC`,
         [userId]
     );
     return rows.map((r) => r.token);
@@ -264,3 +263,79 @@ export async function deleteFcmToken(userId: string, token: string): Promise<voi
     );
 }
 
+
+/**
+ * Retrieves push notification tokens for a list of users.
+ *
+ * Queries the `user_push_tokens` table and returns a map where each key is a
+ * user ID and the value is an array of that user's push tokens, ordered by
+ * most recently updated first.
+ *
+ * @param userIds - Array of user UUIDs to retrieve push tokens for.
+ * @returns A promise that resolves to a map of user IDs to their associated
+ * push notification tokens.
+ *
+ */
+export async function getTokensForUsers(
+  userIds: string[]
+): Promise<Map<string, string[]>> {
+  const pool = await getDB();
+  const { rows } = await pool.query<{ user_id: string; token: string }>(
+    `SELECT user_id, token FROM user_push_tokens
+     WHERE user_id = ANY($1::uuid[])
+     ORDER BY updated_at DESC`,
+    [userIds]
+  );
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!map.has(row.user_id)) map.set(row.user_id, []);
+    map.get(row.user_id)!.push(row.token);
+  }
+  return map;
+}
+/**
+ * Retrieves notification log entries that have already been processed for a
+ * batch of reminder keys.
+ *
+ * A log is considered active if its status is either `sent` or `snoozed`.
+ * The returned set contains composite keys in the format:
+ *
+ * `userPlantId:reminderType:scheduledForISOString`
+ *
+ * which can be used for efficient existence checks when determining whether
+ * a reminder should be sent again.
+ *
+ * @param keys - List of reminder identifiers consisting of:
+ *   - `userPlantId`: The user plant UUID.
+ *   - `reminderType`: The reminder type.
+ *   - `scheduledFor`: The scheduled reminder timestamp.
+ *
+ * @returns A promise that resolves to a set of composite keys representing
+ * active notification logs.
+ *
+ */
+export async function getActiveLogsForBatch(
+  keys: Array<{ userPlantId: string; reminderType: ReminderType; scheduledFor: Date }>
+): Promise<Set<string>> {
+  const pool = await getDB();
+  const { rows } = await pool.query<{
+    user_plant_id: string;
+    reminder_type: string;
+    scheduled_for: string;
+  }>(
+    `SELECT user_plant_id, reminder_type, scheduled_for
+     FROM notification_log
+     WHERE (user_plant_id::text, reminder_type, scheduled_for) IN (
+       SELECT * FROM unnest($1::text[], $2::text[], $3::timestamptz[])
+     )
+     AND status IN ('sent', 'snoozed')`,
+    [
+      keys.map((k) => k.userPlantId),
+      keys.map((k) => dbReminderTypeMap[k.reminderType]),
+      keys.map((k) => k.scheduledFor),
+    ]
+  );
+  return new Set(
+    rows.map((r) => `${r.user_plant_id}:${r.reminder_type}:${new Date(r.scheduled_for).toISOString()}`)
+  );
+}
