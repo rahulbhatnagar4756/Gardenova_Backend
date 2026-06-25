@@ -24,8 +24,8 @@ import {
 function isPreferredTimeReached(preferredTime: string | null): boolean {
   if (!preferredTime) return true;
   const [h, m] = preferredTime.split(':').map(Number);
-  const now = new Date();
-  return now.getHours() > h! || (now.getHours() === h && now.getMinutes() >= m!);
+  const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  return nowIST.getHours() > h! || (nowIST.getHours() === h && nowIST.getMinutes() >= m!);
 }
 /**
  * Determines which reminder types are due for a given plant at the current time.
