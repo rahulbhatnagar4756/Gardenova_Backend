@@ -459,9 +459,9 @@ const calculateNextDate = (days: number | null, preferredTime?: string | null): 
 
     // Aaj ki date IST mein
     const nowIST = new Date(nowUTC + IST_OFFSET_MS);
-    const todayYear  = nowIST.getUTCFullYear();
+    const todayYear = nowIST.getUTCFullYear();
     const todayMonth = nowIST.getUTCMonth();
-    const todayDate  = nowIST.getUTCDate();
+    const todayDate = nowIST.getUTCDate();
 
     let [hours, minutes, seconds] = [9, 0, 0];
     if (preferredTime) {
@@ -2143,23 +2143,25 @@ export const rescheduleNotificationService = async (
     // If preferred_time <= NOW()::time → today not counted, so add frequency days
     await pool.query(
         `UPDATE user_plants
-         SET
-           ${cols.next_at} = (
-             CURRENT_DATE + $1::time
-             + (
-                 CASE
-                   WHEN $1::time > NOW()::time
-                   THEN ($2 - 1)
-                   ELSE $2
-                 END
-               ) * INTERVAL '1 day'
-           ),
-           ${cols.preferred_time} = $1,
-           ${cols.frequency}      = $2,
-           updated_at             = NOW()
-         WHERE id = $3 AND user_id = $4`,
+     SET
+       ${cols.next_at} = (
+         (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date + $1::time
+         + (
+             CASE
+               WHEN $1::time > (NOW() AT TIME ZONE 'Asia/Kolkata')::time
+               THEN ($2 - 1)
+               ELSE $2
+             END
+           ) * INTERVAL '1 day'
+         - INTERVAL '5 hours 30 minutes'
+       ),
+       ${cols.preferred_time} = $1,
+       ${cols.frequency}      = $2,
+       updated_at             = NOW()
+     WHERE id = $3 AND user_id = $4`,
         [preferredTime, frequency, userPlantId, userId]
     );
+
 };
 
 /**
