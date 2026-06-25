@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { ReminderType } from '../../interface/reminder';
+import logger from '../../core/config/logger';
 
 
 // Initialize once
@@ -70,30 +71,28 @@ export async function sendReminderNotification(
 ): Promise<SendResult> {
   const { tokens, reminderType, userPlantId, notificationLogId, plantName, note, scheduledFor } = payload;
 
-  // console.log(`[FCM] 📤 Sending to plant=${userPlantId} type=${reminderType} tokens=${tokens.length}`);
+  logger.debug(`[FCM] Sending plant=${userPlantId} type=${reminderType} tokens=${tokens.length}`);
 
   if (!tokens.length) {
-    // console.warn(`[FCM] ⚠️ No tokens — skipping`);
+    logger.warn(`[FCM] No tokens — skipping plant=${userPlantId}`);
     return { successCount: 0, failureCount: 0, messageId: null, invalidTokens: [] };
   }
 
   const copy = REMINDER_COPY[reminderType];
 
-  const scheduledTime = new Date(scheduledFor ?? Date.now())
-    .toLocaleTimeString('en-IN', {
-      hour:     'numeric',
-      minute:   '2-digit',
-      hour12:   true,
-      timeZone: 'Asia/Kolkata',
-    });
+  const scheduledTime = new Date(scheduledFor ?? Date.now()).toLocaleTimeString('en-IN', {
+    hour:     'numeric',
+    minute:   '2-digit',
+    hour12:   true,
+    timeZone: 'Asia/Kolkata',
+  });
 
   const title = `🌿 ${plantName ?? 'Your Plant'} – ${copy.actionTitle}`;
   const body  = note
     ? `Scheduled for ${scheduledTime} today\n${note}`
     : `Scheduled for ${scheduledTime} today`;
 
-  // console.log(`[FCM] 📋 title="${title}"`);
-  // console.log(`[FCM] 📋 body="${body}"`);
+  logger.debug(`[FCM] title="${title}" body="${body}"`);
 
   const message: admin.messaging.MulticastMessage = {
     tokens,
@@ -102,7 +101,7 @@ export async function sendReminderNotification(
       notification_log_id: notificationLogId,
       user_plant_id:       userPlantId,
       reminder_type:       reminderType,
-      action:              "plant_reminder",
+      action:              'plant_reminder',
     },
     android: {
       priority: 'high',
@@ -124,13 +123,13 @@ export async function sendReminderNotification(
   };
 
   const response = await messaging.sendEachForMulticast(message);
-  // console.log(`[FCM] ✅ Result: success=${response.successCount} fail=${response.failureCount}`);
+  logger.debug(`[FCM] Result success=${response.successCount} fail=${response.failureCount}`);
 
   const invalidTokens: string[] = [];
   response.responses.forEach((resp, idx) => {
     if (!resp.success) {
       const code = resp.error?.code;
-      console.error(`[FCM] ❌ token[${idx}] error: ${code} — ${resp.error?.message}`);
+      logger.error(`[FCM] Token[${idx}] failed`, { code, message: resp.error?.message });
       if (
         code === 'messaging/invalid-registration-token' ||
         code === 'messaging/registration-token-not-registered'
@@ -138,12 +137,12 @@ export async function sendReminderNotification(
         invalidTokens.push(tokens[idx]!);
       }
     } else {
-      // console.log(`[FCM] ✅ token[${idx}] messageId=${resp.messageId}`);
+      logger.debug(`[FCM] Token[${idx}] success messageId=${resp.messageId}`);
     }
   });
 
   if (invalidTokens.length) {
-    // console.warn(`[FCM] 🗑  ${invalidTokens.length} invalid token(s) to remove`);
+    logger.warn(`[FCM] ${invalidTokens.length} invalid token(s) to remove`);
   }
 
   const firstSuccess = response.responses.find((r) => r.success);

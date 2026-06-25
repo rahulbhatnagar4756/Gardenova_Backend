@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { processDueReminders } from './reminder.processor';
+import logger from '../../core/config/logger';
 
 let isRunning = false;
 let tickCount = 0;
@@ -20,8 +21,10 @@ async function cronTick(): Promise<void> {
     tickCount++;
     const tick = tickCount;
 
+    logger.debug(`[Cron] Tick #${tick} fired at ${new Date().toISOString()}`);
+
     if (isRunning) {
-        // console.warn(`[Cron] ⚠️ Previous tick still running — skipping tick #${tick}`);
+        logger.warn(`[Cron] Skipping tick #${tick} — previous still running`);
         return;
     }
 
@@ -30,7 +33,7 @@ async function cronTick(): Promise<void> {
     try {
         await processDueReminders();
     } catch (err) {
-        console.error(`[Cron] ❌ Tick #${tick} threw an unexpected error:`, err);
+        logger.error(`[Cron] Tick #${tick} unexpected error`, { err });
     } finally {
         isRunning = false;
     }
@@ -45,5 +48,5 @@ async function cronTick(): Promise<void> {
  */
 export function startReminderCron(): void {
     cron.schedule("* * * * *", cronTick, { timezone: "UTC" });
-    console.error("[Cron]  Reminder cron started — runs every minute");
+    logger.info('[Cron] Reminder cron started — runs every minute');
 }

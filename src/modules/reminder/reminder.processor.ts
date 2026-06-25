@@ -1,3 +1,4 @@
+import logger from '../../core/config/logger';
 import { UserPlant, ReminderType, DueReminder } from '../../interface/reminder';
 import { sendReminderNotification } from './FCM.service';
 import {
@@ -95,11 +96,12 @@ function getDueTypes(plant: UserPlant, now: Date): DueReminder[] {
 async function processReminder(reminder: DueReminder, tokensMap: Map<string, string[]>): Promise<void> {
   const { plant, type, scheduledFor } = reminder;
 
-  // const tokens = await getTokensForUser(plant.user_id);
   const tokens = tokensMap.get(plant.user_id) ?? [];
-  if (!tokens.length) return;
+  if (!tokens.length) {
+    logger.warn(`[Reminder] No FCM tokens for user=${plant.user_id} — skipping`);
+    return;
+  }
 
-  // getActiveLog call HATA diya — insertNotificationLog khud check karta hai
   let log;
   try {
     log = await insertNotificationLog({
@@ -110,11 +112,14 @@ async function processReminder(reminder: DueReminder, tokensMap: Map<string, str
       fcmMessageId: null,
     });
   } catch (err) {
-    console.error(`[Reminder] ❌ insertNotificationLog threw:`, err);
+    logger.error(`[Reminder] insertNotificationLog failed`, { plant: plant.id, type, err });
     return;
   }
 
-  if (!log) return; // conflict — already sent
+  if (!log) {
+    logger.debug(`[Reminder] Already sent — skipping plant=${plant.id} type=${type}`);
+    return;
+  }
 
   try {
     const result = await sendReminderNotification({
@@ -127,11 +132,14 @@ async function processReminder(reminder: DueReminder, tokensMap: Map<string, str
       scheduledFor,
     });
 
+    logger.debug(`[Reminder] FCM sent plant=${plant.id} type=${type} success=${result.successCount} fail=${result.failureCount}`);
+
     if (result.invalidTokens.length) {
+      logger.warn(`[Reminder] Removing ${result.invalidTokens.length} invalid token(s)`);
       await deleteInvalidTokens(result.invalidTokens);
     }
   } catch (err) {
-    console.error(`[Reminder] ❌ FCM failed plant=${plant.id} type=${type}:`, err);
+    logger.error(`[Reminder] FCM failed`, { plant: plant.id, type, err });
   }
 }
 
@@ -153,19 +161,20 @@ export async function processDueReminders(): Promise<void> {
   try {
     plants = await getDuePlants();
   } catch (err) {
-    console.error('[Reminder] ❌ getDuePlants failed:', err);
+    logger.error('[Reminder] getDuePlants failed', { err });
     return;
   }
+
+  logger.debug(`[Reminder] getDuePlants returned ${plants.length} plant(s)`);
   if (!plants.length) return;
 
   const allDue = plants.flatMap((p) => getDueTypes(p, now));
+  logger.debug(`[Reminder] allDue=${allDue.length}`);
   if (!allDue.length) return;
 
-  // 1 query — sabke tokens ek saath
   const uniqueUserIds = [...new Set(allDue.map((d) => d.plant.user_id))];
   const tokensMap = await getTokensForUsers(uniqueUserIds);
 
-  // 1 query — sabke active logs ek saath
   const activeLogs = await getActiveLogsForBatch(
     allDue.map((d) => ({
       userPlantId: d.plant.id,
@@ -174,18 +183,18 @@ export async function processDueReminders(): Promise<void> {
     }))
   );
 
-  // already sent wale filter out
   const pending = allDue.filter((d) => {
     const key = `${d.plant.id}:${dbReminderTypeMap[d.type]}:${d.scheduledFor.toISOString()}`;
     return !activeLogs.has(key);
   });
 
+  logger.debug(`[Reminder] pending=${pending.length}`);
+  if (!pending.length) return;
+
   const BATCH = 10;
   for (let i = 0; i < pending.length; i += BATCH) {
     const batch = pending.slice(i, i + BATCH);
-    await Promise.allSettled(
-      batch.map((r) => processReminder(r, tokensMap))
-    );
+    await Promise.allSettled(batch.map((r) => processReminder(r, tokensMap)));
   }
 }
 
