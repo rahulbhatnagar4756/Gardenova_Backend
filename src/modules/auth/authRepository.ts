@@ -6,6 +6,8 @@ import { getDB } from "../../core/config/db";
 import JwksClient from "jwks-rsa";
 import jwt, { JwtHeader } from "jsonwebtoken";
 import { AppleJwtPayload } from "../../interface/auth";
+import config from "../../core/config/env";
+import  Twilio  from "twilio";
 
 /**
  * Hash password helper
@@ -231,31 +233,26 @@ export async function findUserByEmail(email: string): Promise<IUser | null> {
  * An object containing the found user (if any) and the matched conflict field.
  */
 export async function findUserByEmailOrPhone(
-  email: string,
-  phoneNumber: string
+  email: string | undefined,
+  phoneNumber: string | undefined
 ): Promise<{ user: IUser | null; conflictField?: "email" | "phone" }> {
   const client = await getDB();
 
   const query = `
     SELECT *
     FROM users
-    WHERE email = $1 OR phone_number = $2
+    WHERE ($1::text IS NOT NULL AND email = $1)
+       OR ($2::text IS NOT NULL AND phone_number = $2)
     LIMIT 1;
   `;
 
-  const result = await client.query(query, [email, phoneNumber]);
+  const result = await client.query(query, [email ?? null, phoneNumber ?? null]);
   const user = result.rows[0];
 
   if (!user) return { user: null };
 
-  // Determine what field caused conflict
-  if (user.email === email) {
-    return { user, conflictField: "email" };
-  }
-
-  if (user.phone_number === phoneNumber) {
-    return { user, conflictField: "phone" };
-  }
+  if (email && user.email === email) return { user, conflictField: "email" };
+  if (phoneNumber && user.phone_number === phoneNumber) return { user, conflictField: "phone" };
 
   return { user: null };
 }
@@ -661,4 +658,135 @@ export function verifyFacebookIdToken(
       }
     );
   });
+}
+
+
+
+const twilioClient = Twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
+/**
+ * Generates and sends an OTP to a user's phone number.
+ *
+ * This function creates a six-digit OTP, invalidates any previously generated
+ * unverified OTPs for the same phone number, stores the new OTP with a
+ * five-minute expiration time, and sends it to the user through Twilio SMS.
+ *
+ * @async
+ *
+ * @param {string} phoneNumber - The recipient's phone number in international format.
+ *
+ * @returns {Promise<void>} Resolves when the OTP is generated, stored, and sent successfully.
+ *
+ * @throws {Error} Throws an error if database operations fail or the OTP message
+ * cannot be sent through Twilio.
+ */
+export const sendOtp = async (phoneNumber: string): Promise<void> => {
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min
+
+  const db = getDB();
+
+  // Purane OTPs invalidate karo
+  await db.query(
+    `UPDATE otp_verifications SET verified = TRUE WHERE identifier = $1 AND verified = FALSE`,
+    [phoneNumber]
+  );
+
+  // Naya OTP insert karo
+  await db.query(
+    `INSERT INTO otp_verifications (identifier, otp, expires_at) VALUES ($1, $2, $3)`,
+    [phoneNumber, otp, expiresAt]
+  );
+
+  // Twilio se bhejo
+  await twilioClient.messages.create({
+    body: `Your OTP is: ${otp}. Valid for 5 minutes. Do not share with anyone.`,
+    from: config.TWILIO_PHONE_NUMBER,
+    to: phoneNumber,
+  });
+};
+/**
+ * Verifies a user's phone OTP.
+ *
+ * This function checks whether the provided OTP exists for the given phone number,
+ * is still valid, and has not already been verified. If a valid OTP is found,
+ * it marks the OTP record as verified and returns a successful verification result.
+ *
+ * @async
+ *
+ * @param {string} phoneNumber - The user's phone number associated with the OTP.
+ * @param {string} otp - The OTP code provided by the user for verification.
+ *
+ * @returns {Promise<boolean>} Returns `true` if the OTP is valid and successfully
+ * verified; otherwise returns `false`.
+ *
+ * @throws {Error} Throws an error if database operations fail during OTP lookup
+ * or verification update.
+ */
+export const verifyOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
+  const db = getDB();
+
+  const result = await db.query(
+    `SELECT id FROM otp_verifications
+     WHERE identifier = $1
+       AND otp = $2
+       AND verified = FALSE
+       AND expires_at > NOW()
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [phoneNumber, otp]
+  );
+
+  if (result.rowCount === 0) return false;
+
+  // Mark as verified
+  await db.query(
+    `UPDATE otp_verifications SET verified = TRUE WHERE id = $1`,
+    [result.rows[0].id]
+  );
+
+  return true;
+};
+/**
+ * Creates a new user account using a phone number.
+ *
+ * This function inserts a new user record into the users table with the provided
+ * phone number and role ID. The phone verification status is automatically marked
+ * as verified since the user has completed OTP verification before account creation.
+ *
+ * @async
+ *
+ * @param {Object} data - User creation data.
+ * @param {string} data.phoneNumber - The user's verified phone number.
+ * @param {string} data.roleId - The ID of the role assigned to the user.
+ *
+ * @returns {Promise<IUser>} Returns the newly created user object containing
+ * user details and verification status.
+ *
+ * @throws {Error} Throws an error if the database insert operation fails.
+ */
+export async function createPhoneUser(data: {
+  phoneNumber: string;
+  roleId: string;
+}): Promise<IUser> {
+  const client = getDB();
+
+  const query = `
+    INSERT INTO users (
+      phone_number,
+      role_id,
+      is_phone_verified,
+      created_at,
+      updated_at
+    )
+    VALUES ($1, $2, TRUE, NOW(), NOW())
+    RETURNING id, name, email, role_id, phone_number,
+              is_email_verified, is_phone_verified, created_at, updated_at;
+  `;
+
+  const result = await client.query(query, [
+    data.phoneNumber,
+    data.roleId,
+  ]);
+
+  return result.rows[0] as IUser;
 }

@@ -77,3 +77,43 @@ export async function downloadImageAsBuffer(imageUrl: string): Promise<Buffer> {
   const arrayBuffer = await response.arrayBuffer();
   return Buffer.from(arrayBuffer);
 }
+/**
+ * Generates a JWT token for phone-based authentication.
+ *
+ * The function encodes the user's phone number, role, and user ID using Base64
+ * before adding them to the JWT payload. The generated token is signed using
+ * the HS512 algorithm and includes an expiration time configured through JWT settings.
+ *
+ * @param {string} userPhone - The user's phone number to include in the token.
+ * @param {string} role - The user's role or access level.
+ * @param {string} userId - The unique identifier of the user.
+ *
+ * @returns {string} A signed JWT token containing the encoded user information.
+ *
+ * @example
+ * const token = generatePhoneToken("+1234567890", "user", "12345");
+ */
+export const generatePhoneToken = (
+  userPhone: string,
+  role: string,
+  userId: string
+): string => {
+  const options: SignOptions = {
+    expiresIn: toExpiresIn(config.JWT_EXPIRE),
+    algorithm: "HS512",
+  };
+
+  const encodedPhone  = Buffer.from(userPhone).toString("base64");
+  const encodedRole   = Buffer.from(role).toString("base64");
+  const encodedUserId = Buffer.from(userId).toString("base64");
+
+  return jwt.sign(
+    {
+      userPhone: encodedPhone,
+      role:      encodedRole,
+      userId:    encodedUserId,
+    },
+    jwtSecret,
+    options
+  );
+};

@@ -41,7 +41,7 @@ export const userRateLimiter = new RateLimiterMemory({
  * - Retry timing in seconds, minutes, and ISO timestamp
  * - Usage details (consumed and remaining points)
  */
-export const getRateLimitErrorMessage = (rateLimiterRes: RateLimiterRes): RateLimitErrorResponse  => {
+export const getRateLimitErrorMessage = (rateLimiterRes: RateLimiterRes): RateLimitErrorResponse => {
   const retryAfterSeconds = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
   const retryAfterMinutes = Math.ceil(retryAfterSeconds / 60);
 
@@ -94,9 +94,14 @@ const auth = async (req: AuthRequest, res: Response, next: NextFunction): Promis
     const decoded = jwt.verify(token, config.JWT_SECRET) as AuthTokenPayload;
 
     req.user = {
-      userEmail: Buffer.from(decoded.userEmail, "base64").toString("utf-8"),
-      role:      Buffer.from(decoded.role,      "base64").toString("utf-8"),
-      userId:    Buffer.from(decoded.userId,    "base64").toString("utf-8"),
+      userId: Buffer.from(decoded.userId, "base64").toString("utf-8"),
+      role: Buffer.from(decoded.role, "base64").toString("utf-8"),
+      ...(decoded.userEmail && {
+        userEmail: Buffer.from(decoded.userEmail, "base64").toString("utf-8"),
+      }),
+      ...(decoded.userPhone && {
+        userPhone: Buffer.from(decoded.userPhone, "base64").toString("utf-8"),
+      }),
       ...(decoded.exp && { exp: decoded.exp }),
       ...(decoded.iat && { iat: decoded.iat }),
     };
@@ -133,9 +138,11 @@ const auth = async (req: AuthRequest, res: Response, next: NextFunction): Promis
       return;
     }
     await error("Authentication failed - unexpected JWT error",
-      { ...requestInfo, errorName: err instanceof Error ? err.name : "UnknownError",
+      {
+        ...requestInfo, errorName: err instanceof Error ? err.name : "UnknownError",
         errorMessage: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined },
+        stack: err instanceof Error ? err.stack : undefined
+      },
       { source: "middleware.auth" }
     );
     res.status(HTTP_STATUS.UNAUTHORIZED).json(
@@ -150,9 +157,9 @@ const auth = async (req: AuthRequest, res: Response, next: NextFunction): Promis
     const rateLimiterRes = await userRateLimiter.consume(userId);
 
     res.set({
-      "X-RateLimit-Limit":     String(userRateLimiter.points),
+      "X-RateLimit-Limit": String(userRateLimiter.points),
       "X-RateLimit-Remaining": String(rateLimiterRes.remainingPoints),
-      "X-RateLimit-Reset":     new Date(Date.now() + rateLimiterRes.msBeforeNext).toISOString(),
+      "X-RateLimit-Reset": new Date(Date.now() + rateLimiterRes.msBeforeNext).toISOString(),
     });
 
   } catch (err) {
@@ -167,10 +174,10 @@ const auth = async (req: AuthRequest, res: Response, next: NextFunction): Promis
       );
 
       res.set({
-        "Retry-After":           String(info.details.retryAfterSeconds),
-        "X-RateLimit-Limit":     String(userRateLimiter.points),
+        "Retry-After": String(info.details.retryAfterSeconds),
+        "X-RateLimit-Limit": String(userRateLimiter.points),
         "X-RateLimit-Remaining": "0",
-        "X-RateLimit-Reset":     info.details.retryAt,
+        "X-RateLimit-Reset": info.details.retryAt,
       });
 
       res.status(429).json(errorResponse(info.message, info));

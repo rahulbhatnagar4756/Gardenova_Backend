@@ -39,19 +39,21 @@ const passwordComplexity = (
 
 export const registerValidation = Joi.object({
   name: Joi.string().min(2).max(50).required(),
-  email: Joi.string().email().required(),
+  email: Joi.string().email(),
   password: Joi.string()
     .min(6)
-    .required()
+    .optional() // phone users ke paas password nahi hoga
     .custom(passwordComplexity, "Password complexity validation"),
   roleCode: Joi.string()
     .length(1)
     .valid(...Object.keys(RoleCodeMap))
     .required(),
   phoneNumber: Joi.string()
-    .pattern(/^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/)
+    .pattern(/^\+[1-9]\d{7,14}$/)
     .optional(),
-});
+})
+.or("email", "phoneNumber") // at least one required
+.and("email", "password");
 
 export const loginValidation = Joi.object({
   email: Joi.string().email().required(),
@@ -230,3 +232,13 @@ export const appleAuthValidation = Joi.object({
     "string.email": "Email must be a valid email address",
   }),
 })
+
+export const sendOtpValidation = Joi.object({
+  phoneNumber: Joi.string().pattern(/^\+[1-9]\d{7,14}$/).required(),
+});
+
+export const verifyOtpValidation = Joi.object({
+  phoneNumber: Joi.string().pattern(/^\+[1-9]\d{7,14}$/).required(),
+  otp:         Joi.string().length(6).pattern(/^\d+$/).required(),
+  
+});

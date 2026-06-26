@@ -9,6 +9,8 @@ import {
   googleAuth,
   facebookAuth,
   appleAuth,
+  sendPhoneOtp,
+  verifyPhoneOtp,
 } from "./authController";
 import {
   registerValidation,
@@ -20,6 +22,8 @@ import {
   googleAuthValidation,
   facebookAuthValidation,
   appleAuthValidation,
+  sendOtpValidation,
+  verifyOtpValidation,
 } from "./authValidations";
 import validateRequest from "../../core/middleware/validateRequest";
 import auth from "../../core/middleware/authMiddleware";
@@ -38,6 +42,9 @@ const router = Router();
  * /api/v1/auth/register:
  *   post:
  *     summary: Register a new user
+ *     description: |
+ *       Supports email registration only.
+ *       For phone registration, use `/phone/send-otp` → `/phone/verify-otp` → `/phone/complete-profile`
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -49,7 +56,7 @@ const router = Router();
  *               - name
  *               - email
  *               - password
- *               - roleId
+ *               - roleCode
  *             properties:
  *               name:
  *                 type: string
@@ -62,17 +69,14 @@ const router = Router();
  *                 example: Secret@123#
  *               roleCode:
  *                 type: string
- *                 description: Code of the role assigned to the user
  *                 example: U
- *               phoneNumber:
- *                 type: string
- *                 description: User's phone number (optional)
- *                 example: +91 9876543210
  *     responses:
  *       201:
  *         description: User registered successfully
+ *       400:
+ *         description: Validation failed
  *       409:
- *         description: Email or Phone Number already exists
+ *         description: Email already registered
  */
 router.post("/register", validateRequest(registerValidation), register);
 
@@ -80,7 +84,7 @@ router.post("/register", validateRequest(registerValidation), register);
  * @swagger
  * /api/v1/auth/login:
  *   post:
- *     summary: Login user
+ *     summary: Login with email and password
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -91,19 +95,17 @@ router.post("/register", validateRequest(registerValidation), register);
  *             required:
  *               - email
  *               - password
- *               - loginType
  *             properties:
  *               email:
  *                 type: string
- *                 format: email
  *                 example: john@example.com
  *               password:
  *                 type: string
- *                 example: secret123
+ *                 example: Secret@123#
  *               loginType:
  *                 type: string
- *                 description: Type of login (e.g., 'user', 'professional', 'admin')
- *                 example: professional
+ *                 enum: [user, professional]
+ *                 example: user
  *     responses:
  *       200:
  *         description: Login successful
@@ -111,6 +113,115 @@ router.post("/register", validateRequest(registerValidation), register);
  *         description: Invalid credentials
  */
 router.post("/login", validateRequest(loginValidation), login);
+
+/**
+ * @swagger
+ * /api/v1/auth/phone/send-otp:
+ *   post:
+ *     summary: Send OTP to phone number
+ *     description: |
+ *       Works for both login and registration.
+ *       OTP is valid for 5 minutes.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: E.164 format
+ *                 example: "+919876543210"
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *       400:
+ *         description: Invalid phone number format
+ */
+router.post("/phone/send-otp", validateRequest(sendOtpValidation), sendPhoneOtp);
+
+/**
+ * @swagger
+ * /api/v1/auth/phone/verify-otp:
+ *   post:
+ *     summary: Verify OTP and get token
+ *     description: |
+ *       Verifies OTP and handles both flows automatically:
+ *       - **Existing user** → returns JWT token (`isNewUser: false`)
+ *       - **New user** → creates user entry, returns JWT token (`isNewUser: true`) — then call `/phone/complete-profile`
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - otp
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 example: "+919876543210"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Existing user logged in
+ *         content:
+ *           application/json:
+ *             example:
+ *               token: "eyJ..."
+ *               role: "user"
+ *               isNewUser: false
+ *       201:
+ *         description: New user created
+ *         content:
+ *           application/json:
+ *             example:
+ *               token: "eyJ..."
+ *               role: "user"
+ *               isNewUser: true
+ *       401:
+ *         description: Invalid or expired OTP
+ */
+router.post("/phone/verify-otp", validateRequest(verifyOtpValidation), verifyPhoneOtp);
+
+// /**
+//  * @swagger
+//  * /api/v1/auth/phone/complete-profile:
+//  *   post:
+//  *     summary: Complete profile for new phone users
+//  *     description: |
+//  *       Called after `/phone/verify-otp` when `isNewUser: true`.
+//  *       Requires Bearer token received from verify-otp.
+//  *     tags: [Auth]
+//  *     security:
+//  *       - bearerAuth: []
+//  *     requestBody:
+//  *       required: true
+//  *       content:
+//  *         application/json:
+//  *           schema:
+//  *             type: object
+//  *             required:
+//  *               - name
+//  *             properties:
+//  *               name:
+//  *                 type: string
+//  *                 example: John Doe
+//  *     responses:
+//  *       200:
+//  *         description: Profile completed successfully
+//  *       401:
+//  *         description: Unauthorized
+//  */
+// router.post("/phone/complete-profile", auth, validateRequest(completeProfileValidation), completePhoneProfile);
 
 /**
  * @swagger
@@ -163,7 +274,6 @@ router.get("/refresh", auth, refreshTokenLogin);
  *       404:
  *         description: User not found
  */
-
 router.patch(
   "/resetPassword",
   validateRequest(resetPasswordValidation),

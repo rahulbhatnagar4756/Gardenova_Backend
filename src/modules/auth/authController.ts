@@ -6,6 +6,7 @@ import {
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import {
   downloadImageAsBuffer,
+  generatePhoneToken,
   generateToken,
 } from "../../core/utils/usableMethods";
 import { error, warn } from "../../core/utils/logger";
@@ -20,6 +21,7 @@ import {
 } from "../../core/services/firebaseAdmin";
 import {
   comparePassword,
+  createPhoneUser,
   createUserFromOAuth,
   createUserProfile,
   createUserProfileWithImage,
@@ -32,11 +34,13 @@ import {
   getRoleById,
   getRoleByName,
   resetPasswordResetFields,
+  sendOtp,
   updatePasswordResetToken,
   updateUserFromOAuth,
   updateUserPassword,
   verifyAppleIdToken,
   verifyFacebookIdToken,
+  verifyOtp,
 } from "./authRepository";
 import bcrypt from "bcryptjs";
 import { uploadBufferToS3 } from "../../core/services/s3UploadService";
@@ -46,6 +50,7 @@ import { handleProfessionalLogin } from "../professional/professionalRepositry";
 import { getDB } from "../../core/config/db";
 import fs from "fs";
 import path from "path";
+import logger from "../../core/config/logger";
 
 /**
  * Registers a new user in the system.
@@ -380,6 +385,111 @@ export const login = async (
     next(errorObj);
   }
 };
+/**
+ * Sends an OTP to the user's registered phone number.
+ *
+ * This controller extracts the phone number from the request body,
+ * triggers the OTP sending process, logs the successful operation,
+ * and returns a success response to the client.
+ *
+ * @async
+ *
+ * @param {Request} req - Express request object containing the phone number in the request body.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express middleware function for forwarding errors.
+ *
+ * @returns {Promise<void>} Resolves when the OTP response is sent or an error is passed to the next middleware.
+ * @throws {Error} Passes any error encountered during OTP generation or sending to the error handler.
+ *
+ */
+export const sendPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { phoneNumber } = req.body;
+
+    await sendOtp(phoneNumber);
+
+    await logger.info("OTP sent", { phoneNumber }, { source: "auth.sendPhoneOtp", req });
+    res.status(HTTP_STATUS.OK).json(successResponse(null, "OTP sent successfully"));
+  } catch (err) {
+    next(err);
+  }
+};
+/**
+ * Verifies a user's phone OTP and authenticates the user.
+ *
+ * This controller validates the OTP provided for a phone number. If the OTP
+ * is valid, it checks whether the user exists. For new users, it creates a
+ * user account with the default role and initializes the user profile.
+ *
+ * After successful verification, it generates a JWT authentication token and
+ * returns the user's role, token, and account creation status.
+ *
+ * @async
+ *
+ * @param {Request} req - Express request object containing:
+ * - `phoneNumber` {string}: User's phone number.
+ * - `otp` {string}: OTP code received by the user.
+ *
+ * @param {Response} res - Express response object used to send the API response.
+ *
+ * @param {NextFunction} next - Express middleware function for forwarding errors.
+ *
+ * @returns {Promise<void>} Resolves after sending the authentication response
+ * or passing an error to the next middleware.
+ *
+ * @throws {Error} Passes errors from OTP verification, user lookup, user creation,
+ * role retrieval, or token generation to the error handler.
+ */
+export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { phoneNumber, otp } = req.body;
+
+    const isValid = await verifyOtp(phoneNumber, otp);
+    if (!isValid) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid or expired OTP"));
+      return;
+    }
+
+    const result = await findUserByEmailOrPhone(undefined, phoneNumber);
+    let user = result.user;
+    let isNewUser = false;
+
+    // ── New user → pehle create karo ─────────────────────────
+    if (!user) {
+      const defaultRole = await getRoleByName("User");
+      if (!defaultRole) {
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(errorResponse("Default role not found"));
+        return;
+      }
+
+      user = await createPhoneUser({
+        phoneNumber,
+        roleId: defaultRole.id!,
+      });
+
+      await createUserProfile(user.id!);
+      isNewUser = true;
+    }
+
+    if (user.isdeleted) {
+      res.status(HTTP_STATUS.OK).json(errorResponse("User profile is deleted"));
+      return;
+    }
+
+    const role = await getRoleById(user.role_id);
+    const token = generatePhoneToken(phoneNumber, role!.name, user.id!);
+
+    res.status(isNewUser ? HTTP_STATUS.CREATED : HTTP_STATUS.OK).json(
+      successResponse(
+        { token, role: role!.name, isNewUser },
+        isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
+      )
+    );
+
+  } catch (err) {
+    next(err);
+  }
+};
 
 /**
  * Authenticates a user and returns a refresh JWT token.
@@ -394,17 +504,18 @@ export const refreshTokenLogin = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  // Extract user info from JWT (populated by auth middleware)
-  const userPayload = req.user as { userId?: string; exp?: number } | undefined;
+  const userPayload = req.user as {
+    userId?: string;
+    userEmail?: string;
+    userPhone?: string;
+    exp?: number;
+  } | undefined;
 
   if (!userPayload?.userId) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
 
-  // Validate token expiry
   const currentTimestamp = Math.floor(Date.now() / 1000);
   if (!userPayload.exp || userPayload.exp <= currentTimestamp) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(
@@ -417,57 +528,32 @@ export const refreshTokenLogin = async (
   }
 
   try {
-    //  Fetch user by ID
     const user = await findUserById(userPayload.userId);
-
     if (!user) {
-      await warn(
-        "Refresh Login failed - user not found",
-        { userId: userPayload.userId },
-        { source: "auth.refresh", req }
-      );
-      res
-        .status(HTTP_STATUS.OK)
-        .json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
+      await warn("Refresh Login failed - user not found", { userId: userPayload.userId }, { source: "auth.refresh", req });
+      res.status(HTTP_STATUS.OK).json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
       return;
     }
 
-    //  Fetch user role
     const role = await getRoleById(user.role_id);
-
     if (!role) {
-      await error(
-        "Refresh Login failed - role not found",
-        { userId: user.id, roleId: user.role_id },
-        { userId: user.id!, source: "auth.refresh", req }
-      );
+      await error("Refresh Login failed - role not found", { userId: user.id, roleId: user.role_id }, { userId: user.id!, source: "auth.refresh", req });
       res.status(HTTP_STATUS.OK).json(errorResponse("Role not found"));
       return;
     }
 
-    //  Generate new JWT
-    const token = generateToken(user.email, role.name, user.id!);
+    // ── Email ya phone — jo bhi original token mein tha ─────
+    const token = userPayload.userEmail
+      ? generateToken(user.email!, role.name, user.id!)
+      : generatePhoneToken(user.phone_number!, role.name, user.id!);
 
-    //  Return refreshed token
-    res
-      .status(HTTP_STATUS.OK)
-      .json(successResponse({ token }, MESSAGES.LOGIN_SUCCESS));
+    res.status(HTTP_STATUS.OK).json(successResponse({ token }, MESSAGES.LOGIN_SUCCESS));
   } catch (err: unknown) {
-    const errorObj: CustomError =
-      err instanceof Error
-        ? { ...err }
-        : {
-          name: "UnknownError",
-          message:
-            typeof err === "string" ? err : "An unknown error occurred",
-        };
+    const errorObj: CustomError = err instanceof Error
+      ? { ...err }
+      : { name: "UnknownError", message: typeof err === "string" ? err : "An unknown error occurred" };
 
-    await error(
-      "Refresh Login failed with unexpected error",
-      { error: errorObj.message, stack: errorObj.stack },
-      { source: "auth.refresh", req }
-    );
-
+    await error("Refresh Login failed with unexpected error", { error: errorObj.message, stack: errorObj.stack }, { source: "auth.refresh", req });
     next(errorObj);
   }
 };

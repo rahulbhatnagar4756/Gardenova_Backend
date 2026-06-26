@@ -32,4 +32,7 @@ export interface Config {
   FB_APP_SECRET: string;
   RAZORPAY_KEY_ID: string;
   RAZORPAY_KEY_SECRET: string;
+  TWILIO_ACCOUNT_SID: string;
+  TWILIO_AUTH_TOKEN: string;
+  TWILIO_PHONE_NUMBER: string;
 }
