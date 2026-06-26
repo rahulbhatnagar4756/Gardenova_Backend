@@ -51,6 +51,7 @@ import { getDB } from "../../core/config/db";
 import fs from "fs";
 import path from "path";
 import logger from "../../core/config/logger";
+import { OtpCooldownError } from "../../core/middleware/errorHandler";
 
 /**
  * Registers a new user in the system.
@@ -411,6 +412,10 @@ export const sendPhoneOtp = async (req: Request, res: Response, next: NextFuncti
     await logger.info("OTP sent", { phoneNumber }, { source: "auth.sendPhoneOtp", req });
     res.status(HTTP_STATUS.OK).json(successResponse(null, "OTP sent successfully"));
   } catch (err) {
+    if (err instanceof OtpCooldownError) {
+      res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json(errorResponse(err.message));
+      return;
+    }
     next(err);
   }
 };
@@ -442,9 +447,18 @@ export const sendPhoneOtp = async (req: Request, res: Response, next: NextFuncti
  */
 export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { phoneNumber, otp } = req.body;
+    const { phoneNumber, otp, reqType } = req.body;
+    
 
     const isValid = await verifyOtp(phoneNumber, otp);
+    if(reqType==="register" && !isValid){
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid or expired OTP"));
+      return;
+    }
+    if(reqType ==="register" && isValid){
+      res.status(HTTP_STATUS.OK).json(successResponse(null, "OTP verified successfully"));
+      return;
+    }
     if (!isValid) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid or expired OTP"));
       return;
@@ -468,8 +482,9 @@ export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunc
       });
 
       await createUserProfile(user.id!);
-      isNewUser = true;
+      
     }
+    isNewUser= user.name !== null && user.name !== undefined && user.name !== "" ? false : true;
 
     if (user.isdeleted) {
       res.status(HTTP_STATUS.OK).json(errorResponse("User profile is deleted"));

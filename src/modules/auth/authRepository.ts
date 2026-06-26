@@ -8,6 +8,7 @@ import jwt, { JwtHeader } from "jsonwebtoken";
 import { AppleJwtPayload } from "../../interface/auth";
 import config from "../../core/config/env";
 import  Twilio  from "twilio";
+import { OtpCooldownError } from "../../core/middleware/errorHandler";
 
 /**
  * Hash password helper
@@ -176,8 +177,9 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
         role_id,
         phone_number,
         is_email_verified
+        is_phone_verified
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, name, email, role_id, phone_number,
                 is_email_verified, created_at, updated_at;
     `;
@@ -190,6 +192,7 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
       parsedData.roleId,
       parsedData.phoneNumber ?? null,
       parsedData.isEmailVerified ?? false,
+      true, // is_phone_verified is set to true for phone users
     ];
 
     const result = await client.query(query, values);
@@ -680,10 +683,30 @@ const twilioClient = Twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
  * cannot be sent through Twilio.
  */
 export const sendOtp = async (phoneNumber: string): Promise<void> => {
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min
-
   const db = getDB();
+
+  // ── 1 min cooldown check ──────────────────────────────────
+  const lastOtp = await db.query(
+    `SELECT created_at FROM otp_verifications
+     WHERE identifier = $1
+       AND verified = FALSE
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [phoneNumber]
+  );
+
+  if (lastOtp.rows.length > 0) {
+    const lastSentAt = new Date(lastOtp.rows[0].created_at);
+    const secondsElapsed = (Date.now() - lastSentAt.getTime()) / 1000;
+
+    if (secondsElapsed < 60) {
+      const secondsLeft = Math.ceil(60 - secondsElapsed);
+      throw new OtpCooldownError(`Please wait ${secondsLeft} seconds before requesting a new OTP`);
+    }
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
   // Purane OTPs invalidate karo
   await db.query(
@@ -691,13 +714,11 @@ export const sendOtp = async (phoneNumber: string): Promise<void> => {
     [phoneNumber]
   );
 
-  // Naya OTP insert karo
   await db.query(
     `INSERT INTO otp_verifications (identifier, otp, expires_at) VALUES ($1, $2, $3)`,
     [phoneNumber, otp, expiresAt]
   );
 
-  // Twilio se bhejo
   await twilioClient.messages.create({
     body: `Your OTP is: ${otp}. Valid for 5 minutes. Do not share with anyone.`,
     from: config.TWILIO_PHONE_NUMBER,

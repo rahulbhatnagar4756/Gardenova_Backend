@@ -5,6 +5,31 @@ import { CustomError } from "../../interface/Error";
 import logger from "../config/logger";
 import { Sentry } from "../config/sentry";
 
+
+/**
+ * Custom error thrown when an OTP request is made before the cooldown period expires.
+ *
+ * This error is used to prevent users from requesting multiple OTPs within a
+ * restricted time interval and allows the application to handle OTP cooldown
+ * cases separately from general errors.
+ *
+ * @extends Error
+ *
+ * @example
+ * throw new OtpCooldownError("Please wait before requesting another OTP");
+ */
+export class OtpCooldownError extends Error {
+  /**
+   * Creates an OTP cooldown error instance.
+   *
+   * @param {string} message - The error message describing the cooldown restriction.
+   */
+  constructor(message: string) {
+    super(message);
+    this.name = "OtpCooldownError";
+  }
+}
+
 /**
  * Global error-handling middleware for Express.
  * Catches application errors, maps known error types (Mongoose, JWT, etc.)
@@ -65,5 +90,6 @@ const errorHandler = (
   });
   res.status(statusCode ?? 400).json(errorResponse(message));
 };
+
 
 export default errorHandler;

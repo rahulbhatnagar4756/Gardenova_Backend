@@ -340,7 +340,7 @@ auth,
 verifyCode
 )
 
-export default router;
+
 
 /**
  * @swagger
@@ -402,3 +402,4 @@ export default router;
  *         description: Internal server error
  */
 router.patch("/addPasswordforsso", auth, addPasswordForSSOUser);
+export default router;
