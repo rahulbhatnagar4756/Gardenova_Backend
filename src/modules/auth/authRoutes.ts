@@ -45,7 +45,8 @@ const router = Router();
  *     description: |
  *       Supports email registration only.
  *       For phone registration, use `/phone/send-otp` → `/phone/verify-otp` → `/phone/complete-profile`
- *     tags: [Auth]
+ *     tags:
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
@@ -63,6 +64,7 @@ const router = Router();
  *                 example: John Doe
  *               email:
  *                 type: string
+ *                 format: email
  *                 example: john@example.com
  *               password:
  *                 type: string
@@ -70,6 +72,9 @@ const router = Router();
  *               roleCode:
  *                 type: string
  *                 example: U
+ *               phoneNumber:
+ *                 type: string
+ *                 example: "+919876543210"
  *     responses:
  *       201:
  *         description: User registered successfully

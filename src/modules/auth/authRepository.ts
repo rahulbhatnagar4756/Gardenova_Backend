@@ -161,12 +161,10 @@ export async function comparePassword(
  */
 export async function createValidatedUser(data: unknown): Promise<IUser> {
   try {
-    // Validate input using Zod schema
     const parsedData = createUserDto.parse(data);
 
     const client = getDB();
 
-    // Hash password if provided
     const hashedPassword = await hashPassword(parsedData.password);
 
     const query = `
@@ -176,37 +174,33 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
         password,
         role_id,
         phone_number,
-        is_email_verified
+        is_email_verified,
         is_phone_verified
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, name, email, role_id, phone_number,
-                is_email_verified, created_at, updated_at;
+                is_email_verified, is_phone_verified, created_at, updated_at;
     `;
 
     const values = [
       parsedData.name,
       parsedData.email,
       hashedPassword ?? null,
-      // parsedData.firebaseUid ?? null,
       parsedData.roleId,
       parsedData.phoneNumber ?? null,
       parsedData.isEmailVerified ?? false,
-      true, // is_phone_verified is set to true for phone users
+      true,
     ];
 
     const result = await client.query(query, values);
-    const user = result.rows[0];
-
-    return user as IUser;
+    return result.rows[0] as IUser;
   } catch (err) {
     if (err instanceof ZodError) {
-      throw err; // handled by controller
+      throw err;
     }
-    throw err; // database or runtime error
+    throw err;
   }
 }
-
 /**
  * Finds user by email (for login)
  * @param email - The email address of the user to find
