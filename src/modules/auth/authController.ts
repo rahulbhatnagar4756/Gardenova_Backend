@@ -448,7 +448,7 @@ export const sendPhoneOtp = async (req: Request, res: Response, next: NextFuncti
 export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { phoneNumber, otp, reqType } = req.body;
-    
+    const client = getDB();
 
     const isValid = await verifyOtp(phoneNumber, otp);
     if(reqType==="register" && !isValid){
@@ -494,10 +494,20 @@ export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunc
     const role = await getRoleById(user.role_id);
     const token = generatePhoneToken(phoneNumber, role!.name, user.id!);
 
+    const response_id = await client.query(
+        "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [user.id]
+      );
+
+
     res.status(isNewUser ? HTTP_STATUS.CREATED : HTTP_STATUS.OK).json(
       successResponse(
-        { token, role: role!.name, isNewUser },
-        isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
+        { token, role: role!.name,
+           isNewUser,
+            responseId: response_id.rows[0]?.response_id || null
+           },
+        isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS,
+       
       )
     );
 
