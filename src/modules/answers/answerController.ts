@@ -11,7 +11,7 @@ import {
 import { getDB } from "../../core/config/db";
 import { AuthUserPayload } from "../../interface/user";
 import { AuthRequest } from "../../interface/auth";
-import { findUserByEmail } from "../auth/authRepository";
+import { findUserByEmail, findUserById } from "../auth/authRepository";
 // import { createSurveyResponse } from "./answerModel";
 
 /**
@@ -90,7 +90,7 @@ export const submitAnswer = async (
       return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
       return;

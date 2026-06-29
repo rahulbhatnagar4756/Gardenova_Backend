@@ -31,6 +31,7 @@ export interface IRole {
 export interface AuthUserPayload {
   userEmail?: string;
   role?: string;
+  userId?: string;
 }
 
 export interface IUserOAuth {
