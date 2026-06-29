@@ -11,7 +11,7 @@ import {
 import { getDB } from "../../core/config/db";
 import { AuthUserPayload } from "../../interface/user";
 import { AuthRequest } from "../../interface/auth";
-import { findUserByEmail, findUserById } from "../auth/authRepository";
+import {  findUserById } from "../auth/authRepository";
 // import { createSurveyResponse } from "./answerModel";
 
 /**
@@ -85,7 +85,7 @@ export const submitAnswer = async (
     const { answers } = req.body;
     const userPayload = req.user as AuthUserPayload | undefined;
 
-    if (!userPayload || !userPayload.userEmail) {
+      if (!userPayload?.userId) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
       return;
     }
@@ -381,12 +381,12 @@ export const getUserAnswersController = async (
   try {
     const { responseId } = req.params;
     const userPayload = req.user as AuthUserPayload | undefined;
-    if (!userPayload || !userPayload.userEmail) {
+      if (!userPayload?.userId) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
       return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
       return;
