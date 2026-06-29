@@ -37,7 +37,6 @@ const router = Router();
  *         description: Unauthorized - Invalid or missing token
  */
 router.get("/", auth, getCurrentUserProfile);
-
 /**
  * @swagger
  * /api/v1/userProfile:
@@ -53,9 +52,20 @@ router.get("/", auth, getCurrentUserProfile);
  *           schema:
  *             type: object
  *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 2
+ *                 maxLength: 50
+ *                 description: User's display name
+ *                 example: "John Doe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "john@example.com"
  *               profileImage:
  *                 type: string
- *                 description: Base64 encoded image string (uploaded to S3 Bucket)
+ *                 description: Base64 encoded image string
  *                 example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
  *               dateOfBirth:
  *                 type: string
@@ -65,42 +75,33 @@ router.get("/", auth, getCurrentUserProfile);
  *               gender:
  *                 type: string
  *                 enum: [male, female, other, ""]
- *                 description: User's gender (optional)
  *                 example: "female"
  *               bio:
  *                 type: string
  *                 maxLength: 500
- *                 description: Short biography or personal summary
  *                 example: "Experienced software engineer with 8+ years in backend development."
  *               street:
  *                 type: string
- *                 description: Street address (optional)
  *                 example: "456 Elm St"
  *               city:
  *                 type: string
- *                 description: City (optional)
  *                 example: "Los Angeles"
  *               state:
  *                 type: string
- *                 description: State or province (optional)
  *                 example: "CA"
  *               country:
  *                 type: string
- *                 description: Country (optional)
  *                 example: "USA"
  *               zipCode:
  *                 type: string
- *                 description: Postal or ZIP code (optional)
  *                 example: "90001"
  *               occupation:
  *                 type: string
  *                 maxLength: 255
- *                 description: User's current occupation or job title
  *                 example: "Senior Developer"
  *               company:
  *                 type: string
  *                 maxLength: 255
- *                 description: User's company or organization
  *                 example: "InnovateTech Inc"
  *     responses:
  *       200:
@@ -109,6 +110,8 @@ router.get("/", auth, getCurrentUserProfile);
  *         description: Validation failed or image upload error
  *       401:
  *         description: Unauthorized
+ *       403:
+ *         description: Phone number cannot be updated
  *       404:
  *         description: Profile not found
  */

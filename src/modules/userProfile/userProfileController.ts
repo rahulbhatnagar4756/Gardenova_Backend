@@ -20,7 +20,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../../core/services/emailService";
-import { generateToken } from "../../core/utils/usableMethods";
+import { generatePhoneToken, generateToken } from "../../core/utils/usableMethods";
 
 
 /**
@@ -41,26 +41,24 @@ export const getCurrentUserProfile = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as { userEmail?: string } | undefined;
+  const userPayload = req.user as { userId?: string; userEmail?: string; userPhone?: string } | undefined;
 
-  if (!userPayload?.userEmail) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
+  if (!userPayload?.userId) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
 
   try {
-    const user = await findUserByEmail(userPayload.userEmail);
+    // ── userId se fetch karo — works for both email & phone users ──
+    const user = await findUserById(userPayload.userId);
+
     if (!user) {
       await error("Profile retrieval failed - User not found", {
-        email: userPayload.userEmail,
+        userId: userPayload.userId,
         action: "getCurrentUserProfile",
         req,
       });
-      res
-        .status(HTTP_STATUS.NOT_FOUND)
-        .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
 
@@ -89,19 +87,14 @@ export const getCurrentUserProfile = async (
     const userProfile: IUserProfileRow | null = profileRows[0] ?? null;
 
     const answerResponse = await client.query(
-      `
-    SELECT response_id
-    FROM survey_answers
-    WHERE user_id = $1
-    ORDER BY created_at DESC
-    LIMIT 1
-  `,
+      `SELECT response_id FROM survey_answers
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
       [user.id]
     );
     const responseId = answerResponse.rows[0]?.response_id ?? null;
 
-    // Build the base URL from the incoming request (e.g. http://localhost:3000)
-    // const baseUrl = `${req.protocol}://${req.get("host")}`;
     const baseUrl = env.APPDEV_URL || `${req.protocol}://${req.get("host")}`;
 
     const fullProfile: IFullUserProfile = {
@@ -109,12 +102,9 @@ export const getCurrentUserProfile = async (
       email: user.email ?? null,
       contactNumber: user.phone_number ?? null,
       is_email_verified: user.is_email_verified ?? false,
-      // eslint-disable-next-line eqeqeq
-      is_sso_user: user.password == null, // If password is null, it's likely an SSO user
+      is_phone_verified: user.is_phone_verified ?? false,
+      is_sso_user: user.password === null, 
 
-      // Convert stored relative path → accessible URL
-      // e.g. "uploads/Users/ProfileImages/123.jpg"
-      //   → "http://localhost:3000/uploads/Users/ProfileImages/123.jpg"
       profileImage: userProfile?.profile_image
         ? `${baseUrl}/${userProfile.profile_image.replace(/\\/g, "/")}`
         : null,
@@ -133,24 +123,17 @@ export const getCurrentUserProfile = async (
       },
       occupation: userProfile?.occupation ?? null,
       company: userProfile?.company ?? null,
-      responseId: responseId,
+      responseId,
     };
 
-    res
-      .status(HTTP_STATUS.OK)
-      .json(successResponse(fullProfile, "User profile retrieved successfully"));
+    res.status(HTTP_STATUS.OK).json(successResponse(fullProfile, "User profile retrieved successfully"));
   } catch (err: unknown) {
-    const errorObj: CustomError =
-      err instanceof Error
-        ? (err as CustomError)
-        : ({
-          name: "UnknownError",
-          message:
-            typeof err === "string" ? err : "An unknown error occurred",
-        } as CustomError);
+    const errorObj: CustomError = err instanceof Error
+      ? (err as CustomError)
+      : ({ name: "UnknownError", message: typeof err === "string" ? err : "An unknown error occurred" } as CustomError);
 
     await error("Profile retrieval error", {
-      email: userPayload?.userEmail,
+      userId: userPayload?.userId,
       error: errorObj.message,
       stack: errorObj.stack,
       action: "getCurrentUserProfile",
@@ -160,110 +143,7 @@ export const getCurrentUserProfile = async (
     next(errorObj);
   }
 };
-// export const getCurrentUserProfile = async (
-//   req: AuthRequest,
-//   res: Response,
-//   next: NextFunction
-// ): Promise<void> => {
-//   const userPayload = req.user as { userEmail?: string } | undefined;
 
-//   if (!userPayload?.userEmail) {
-//     res
-//       .status(HTTP_STATUS.UNAUTHORIZED)
-//       .json(errorResponse("Unauthorized request"));
-//     return;
-//   }
-
-//   try {
-//     // 1. Get user basic details
-//     const user = await findUserByEmail(userPayload.userEmail);
-//     if (!user) {
-//       await error("Profile retrieval failed - User not found", {
-//         email: userPayload.userEmail,
-//         action: "getCurrentUserProfile",
-//         req,
-//       });
-//       res
-//         .status(HTTP_STATUS.NOT_FOUND)
-//         .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
-//       return;
-//     }
-
-//     const client = getDB();
-
-//     // 2. Run both queries in parallel
-//     //  const client = getDB();
-
-//     const { rows: profileRows } = await client.query<IUserProfileRow>(
-//       `
-//       SELECT
-//         profile_image,
-//         date_of_birth,
-//         gender,
-//         bio,
-//         street,
-//         city,
-//         state,
-//         country,
-//         zip_code,
-//         occupation,
-//         company
-//       FROM userprofiles
-//       WHERE user_id = $1
-//       `,
-//       [user.id]
-//     );
-
-//     const userProfile: IUserProfileRow | null = profileRows[0] ?? null;
-
-//     const fullProfile: IFullUserProfile = {
-//       name: user.name ?? null,
-//       email: user.email ?? null,
-//       contactNumber: user.phone_number ?? null,
-//       profileImage: userProfile?.profile_image
-//         ? (await getSignedFileUrl(userProfile.profile_image)) ?? null
-//         : null,
-//       dateOfBirth: userProfile?.date_of_birth
-//         ? new Date(userProfile.date_of_birth).toISOString().split("T")[0]
-//         : null,
-//       gender: (userProfile?.gender ?? null) as "male" | "female" | "other" | null,
-//       bio: userProfile?.bio ?? null,
-//       address: {
-//         street: userProfile?.street ?? null,
-//         city: userProfile?.city ?? null,
-//         state: userProfile?.state ?? null,
-//         country: userProfile?.country ?? null,
-//         zipCode: userProfile?.zip_code ?? null,
-//       },
-//       occupation: userProfile?.occupation ?? null,
-//       company: userProfile?.company ?? null,
-//     };
-
-//     res.status(HTTP_STATUS.OK).json(successResponse(
-//       fullProfile,
-//       "User profile retrieved successfully"
-//     ));
-//   } catch (err: unknown) {
-//     const errorObj: CustomError =
-//       err instanceof Error
-//         ? (err as CustomError)
-//         : ({
-//           name: "UnknownError",
-//           message:
-//             typeof err === "string" ? err : "An unknown error occurred",
-//         } as CustomError);
-
-//     await error("Profile retrieval error", {
-//       email: userPayload?.userEmail,
-//       error: errorObj.message,
-//       stack: errorObj.stack,
-//       action: "getCurrentUserProfile",
-//       req,
-//     });
-
-//     next(errorObj);
-//   }
-// };
 /**
  * Updates the authenticated user's profile.
  *
@@ -282,37 +162,33 @@ export const updateUserProfile = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as { userEmail?: string } | undefined;
+  const userPayload = req.user as { userId?: string } | undefined;
 
-  if (!userPayload?.userEmail) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
+  if (!userPayload?.userId) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
 
   try {
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId);
     if (!user) {
       await error("Profile update failed - User not found", {
-        email: userPayload.userEmail,
+        userId: userPayload.userId,
         action: "updateUserProfile",
         req,
       });
-      res
-        .status(HTTP_STATUS.NOT_FOUND)
-        .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
+
     if (!user.id) {
-      await error("Profile update failed - User ID missing", {
-        email: userPayload.userEmail,
-        action: "updateUserProfile",
-        req,
-      });
-      res
-        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-        .json(errorResponse("User ID is missing for the authenticated user"));
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(errorResponse("User ID is missing"));
+      return;
+    }
+
+    // ── Phone number update allow nahi ────────────────────────
+    if (req.body.phoneNumber || req.body.phone_number) {
+      res.status(HTTP_STATUS.FORBIDDEN).json(errorResponse("Phone number cannot be updated"));
       return;
     }
 
@@ -325,125 +201,96 @@ export const updateUserProfile = async (
 
     if (existingProfileRows.length === 0) {
       await warn("Profile update failed - Profile not found", {
-        email: userPayload.userEmail,
         userId: user.id,
         action: "updateUserProfile",
         req,
       });
-      res
-        .status(HTTP_STATUS.NOT_FOUND)
-        .json(errorResponse("User profile not found"));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User profile not found"));
       return;
     }
 
     const profileId = existingProfileRows[0].id;
 
-    // Handle base64 image upload locally
-    if (req.body.profileImage && typeof req.body.profileImage === "string") {
-      const isBase64 = /^data:image\/[a-zA-Z]+;base64,/.test(
-        req.body.profileImage
+    // ── name/email update — users table mein ─────────────────
+    const { name, email } = req.body;
+
+    if (name || email) {
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+
+      if (name) { fields.push(`name = $${idx++}`); values.push(name); }
+      if (email) { fields.push(`email = $${idx++}`); values.push(email.toLowerCase()); }
+
+      fields.push(`updated_at = NOW()`);
+      values.push(user.id);
+
+      await client.query(
+        `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx}`,
+        values
       );
+    }
+
+    // ── Base64 image upload ───────────────────────────────────
+    if (req.body.profileImage && typeof req.body.profileImage === "string") {
+      const isBase64 = /^data:image\/[a-zA-Z]+;base64,/.test(req.body.profileImage);
 
       if (isBase64) {
         try {
-          // Strip the base64 header and get the raw data
-          const matches = req.body.profileImage.match(
-            /^data:image\/([a-zA-Z]+);base64,(.+)$/
-          );
+          const matches = req.body.profileImage.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
 
           if (!matches || matches.length !== 3) {
-            res
-              .status(HTTP_STATUS.BAD_REQUEST)
-              .json(errorResponse("Invalid base64 image format"));
+            res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid base64 image format"));
             return;
           }
 
           const imageBuffer = Buffer.from(matches[2], "base64");
-
-          // Define upload directory and file path
-          const uploadDir = path.join(
-            process.cwd(),
-            "uploads",
-            "Users",
-            "ProfileImages"
-          );
+          const uploadDir = path.join(process.cwd(), "uploads", "Users", "ProfileImages");
           const fileName = `${Date.now()}.jpg`;
           const newFilePath = path.join(uploadDir, fileName);
+          const newFileKey = path.join("uploads", "Users", "ProfileImages", fileName);
 
-          // Relative path to store in DB (acts like a "file key")
-          const newFileKey = path.join(
-            "uploads",
-            "Users",
-            "ProfileImages",
-            fileName
-          );
-
-          // Ensure the upload directory exists
           fs.mkdirSync(uploadDir, { recursive: true });
 
-          // Delete old image if it exists
           const oldProfile = await getUserProfileById(profileId);
           const oldFileKey = oldProfile?.profile_image || null;
 
           if (oldFileKey) {
             const oldFilePath = path.join(process.cwd(), oldFileKey);
-            if (fs.existsSync(oldFilePath)) {
-              fs.unlinkSync(oldFilePath);
-            }
+            if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
           }
 
-          // Write new image to disk
           fs.writeFileSync(newFilePath, imageBuffer);
-
-          // Store the relative path in DB (same role as S3 file key)
           req.body.profileImage = newFileKey;
         } catch (uploadErr: unknown) {
           await error("Local image save failed", {
-            email: userPayload.userEmail,
             userId: user.id,
             error: (uploadErr as Error).message,
             req,
           });
-          res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse("Failed to save profile image"));
+          res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(errorResponse("Failed to save profile image"));
           return;
         }
       }
     }
 
-    const updatedProfile = await updateValidatedUserProfile(
-      profileId,
-      req.body,
-      user.id
-    );
+    // ── userprofiles table update ─────────────────────────────
+    const updatedProfile = await updateValidatedUserProfile(profileId, req.body, user.id);
 
     if (!updatedProfile) {
-      await warn("Profile update failed - No record updated", {
-        email: userPayload.userEmail,
-        userId: user.id,
-        req,
-      });
-      res
-        .status(HTTP_STATUS.NOT_FOUND)
-        .json(errorResponse("User profile not found"));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User profile not found"));
       return;
     }
 
-    res
-      .status(HTTP_STATUS.OK)
-      .json(successResponse(null, MESSAGES.PROFILE_UPDATED));
+    res.status(HTTP_STATUS.OK).json(successResponse(null, MESSAGES.PROFILE_UPDATED));
+
   } catch (err: unknown) {
-    const errorObj: CustomError =
-      err instanceof Error
-        ? (err as CustomError)
-        : ({
-          name: "UnknownError",
-          message: "An unknown error occurred",
-        } );
+    const errorObj: CustomError = err instanceof Error
+      ? (err as CustomError)
+      : ({ name: "UnknownError", message: "An unknown error occurred" });
 
     await error("Profile updation error", {
-      email: userPayload?.userEmail,
+      userId: userPayload?.userId,
       error: errorObj.message,
       stack: errorObj.stack,
       action: "updateUserProfile",
@@ -451,8 +298,6 @@ export const updateUserProfile = async (
     });
 
     next(errorObj);
-    // console.log("Error in updateUserProfile:", err);
-    next(err);
   }
 };
 
@@ -530,21 +375,21 @@ export const sendEmailVerification = async (
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
- 
+
   // ── 2. Validate body ───────────────────────────────────────────────────────
   const targetEmail: string | undefined = req.body?.email?.trim().toLowerCase();
   if (!targetEmail) {
     res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Email is required"));
     return;
   }
- 
+
   // Basic email format check (use a library like `validator` for production)
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(targetEmail)) {
     res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid email format"));
     return;
   }
- 
+
   try {
     // ── 3. Load authenticated user ─────────────────────────────────────────
     const user = await findUserById(userId);
@@ -552,13 +397,13 @@ export const sendEmailVerification = async (
       res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
- 
+
     // ── 4. Already verified with the same email? ───────────────────────────
     if (user.is_email_verified && user.email === targetEmail) {
       res.status(HTTP_STATUS.OK).json(successResponse(null, "Email is already verified"));
       return;
     }
- 
+
     // ── 5. Is the target email taken by someone else? ──────────────────────
     const emailOwner = await findUserByEmail(targetEmail);
     if (emailOwner && emailOwner.id !== userId) {
@@ -567,9 +412,9 @@ export const sendEmailVerification = async (
         .json(errorResponse("This email is already in use by another account"));
       return;
     }
- 
+
     const client = await getDB();
- 
+
     // ── 6. Rate-limit: reuse an unexpired, unused OTP ──────────────────────
     //    Prevents users from spamming the endpoint and burning e-mail quota.
     const existingOtpQuery = `
@@ -593,7 +438,7 @@ export const sendEmailVerification = async (
       );
       return;
     }
- 
+
     // ── 7. Store pending email (do NOT overwrite live email yet) ───────────
     //    Requires a `pending_email` column in your users table:
     //    ALTER TABLE users ADD COLUMN pending_email TEXT;
@@ -603,16 +448,16 @@ export const sendEmailVerification = async (
       WHERE  id = $2
     `;
     await client.query(pendingEmailQuery, [targetEmail, userId]);
- 
+
     // ── 8. Generate OTP and persist it ────────────────────────────────────
     const verificationCode = generate4DigitCode();
     const expiresAt = new Date(Date.now() + 1 * 60 * 1000); // 10 minutes
- 
+
     await saveEmailVerificationCode(userId, { code: verificationCode, expiresAt });
- 
+
     // ── 9. Fire the email (intentionally not awaited — non-blocking) ───────
     sendVerificationEmail(targetEmail, verificationCode, expiresAt);
- 
+
     res.status(HTTP_STATUS.OK).json(successResponse(null, "Verification code sent to email"));
   } catch (err: unknown) {
     const errorObj = toCustomError(err);
@@ -626,7 +471,7 @@ export const sendEmailVerification = async (
     next(errorObj);
   }
 };
- 
+
 
 /**
  * Verifies the email verification OTP for the authenticated user.
@@ -660,7 +505,7 @@ export const verifyCode = async (
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
     return;
   }
- 
+
   // ── 2. Validate body ───────────────────────────────────────────────────────
   const otp: string | undefined = req.body?.otp?.toString().trim();
   if (!otp) {
@@ -671,7 +516,7 @@ export const verifyCode = async (
     res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("OTP must be a 4-digit number"));
     return;
   }
- 
+
   try {
     // ── 3. Load user ───────────────────────────────────────────────────────
     const user = await findUserById(userId);
@@ -679,16 +524,16 @@ export const verifyCode = async (
       res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
- 
+
     // ── 4. Already fully verified? ─────────────────────────────────────────
     //    (pending_email check means they started a new change — let them verify)
     if (user.is_email_verified && !user.pending_email) {
       res.status(HTTP_STATUS.OK).json(successResponse(null, "Email is already verified"));
       return;
     }
- 
+
     const client = await getDB();
- 
+
     // ── 5. Look up OTP record ──────────────────────────────────────────────
     const otpQuery = `
       SELECT id
@@ -700,7 +545,7 @@ export const verifyCode = async (
       LIMIT  1
     `;
     const { rows } = await client.query(otpQuery, [userId, otp]);
- 
+
     if (rows.length === 0) {
       // Differentiate expired vs wrong code for better UX
       const anyCodeQuery = `
@@ -710,7 +555,7 @@ export const verifyCode = async (
         LIMIT  1
       `;
       const { rows: anyRows } = await client.query(anyCodeQuery, [userId, otp]);
- 
+
       if (anyRows.length > 0 && anyRows[0].is_used) {
         res
           .status(HTTP_STATUS.BAD_REQUEST)
@@ -723,13 +568,13 @@ export const verifyCode = async (
           .json(errorResponse("OTP has expired. Please request a new one."));
         return;
       }
- 
+
       res
         .status(HTTP_STATUS.BAD_REQUEST)
         .json(errorResponse("Invalid OTP. Please check and try again."));
       return;
     }
- 
+
     // ── 6. Mark OTP as used ────────────────────────────────────────────────
     const markUsedQuery = `
       UPDATE email_verifications
@@ -737,7 +582,7 @@ export const verifyCode = async (
       WHERE  user_id = $1 AND code = $2
     `;
     await client.query(markUsedQuery, [userId, otp]);
- 
+
     // ── 7. Promote pending_email → email, mark verified ───────────────────
     const verifyQuery = `
       UPDATE users
@@ -747,14 +592,16 @@ export const verifyCode = async (
       WHERE  id = $1
       RETURNING email
     `;
-     await client.query(verifyQuery, [userId]);
+    await client.query(verifyQuery, [userId]);
     // const verifiedEmail: string = updatedRows[0].email;
- 
+
     // ── 8. Issue fresh token (email may have changed) ──────────────────────
-    const users = await findUserById(userId); // Reload user to get latest email & role
-    const role = await getRoleById(users?.role_id!);
-    const token = generateToken(users?.email!, role?.name!, users?.id!);
- 
+    const updatedUser = await findUserById(userId);
+    const role = await getRoleById(updatedUser?.role_id!);
+    const token = updatedUser?.email
+      ? generateToken(updatedUser.email, role?.name!, updatedUser.id!)
+      : generatePhoneToken(updatedUser?.phone_number!, role?.name!, updatedUser?.id!);
+
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(token, "Email verified successfully"));
@@ -1116,9 +963,9 @@ export const addPasswordForSSOUser = async (
       return;
     }
 
-    const {new_password} = req.body;
+    const { new_password } = req.body;
     if (!new_password || typeof new_password !== "string" || new_password.length < 6) {
-      res        
+      res
         .status(HTTP_STATUS.BAD_REQUEST)
         .json(errorResponse("New password must be at least 6 characters long"));
       return;
@@ -1164,7 +1011,7 @@ export const addPasswordForSSOUser = async (
       email: userPayload?.userEmail,
       error: errorObj.message,
       stack: errorObj.stack,
-      action: "addPasswordForSSOUser",  
+      action: "addPasswordForSSOUser",
       req,
     });
     next(errorObj);

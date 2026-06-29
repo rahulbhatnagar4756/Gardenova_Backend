@@ -1,6 +1,15 @@
 import Joi, { ObjectSchema } from "joi";
 
 export const createUserProfileValidation: ObjectSchema = Joi.object({
+  name: Joi.string().min(2).max(50).trim().allow("", null).optional().messages({
+    "string.max": "Name cannot exceed 50 characters",
+    "string.min": "Name must be at least 2 characters",
+  }),
+
+  email: Joi.string().email().trim().allow("", null).optional().messages({
+    "string.email": "Please provide a valid email address",
+  }),
+
   profileImage: Joi.string().allow("", null).optional().messages({
     "string.base": "Profile image must be a string",
   }),
@@ -21,10 +30,9 @@ export const createUserProfileValidation: ObjectSchema = Joi.object({
     "string.max": "Bio cannot exceed 500 characters",
   }),
 
-  // Flattened address fields (PostgreSQL version)
-  street: Joi.string().trim().allow("", null).optional(),
-  city: Joi.string().trim().allow("", null).optional(),
-  state: Joi.string().trim().allow("", null).optional(),
+  street:  Joi.string().trim().allow("", null).optional(),
+  city:    Joi.string().trim().allow("", null).optional(),
+  state:   Joi.string().trim().allow("", null).optional(),
   country: Joi.string().trim().allow("", null).optional(),
   zipCode: Joi.string().trim().allow("", null).optional(),
 
@@ -35,11 +43,13 @@ export const createUserProfileValidation: ObjectSchema = Joi.object({
   company: Joi.string().max(255).trim().allow("", null).optional().messages({
     "string.max": "Company name cannot exceed 255 characters",
   }),
-  contactNumber: Joi.string().trim().allow("", null).optional().messages({
-    "string.base": "Contact number must be a string",
+
+  // ── Blocked fields ────────────────────────────────────────
+  contactNumber: Joi.any().forbidden().messages({
+    "any.unknown": "Phone number cannot be updated",
   }),
-  name: Joi.string().max(255).trim().allow("", null).optional().messages({
-    "string.max": "Name cannot exceed 255 characters",
+  phoneNumber: Joi.any().forbidden().messages({
+    "any.unknown": "Phone number cannot be updated",
   }),
 });
 
