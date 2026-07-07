@@ -610,7 +610,7 @@ export const handlePasswordResetToken = async (
       );
       res
         .status(HTTP_STATUS.OK)
-        .json(errorResponse("User not found with this email address"));
+        .json(errorResponse("Please enter the correct email address."));
       return;
     }
 
