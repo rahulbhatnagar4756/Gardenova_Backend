@@ -6,7 +6,7 @@ import {
 } from './reminder.queries';
 
 import { AuthUserPayload, IUser } from '../../interface/user';
-import { findUserByAppleId,  } from '../auth/authRepository';
+import {  findUserById,  } from '../auth/authRepository';
 import { AuthRequest } from '../../interface/auth';
 
 // ─── POST /reminders/snooze ──────────────────────────────────────────────────
@@ -46,7 +46,7 @@ import { AuthRequest } from '../../interface/auth';
  */
 async function resolveUser(req: AuthRequest, res: Response):Promise<IUser | null> {
     const userPayload = req.user as AuthUserPayload | undefined;
-    const user = await findUserByAppleId(userPayload?.userId!);
+    const user = await findUserById(userPayload?.userId!);
     if (!user) {
         res.status(401).json({ error: "Unauthorized" });
         return null;

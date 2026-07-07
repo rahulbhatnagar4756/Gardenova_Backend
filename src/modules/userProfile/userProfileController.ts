@@ -801,24 +801,19 @@ export const softDeleteUserProfile = async (
 
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as { userEmail?: string } | undefined;
+  const userPayload = req.user as AuthUserPayload| undefined;
 
-  if (!userPayload?.userEmail) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
-    return;
-  }
+  
 
   try {
 
     //  Find user
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload!.userId!);
 
     if (!user) {
       await error("Profile soft delete failed - User not found", {
-        email: userPayload.userEmail,
+        email: userPayload!.userEmail,
         action: "softDeleteUserProfile",
         req,
       });
@@ -839,7 +834,7 @@ export const softDeleteUserProfile = async (
 
     if (checkProfileResult.rowCount === 0) {
       await warn("Profile soft delete failed - Profile not found", {
-        email: userPayload.userEmail,
+        email: userPayload!.userEmail,
         userId: user.id,
         action: "softDeleteUserProfile",
         req,
@@ -861,7 +856,7 @@ export const softDeleteUserProfile = async (
     );
     if (result.rowCount === 0) {
       await warn("Profile soft delete failed - Profile not found", {
-        email: userPayload.userEmail,
+        email: userPayload!.userEmail,
         userId: user.id,
         action: "softDeleteUserProfile",
         req,
