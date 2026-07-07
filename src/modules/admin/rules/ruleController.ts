@@ -11,7 +11,7 @@ import {
   getAllRules as getAllRulesFromDB,
   deleteRule as deleteRuleFromDB,
 } from "./rulesModel";
-import { findUserByEmail } from "../../auth/authRepository";
+import {  findUserById } from "../../auth/authRepository";
 import { AuthUserPayload } from "../../../interface/user";
 import { AuthRequest } from "../../../interface/auth";
 
@@ -34,7 +34,7 @@ export const getAllRules = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;
@@ -84,7 +84,7 @@ export const createRule = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;
@@ -137,7 +137,7 @@ export const updateRule = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;
@@ -194,7 +194,7 @@ export const deleteRule = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;

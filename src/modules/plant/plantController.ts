@@ -12,7 +12,7 @@ import {
   errorResponse,
 } from "../../core/utils/responseFormatter";
 import { HTTP_STATUS } from "../../core/utils/constants";
-import { findUserByEmail } from "../auth/authRepository";
+import { findUserByEmail, findUserById } from "../auth/authRepository";
 import { error, warn } from "../../core/utils/logger";
 import { CustomError } from "../../interface/Error";
 import { IUser } from "../../interface/user";
@@ -312,7 +312,7 @@ export const diagnosePlantController = async (
   next: NextFunction
 ): Promise<void> => {
   const userPayload = req.user as
-    | { userEmail?: string; role?: string }
+    | { userEmail?: string; role?: string; userId?: string }
     | undefined;
 
   if (!userPayload?.userEmail) {
@@ -322,7 +322,7 @@ export const diagnosePlantController = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
 
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));

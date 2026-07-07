@@ -5,7 +5,7 @@ import {
   errorResponse,
   successResponse,
 } from "../../../core/utils/responseFormatter";
-import { findUserByEmail } from "../../auth/authRepository";
+import {  findUserById } from "../../auth/authRepository";
 import {
   createQuestion,
   findAllQuestions,
@@ -173,7 +173,7 @@ export const createQuestionController = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;
@@ -235,7 +235,7 @@ export const updateQuestionController = async (
     return;
   }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserById(userPayload.userId!);
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return;
@@ -303,13 +303,13 @@ export const deleteQuestionController = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userPayload = req.user as { userEmail?: string } | undefined;
+    const userPayload = req.user as { userEmail?: string,userId?:string } | undefined;
     if (!userPayload?.userEmail) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
       return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
       res
         .status(HTTP_STATUS.UNAUTHORIZED)

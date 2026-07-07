@@ -21,6 +21,7 @@ import path from "path";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../../core/services/emailService";
 import { generatePhoneToken, generateToken } from "../../core/utils/usableMethods";
+import { AuthUserPayload } from "../../interface/user";
 
 
 /**
@@ -924,7 +925,7 @@ export const addPasswordForSSOUser = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as { userEmail?: string } | undefined;
+  const userPayload = req.user as AuthUserPayload  | undefined;
 
   if (!userPayload?.userEmail) {
     res
@@ -933,7 +934,7 @@ export const addPasswordForSSOUser = async (
     return;
   }
   try {
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
       await error("Add password failed - User not found", {
         email: userPayload.userEmail,

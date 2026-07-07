@@ -2,7 +2,7 @@ import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import { errorResponse, successResponse } from "../../core/utils/responseFormatter";
 import { AuthRequest } from "../../interface/auth";
 import { Response } from "express";
-import { findUserByEmail } from "../auth/authRepository";
+import {  findUserById } from "../auth/authRepository";
 import { error } from "../../core/utils/logger";
 import {   getAllPlansWithDetailService } from "./subscriptionRepository";
 // import { VerifyPurchaseBody } from "../../interface/subscription";
@@ -48,7 +48,7 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): P
     }
 
     try {
-        const user = await findUserByEmail(userPayload.userEmail);
+        const user = await findUserById(userPayload.userEmail);
         if (!user) {
             await error("Profile retrieval failed - User not found", {
                 email: userPayload.userEmail,

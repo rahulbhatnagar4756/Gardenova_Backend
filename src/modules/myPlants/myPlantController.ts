@@ -3,7 +3,7 @@ import { AuthRequest } from "../../interface/auth";
 import { AuthUserPayload } from "../../interface/user";
 import { errorResponse, successResponse } from "../../core/utils/responseFormatter";
 import { HTTP_STATUS } from "../../core/utils/constants";
-import { findUserByEmail } from "../auth/authRepository";
+import {  findUserById } from "../auth/authRepository";
 import { addPlantToUserService, 
     completeNotificationService, 
     deleteUserPlantService, 
@@ -49,7 +49,7 @@ export const getAllPlants = async (
         return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
         return;
@@ -106,7 +106,7 @@ export const getPlantById = async (
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
         return;
@@ -183,7 +183,7 @@ export const AddPlantToUser = async (
         return;
     }
  
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User not found"));
         return;
@@ -249,7 +249,7 @@ export const getAllUserPlants = async (
         return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User not found"));
         return;
@@ -324,7 +324,7 @@ export const getUserPlantById = async (
         return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User not found"));
         return;
@@ -426,7 +426,7 @@ export const updateUserPlantController = async (
             return;
         }
  
-        const user = await findUserByEmail(userPayload.userEmail);
+        const user = await findUserById(userPayload.userId!);
         if (!user) {
             res.status(404).json({ message: "User not found" });
             return;
@@ -523,7 +523,7 @@ export const getAllPlantsAdmin = async (
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
         return;
@@ -591,7 +591,7 @@ export const deleteUserPlantController= async (
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
 
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
@@ -649,7 +649,7 @@ export const getNotificationsController = async (
       return;
     }
 
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
       return;
@@ -697,7 +697,7 @@ async function resolveUser(req: AuthRequest, res: Response):Promise<any | null> 
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return null;
     }
-    const user = await findUserByEmail(userPayload.userEmail);
+    const user = await findUserById(userPayload.userEmail);
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
         return null;
