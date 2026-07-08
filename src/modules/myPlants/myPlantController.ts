@@ -44,7 +44,7 @@ export const getAllPlants = async (
     next: NextFunction
 ): Promise<void> => {
     const userPayload = req.user as AuthUserPayload | undefined;
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
@@ -102,7 +102,7 @@ export const getPlantById = async (
     next: NextFunction
 ): Promise<void> => {
     const userPayload = req.user as AuthUserPayload | undefined;
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
@@ -173,7 +173,7 @@ export const AddPlantToUser = async (
     // ── 1. Auth checks ────────────────────────────────────────────────────────
     const userPayload = req.user as AuthUserPayload | undefined;
  
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
@@ -239,7 +239,7 @@ export const getAllUserPlants = async (
     // ── 1. Auth Checks ────────────────────────────────────────────────────────
     const userPayload = req.user as AuthUserPayload | undefined;
 
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
@@ -314,7 +314,7 @@ export const getUserPlantById = async (
     // ── 1. Auth ───────────────────────────────────────────────────────────────
     const userPayload = req.user as AuthUserPayload | undefined;
 
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return;
     }
@@ -421,7 +421,7 @@ export const updateUserPlantController = async (
             return;
         }
  
-        if (!userPayload?.userEmail) {
+        if (!userPayload?.userId) {
             res.status(401).json({ message: "Unauthorized" });
             return;
         }
@@ -644,12 +644,12 @@ export const getNotificationsController = async (
 ): Promise<void> => {
   try {
     const userPayload = req.user as AuthUserPayload | undefined;
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
       return;
     }
 
-    const user = await findUserById(userPayload.userId!);
+    const user = await findUserById(userPayload.userId);
     if (!user) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
       return;
@@ -693,11 +693,11 @@ export const getNotificationsController = async (
  */
 async function resolveUser(req: AuthRequest, res: Response):Promise<any | null> { //eslint-disable-line @typescript-eslint/no-explicit-any
     const userPayload = req.user as AuthUserPayload | undefined;
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
         return null;
     }
-    const user = await findUserById(userPayload.userEmail);
+    const user = await findUserById(userPayload.userId!);
     if (!user) {
         res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
         return null;

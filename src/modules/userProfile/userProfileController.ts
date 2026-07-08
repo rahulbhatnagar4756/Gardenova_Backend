@@ -104,7 +104,7 @@ export const getCurrentUserProfile = async (
       contactNumber: user.phone_number ?? null,
       is_email_verified: user.is_email_verified ?? false,
       is_phone_verified: user.is_phone_verified ?? false,
-      is_sso_user: user.password === null, 
+      is_sso_user: user.password === null,
 
       profileImage: userProfile?.profile_image
         ? `${baseUrl}/${userProfile.profile_image.replace(/\\/g, "/")}`
@@ -419,27 +419,22 @@ export const sendEmailVerification = async (
     // ── 6. Rate-limit: reuse an unexpired, unused OTP ──────────────────────
     //    Prevents users from spamming the endpoint and burning e-mail quota.
     const existingOtpQuery = `
-      SELECT id, expires_at
-      FROM   email_verifications
-      WHERE  user_id   = $1
-        AND  is_used   = false
-        AND  expires_at > now()
-      ORDER  BY expires_at DESC
-      LIMIT  1
-    `;
+  SELECT id, GREATEST(EXTRACT(EPOCH FROM (expires_at - now())), 0)::int AS remaining_seconds
+  FROM   email_verifications
+  WHERE  user_id   = $1
+    AND  is_used   = false
+    AND  expires_at > now()
+  ORDER  BY expires_at DESC
+  LIMIT  1
+`;
     const { rows: existingOtps } = await client.query(existingOtpQuery, [userId]);
     if (existingOtps.length > 0) {
-      const remaining = Math.ceil(
-        (new Date(existingOtps[0].expires_at).getTime() - Date.now()) / 1000
-      );
+      const remaining = existingOtps[0].remaining_seconds;
       res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json(
-        errorResponse(
-          `An OTP was already sent. Please wait ${remaining}s before requesting a new one.`
-        )
+        errorResponse(`An OTP was already sent. Please wait ${remaining}s before requesting a new one.`)
       );
       return;
     }
-
     // ── 7. Store pending email (do NOT overwrite live email yet) ───────────
     //    Requires a `pending_email` column in your users table:
     //    ALTER TABLE users ADD COLUMN pending_email TEXT;
@@ -452,7 +447,7 @@ export const sendEmailVerification = async (
 
     // ── 8. Generate OTP and persist it ────────────────────────────────────
     const verificationCode = generate4DigitCode();
-    const expiresAt = new Date(Date.now() + 1 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutes
 
     await saveEmailVerificationCode(userId, { code: verificationCode, expiresAt });
 
@@ -618,155 +613,6 @@ export const verifyCode = async (
     next(errorObj);
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-// export const updateUserProfile = async (
-//   req: AuthRequest,
-//   res: Response,
-//   next: NextFunction
-// ): Promise<void> => {
-//   const userPayload = req.user as { userEmail?: string } | undefined;
-
-//   if (!userPayload?.userEmail) {
-//     res
-//       .status(HTTP_STATUS.UNAUTHORIZED)
-//       .json(errorResponse("Unauthorized request"));
-//     return;
-//   }
-
-//   try {
-//     //  Find user
-//     const user = await findUserByEmail(userPayload.userEmail);
-//     if (!user) {
-//       await error("Profile update failed - User not found", {
-//         email: userPayload.userEmail,
-//         action: "updateUserProfile",
-//         req,
-//       });
-//       res
-//         .status(HTTP_STATUS.NOT_FOUND)
-//         .json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
-//       return;
-//     }
-
-//     const client = getDB();
-
-//     //  Find existing profile
-//     const { rows: existingProfileRows } = await client.query(
-//       `SELECT id FROM userprofiles WHERE user_id = $1`,
-//       [user.id]
-//     );
-
-//     if (existingProfileRows.length === 0) {
-//       await warn("Profile update failed - Profile not found", {
-//         email: userPayload.userEmail,
-//         userId: user.id,
-//         action: "updateUserProfile",
-//         req,
-//       });
-//       res
-//         .status(HTTP_STATUS.NOT_FOUND)
-//         .json(errorResponse("User profile not found"));
-//       return;
-//     }
-
-//     const profileId = existingProfileRows[0].id;
-
-//     // Handle base64 image upload
-//     if (req.body.profileImage && typeof req.body.profileImage === "string") {
-//       const isBase64 = /^data:image\/[a-zA-Z]+;base64,/.test(
-//         req.body.profileImage
-//       );
-//       if (isBase64) {
-//         try {
-//           const plantName = `${Date.now()}.jpg`; // or `${user.id}_${Date.now()}.jpg`
-//           const folder = "Users/ProfileImages"; // or any folder name you prefer
-//           // Fetch old profile image from DB
-//           const oldProfile = await getUserProfileById(profileId);
-//           const oldFileKey = oldProfile?.profile_image || null;
-
-//           // Upload new image
-//           const uploadedFileKey = await uploadBase64ToS3(
-//             req.body.profileImage,
-//             plantName,
-//             folder
-//           );
-
-//           // Delete old image (if exists)
-//           if (oldFileKey) {
-//             await deleteFileFromS3(oldFileKey);
-//           }
-
-//           // Assign new file key to request body
-//           req.body.profileImage = uploadedFileKey;
-//         } catch (uploadErr: unknown) {
-//           await error("Image upload to S3 Bucket failed", {
-//             email: userPayload.userEmail,
-//             userId: user.id,
-//             error: (uploadErr as Error).message,
-//             req,
-//           });
-//           res
-//             .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-//             .json(errorResponse("Failed to upload profile image"));
-//           return;
-//         }
-//       }
-//     }
-
-//     // Validate and update using your service method
-//     const updatedProfile = await updateValidatedUserProfile(
-//       profileId,
-//       req.body
-//     );
-
-//     if (!updatedProfile) {
-//       await warn("Profile update failed - No record updated", {
-//         email: userPayload.userEmail,
-//         userId: user.id,
-//         req,
-//       });
-//       res
-//         .status(HTTP_STATUS.NOT_FOUND)
-//         .json(errorResponse("User profile not found"));
-//       return;
-//     }
-//     res
-//       .status(HTTP_STATUS.OK)
-//       .json(successResponse(null, MESSAGES.PROFILE_UPDATED));
-//   } catch (err: unknown) {
-//     const errorObj: CustomError =
-//       err instanceof Error
-//         ? (err as CustomError)
-//         : ({
-//           name: "UnknownError",
-//           message: "An unknown error occurred",
-//         } as CustomError);
-
-//     await error("Profile updation error", {
-//       email: userPayload?.userEmail,
-//       error: errorObj.message,
-//       stack: errorObj.stack,
-//       action: "updateUserProfile",
-//       req,
-//     });
-
-//     next(errorObj);
-//   }
-// };
-
-
 /**
  * Soft deletes the current user's profile by setting `is_deleted = true`.
  * 
@@ -801,9 +647,9 @@ export const softDeleteUserProfile = async (
 
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as AuthUserPayload| undefined;
+  const userPayload = req.user as AuthUserPayload | undefined;
 
-  
+
 
   try {
 
@@ -825,46 +671,30 @@ export const softDeleteUserProfile = async (
 
     const client = getDB();
     //  Find existing profile
-
-    const checkProfileResult = await client.query(
-      `SELECT isdeleted FROM users WHERE id = $1`,
+    const result = await client.query(
+      `DELETE FROM users WHERE id = $1 RETURNING id`,
       [user.id]
-    );
+    )
 
 
-    if (checkProfileResult.rowCount === 0) {
-      await warn("Profile soft delete failed - Profile not found", {
+
+    if (result.rowCount === 0) {
+      await warn("Profile delete failed - Profile not found", {
         email: userPayload!.userEmail,
         userId: user.id,
-        action: "softDeleteUserProfile",
+        action: "deleteUserProfile",
         req,
       });
-      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User profile not found"));
 
-    }
-    if (checkProfileResult.rows[0]?.isdeleted) {
       res
-        .status(HTTP_STATUS.GONE)
-        .json(errorResponse("User profile already deleted"));
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse("User profile not found"));
       return;
     }
 
-
-    const result = await client.query(
-      `UPDATE users SET isdeleted = true WHERE id  = $1 RETURNING id`,
-      [user.id]
-    );
-    if (result.rowCount === 0) {
-      await warn("Profile soft delete failed - Profile not found", {
-        email: userPayload!.userEmail,
-        userId: user.id,
-        action: "softDeleteUserProfile",
-        req,
-      });
-    }
     res
       .status(HTTP_STATUS.OK)
-      .json(successResponse(null, "User profile soft deleted successfully"));
+      .json(successResponse(null, "User profile deleted successfully"));
   }
 
   catch (err: unknown) {
@@ -890,7 +720,6 @@ export const softDeleteUserProfile = async (
     next(errorObj);
   }
 }
-
 /**
  * Adds a password for an authenticated SSO user who does not already
  * have a password set in the system.
@@ -920,7 +749,7 @@ export const addPasswordForSSOUser = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as AuthUserPayload  | undefined;
+  const userPayload = req.user as AuthUserPayload | undefined;
 
   if (!userPayload?.userEmail) {
     res
