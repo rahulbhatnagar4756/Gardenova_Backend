@@ -401,7 +401,7 @@ export const sendEmailVerification = async (
 
     // ── 4. Already verified with the same email? ───────────────────────────
     if (user.is_email_verified && user.email === targetEmail) {
-      res.status(HTTP_STATUS.OK).json(successResponse(null, "Email is already verified"));
+      res.status(HTTP_STATUS.CONFLICT).json(successResponse(null, "Email is already verified"));
       return;
     }
 

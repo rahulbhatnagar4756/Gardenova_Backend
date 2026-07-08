@@ -452,7 +452,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunc
 
     const isValid = await verifyOtp(phoneNumber, otp);
     if(reqType==="register" && !isValid){
-      res.status(HTTP_STATUS.OK).json(errorResponse("Invalid or expired OTP"));
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid or expired OTP"));
       return;
     }
     if(reqType ==="register" && isValid){
@@ -460,7 +460,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunc
       return;
     }
     if (!isValid) {
-      res.status(HTTP_STATUS.OK).json(errorResponse("Invalid or expired OTP"));
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid or expired OTP"));
       return;
     }
 
