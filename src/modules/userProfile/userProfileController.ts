@@ -409,7 +409,7 @@ export const sendEmailVerification = async (
     const emailOwner = await findUserByEmail(targetEmail);
     if (emailOwner && emailOwner.id !== userId) {
       res
-        .status(HTTP_STATUS.CONFLICT)
+        .status(HTTP_STATUS.OK)
         .json(errorResponse("This email is already in use by another account"));
       return;
     }

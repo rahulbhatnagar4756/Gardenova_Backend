@@ -22,12 +22,14 @@ import reminderRoutes from "./modules/reminder/reminder.Routes";
 // import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import { connectDB } from "./core/config/db";
+import cron from "node-cron";
 // import { startReminderCron } from "./modules/reminder/reminder.cron";
 import logger from "./core/config/logger";
 import detailedLogger from "./core/middleware/httpLogger";
 import contactRoutes from "./modules/contactus/contactRoutes";
 import blogRouter from "./modules/Blog/blogRoute";
 import { startReminderCron } from "./modules/reminder/reminder.cron";
+import { autoRescheduleMissedNotificationsService } from "./modules/myPlants/myPlantServices";
 // import { createBlogTable } from "./db/createBlogTable";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
@@ -65,6 +67,16 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(translationMiddleware()); // enable translation globally
+
+cron.schedule("0 0 * * *", async () => {
+    try {
+        await autoRescheduleMissedNotificationsService();
+    } catch (err) {
+        console.error("autoRescheduleMissedNotificationsService failed:", err);
+    }
+}, {
+    timezone: "Asia/Kolkata",
+});
 
 
 // User Authentication Routes

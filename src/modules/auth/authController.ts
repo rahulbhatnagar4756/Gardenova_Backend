@@ -460,7 +460,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunc
       return;
     }
     if (!isValid) {
-      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Invalid or expired OTP"));
+      res.status(HTTP_STATUS.OK).json(errorResponse("Invalid or expired OTP"));
       return;
     }
 

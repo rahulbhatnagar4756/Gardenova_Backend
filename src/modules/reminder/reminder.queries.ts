@@ -87,7 +87,6 @@ export async function getDuePlants(): Promise<UserPlant[]> {
     client.release();  // connection pool wapas
   }
 }
-
 // ─── Idempotency check ───────────────────────────────────────────────────────
 // Returns existing active log if one already exists for this plant+type+cycle
 /**
@@ -186,10 +185,6 @@ export async function insertNotificationLog(data: {
 
     return rows[0];
 }
-
-
-
-
 
 // ─── FCM token queries ───────────────────────────────────────────────────────
 /**

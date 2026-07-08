@@ -1869,7 +1869,7 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
     pruning: "prune",
     generic: "generic",
 };
-const ALL_ACTIVITY_TYPES: ActivityType[] = [
+export const ALL_ACTIVITY_TYPES: ActivityType[] = [
     "watering",
     "fertilizing",
     "pruning",
@@ -1897,12 +1897,16 @@ function buildUnionQuery(
     const branches = activities.map((activity) => {
         const cols = getColumns(activity);
 
-        // Plan B completed: last_at is within the current reminder cycle
+        // Completed: last_at falls within the current reminder cycle
         const completedCond = `
       up.${cols.last_at} IS NOT NULL
       AND up.${cols.next_at} IS NOT NULL
       AND up.${cols.frequency} > 0
       AND up.${cols.last_at} >= (up.${cols.next_at} - (up.${cols.frequency} || ' days')::interval)
+    `;
+
+        const missedCond = `
+      up.${cols.next_at} < NOW()
     `;
 
         const in5HoursCond = `
@@ -1923,8 +1927,8 @@ function buildUnionQuery(
     up.${cols.frequency}                   AS frequency_days,
     up.${cols.preferred_time}              AS preferred_time,
     CASE
-      WHEN (${completedCond})         THEN 'completed'
-      WHEN up.${cols.next_at} < NOW() THEN 'missed'
+      WHEN (${completedCond}) THEN 'completed'
+      WHEN (${missedCond}) THEN 'missed'
       ELSE 'upcoming'
     END                                    AS event_type,
     (${in5HoursCond})                      AS is_upcoming_in_5_hours
@@ -1943,7 +1947,6 @@ function buildUnionQuery(
 
     return { query, params };
 }
-
 
 /**
  * Fetch notifications for a user with optional activity and event filters.
@@ -2141,10 +2144,10 @@ export const rescheduleNotificationService = async (
 
 
     const dbTypeMap: Record<string, string> = {
-        watering:    'watering',
+        watering: 'watering',
         fertilizing: 'fertilizer',
-        pruning:     'pruning',
-        generic:     'generic_care',
+        pruning: 'pruning',
+        generic: 'generic_care',
     };
 
     // If preferred_time > NOW()::time → today is day 1, so add (frequency - 1) days
@@ -2260,4 +2263,41 @@ export const disableNotificationService = async (
          WHERE id = $1 AND user_id = $2`,
         [userPlantId, userId]
     );
+};
+/**
+ * Advances next_at for any overdue (missed), non-completed reminders,
+ * across all activity types, for all users. Meant to run once daily
+ * (e.g. at midnight IST) so a missed reminder only shows as "missed"
+ * for one day before rolling forward to the next cycle.
+ *
+ * Jumps straight to the next future occurrence even if multiple
+ * cycles were missed (e.g. server downtime), rather than advancing
+ * one cycle per run.
+ *
+ * @returns {Promise<void>}
+ */
+export const autoRescheduleMissedNotificationsService = async (): Promise<void> => {
+    const pool = await getDB();
+
+    for (const activity of ALL_ACTIVITY_TYPES) {
+        const cols = getColumns(activity);
+
+        await pool.query(`
+            UPDATE user_plants
+            SET ${cols.next_at} = ${cols.next_at} + (
+                    ${cols.frequency} || ' days'
+                )::interval * CEIL(
+                    EXTRACT(EPOCH FROM (NOW() - ${cols.next_at})) / (${cols.frequency} * 86400)
+                ),
+                updated_at = NOW()
+            WHERE ${cols.enabled} = true
+              AND ${cols.frequency} > 0
+              AND ${cols.next_at} IS NOT NULL
+              AND ${cols.next_at} < NOW()
+              AND NOT (
+                  ${cols.last_at} IS NOT NULL
+                  AND ${cols.last_at} >= (${cols.next_at} - (${cols.frequency} || ' days')::interval)
+              )
+        `);
+    }
 };

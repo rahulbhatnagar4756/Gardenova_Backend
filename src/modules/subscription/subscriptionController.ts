@@ -5,6 +5,7 @@ import { Response } from "express";
 import {  findUserById } from "../auth/authRepository";
 import { error } from "../../core/utils/logger";
 import {   getAllPlansWithDetailService } from "./subscriptionRepository";
+import { AuthUserPayload } from "../../interface/user";
 // import { VerifyPurchaseBody } from "../../interface/subscription";
 // import { getDB } from "../../core/config/db";
 // import { GooglePlayError, verifySubscriptionWithGoogle } from "./googlePlay.service";
@@ -38,9 +39,9 @@ import {   getAllPlansWithDetailService } from "./subscriptionRepository";
  */
 export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): Promise<void> => {
 
-    const userPayload = req.user as { userEmail?: string } | undefined;
+    const userPayload = req.user as AuthUserPayload| undefined;
 
-    if (!userPayload?.userEmail) {
+    if (!userPayload?.userId) {
         res
             .status(HTTP_STATUS.UNAUTHORIZED)
             .json(errorResponse("Unauthorized request"));
@@ -48,7 +49,7 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): P
     }
 
     try {
-        const user = await findUserById(userPayload.userEmail);
+        const user = await findUserById(userPayload.userId!);
         if (!user) {
             await error("Profile retrieval failed - User not found", {
                 email: userPayload.userEmail,
