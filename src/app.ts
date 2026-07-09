@@ -77,8 +77,6 @@ cron.schedule("0 0 * * *", async () => {
 }, {
     timezone: "Asia/Kolkata",
 });
-
-
 // User Authentication Routes
 // createBlogTable()
 startReminderCron();

@@ -15,6 +15,7 @@ export interface IUser {
   password_reset_expires?: Date | null;
   isdeleted?: boolean;
   pending_email?: string | null;
+  razorpay_customer_id?: string | null;
   is_phone_verified?: boolean;
   created_at?: Date;
   updated_at?: Date;

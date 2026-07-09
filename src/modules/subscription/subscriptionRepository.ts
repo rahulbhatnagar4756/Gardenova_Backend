@@ -1,8 +1,10 @@
-import { connectDB } from "../../core/config/db";
+import { connectDB, getDB } from "../../core/config/db";
 import config from "../../core/config/env";
-import { GetAllPlansWithDetailResponse, PlanFields, PlanLimitFields, RazorpayOrder, ServiceResponse, UpdatePlanPayload } from "../../interface/subscription";
+import { GetAllPlansWithDetailResponse, SubscriptionPlan, UserSubscription, VerifySubscriptionBody } from "../../interface/subscription";
 import Razorpay from "razorpay";
-import crypto from "crypto";
+import { findUserById } from "../auth/authRepository";
+import logger from "../../core/config/logger";
+import { verifyCheckoutSignature } from "./razorPay.service";
 
 const razorpay = new Razorpay({
   key_id: config.RAZORPAY_KEY_ID,
@@ -31,549 +33,452 @@ const razorpay = new Razorpay({
  * - `{ success: false, message: "Failed to fetch plans" }`
  */
 export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDetailResponse> => {
-  // Placeholder for actual subscription plan retrieval logic
   const client = await connectDB();
   try {
     const query = `
-            SELECT
-                id,
-                name,
-                tier,
-                billing_period,
-                product_id,
-                price,
-                currency,
-                diagnosis_scans,
-                landscape_gen,
-                max_plants,
-                ai_assistant,
-                hd_renders,
-                pdf_export,
-                premium_styles,
-                before_after_download,
-                basic_reminders
-            FROM subscription_plans
-            WHERE is_active = true
-        `;
+      SELECT
+        id,
+        code,
+        tier,
+        billing_cycle,
+        price_inr,
+        razorpay_plan_id,
+        features
+      FROM subscription_plans
+      WHERE is_active = true
+      ORDER BY price_inr ASC
+    `;
     const result = await client.query(query);
-    const plans = result.rows.map((plan) => ({
-      id: plan.id,
-      name: plan.name,
-      tier: plan.tier,
-      billing_period: plan.billing_period,
-      product_id: plan.product_id,
-      price: plan.price,
-      currency: plan.currency,
-      features: [
-        {
-          key: "diagnosis_scans",
-          label: `${plan.diagnosis_scans} Diagnosis Scans`,
-          enabled: plan.diagnosis_scans > 0
-        },
-        {
-          key: "landscape_gen",
-          label: `${plan.landscape_gen} Landscape Generations`,
-          enabled: plan.landscape_gen > 0
-        },
-        {
-          key: "max_plants",
-          label:
-            plan.max_plants === -1
-              ? "Unlimited Plants"
-              : `${plan.max_plants} Plants`,
-          enabled: plan.max_plants > 0 || plan.max_plants === -1
-        },
-        {
-          key: "ai_assistant",
-          label: "AI Assistant",
-          enabled: plan.ai_assistant
-        },
-        {
-          key: "hd_renders",
-          label: "HD Renders",
-          enabled: plan.hd_renders
-        },
-        {
-          key: "pdf_export",
-          label: "PDF Export",
-          enabled: plan.pdf_export
-        },
-        {
-          key: "premium_styles",
-          label: "Premium Styles",
-          enabled: plan.premium_styles
-        },
-        {
-          key: "before_after_download",
-          label: "Before/After Download",
-          enabled: plan.before_after_download
-        },
-        {
-          key: "basic_reminders",
-          label: "Basic Reminders",
-          enabled: plan.basic_reminders
-        }
-      ]
-    }));
+
+    const plans = result.rows.map((plan) => {
+      const f = plan.features; // JSONB column comes back as parsed JS object already
+
+      return {
+        id: plan.id,
+        code: plan.code,
+        tier: plan.tier,
+        billing_cycle: plan.billing_cycle,
+        price_inr: plan.price_inr,
+        razorpay_plan_id: plan.razorpay_plan_id,
+        features: [
+          {
+            key: "diagnosis_scans",
+            label:
+              f.diagnosis_scans === null
+                ? "Unlimited Diagnosis Scans"
+                : `${f.diagnosis_scans} Diagnosis Scans`,
+            enabled: f.diagnosis_scans === null || f.diagnosis_scans > 0
+          },
+          {
+            key: "landscape_gens",
+            label:
+              f.landscape_gens === null
+                ? "Unlimited Landscape Generations"
+                : `${f.landscape_gens} Landscape Generations`,
+            enabled: f.landscape_gens === null || f.landscape_gens > 0
+          },
+          {
+            key: "saved_plants",
+            label:
+              f.saved_plants === null ? "Unlimited Plants" : `${f.saved_plants} Plants`,
+            enabled: f.saved_plants === null || f.saved_plants > 0
+          },
+          {
+            key: "ai_care_assistant",
+            label: "AI Care Assistant",
+            enabled: f.ai_care_assistant
+          },
+          {
+            key: "hd_renders",
+            label: "HD Renders",
+            enabled: f.hd_renders
+          },
+          {
+            key: "pdf_export",
+            label: "PDF Export",
+            enabled: f.pdf_export
+          },
+          {
+            key: "priority_generation",
+            label: "Priority Generation",
+            enabled: f.priority_generation
+          },
+          {
+            key: "premium_themes",
+            label: "Premium Styles/Themes",
+            enabled: f.premium_themes
+          },
+          {
+            key: "before_after_download",
+            label: "Before/After Comparison Downloads",
+            enabled: f.before_after_download
+          },
+          {
+            key: "priority_support",
+            label: "Priority Support",
+            enabled: f.priority_support
+          },
+          {
+            key: "ad_free",
+            label: "Ad-Free Experience",
+            enabled: f.ad_free
+          }
+        ]
+      };
+    });
+
     return {
       success: true,
       data: plans
     };
-
   } catch (error) {
     console.error("Error fetching plans:", error);
-
     return {
       success: false,
       message: "Failed to fetch plans"
     };
-
   }
-}
-
-const PLAN_COLUMNS = new Set<keyof PlanFields>([
-  'name', 'tier', 'price_monthly', 'price_yearly', 'is_active',
-]);
-
-const PLAN_LIMIT_COLUMNS = new Set<keyof PlanLimitFields>([
-  'scans_per_month', 'landscape_gens_per_month', 'max_saved_plants',
-  'care_reminders', 'ad_free', 'ai_care_assistant', 'hd_renders',
-  'priority_support', 'pdf_export', 'priority_generation',
-  'premium_styles', 'before_after_downloads',
-]);
-
+};
 /**
- * Builds a dynamic SQL SET clause for parameterized queries.
+ * Retrieves an active subscription plan by its unique code.
  *
- * This utility converts a key-value object into a SQL-safe SET clause
- * along with the corresponding parameter values and next parameter index.
- *
- * Example output:
- * - clause: "name = $1, age = $2"
- * - values: ["John", 25]
- *
- * Useful for UPDATE queries where fields are dynamic.
- *
- * @function buildSetClause
- *
- * @param {Record<string, unknown>} fields - Object containing column names as keys
- * and their corresponding values to be updated.
- *
- * @param {number} [startAt=1] - Starting index for SQL parameter placeholders
- * (useful when composing larger queries with existing bindings).
- *
- * @returns {{
- *   clause: string;
- *   values: unknown[];
- *   nextIndex: number;
- * } | null}
- * Returns:
- * - `clause`: SQL SET clause string (e.g., "col1 = $1, col2 = $2")
- * - `values`: Array of values in order of placeholders
- * - `nextIndex`: Next available parameter index after processing
- *
- * Returns `null` if no fields are provided.
- */
-function buildSetClause(
-  fields: Record<string, unknown>,
-  startAt: number = 1,
-): { clause: string; values: unknown[]; nextIndex: number } | null {
-  const entries = Object.entries(fields);
-  if (entries.length === 0) return null;
-
-  const parts: string[] = [];
-  const values: unknown[] = [];
-  let i = startAt;
-
-  for (const [key, value] of entries) {
-    parts.push(`${key} = $${i++}`);
-    values.push(value);
-  }
-
-  return { clause: parts.join(', '), values, nextIndex: i };
-}
-/**
- * Updates a subscription plan and its associated limits in a single transaction.
- *
- * This service:
- * 1. Validates the provided `planId`.
- * 2. Splits incoming update payload into:
- *    - `plans` table fields
- *    - `plan_limits` table fields
- * 3. Ignores unknown fields safely (prevents unsafe SQL injection inputs).
- * 4. Executes both updates inside a single DB transaction.
- * 5. Ensures atomicity using BEGIN / COMMIT / ROLLBACK.
- *
- * If either update fails, the entire transaction is rolled back.
+ * Queries the database for an active subscription plan matching the
+ * provided plan code. Throws an error if no active plan is found.
  *
  * @async
- * @function updatePlanDetailService
+ * @function getPlanByCode
+ * @param {string} planCode - The unique code identifying the subscription plan.
+ * @returns {Promise<SubscriptionPlan>} A promise that resolves to the matching active subscription plan.
  *
- * @param {string} planId - Unique identifier of the subscription plan to update.
- *
- * @param {UpdatePlanPayload} updateData - Partial payload containing fields
- * for either `plans` or `plan_limits` tables.
- *
- * @returns {Promise<ServiceResponse>} Service response object:
- * - `{ success: true, message: string }` on success
- * - `{ success: false, message: string }` on failure or invalid input
- *
- * @remarks
- * - Uses `buildSetClause` to dynamically generate parameterized SQL.
- * - Ensures safe updates by mapping only whitelisted columns.
- * - Unknown fields are ignored and not passed to SQL.
+ * @throws {Error} If no active subscription plan exists for the specified plan code.
  */
-export const updatePlanDetailService = async (
-  planId: string,
-  updateData: UpdatePlanPayload,
-): Promise<ServiceResponse> => {
-  if (!planId) {
-    return { success: false, message: 'planId is required' };
+export const getPlanByCode = async (planCode: string): Promise<SubscriptionPlan> => {
+  const client = await getDB();
+
+  const query = `
+    select * from subscription_plans where code = $1 and is_active = true
+    `;
+  const result = await client.query(query, [planCode]);
+
+  if (result.rows.length === 0) {
+    throw new Error(`No active plan found for code: ${planCode}`);
+  }
+  return result.rows[0];
+}
+/**
+ * Retrieves the default free subscription plan.
+ *
+ * Queries the database for the subscription plan with the code
+ * `free` and returns it.
+ *
+ * @async
+ * @function getFreePlan
+ * @returns {Promise<SubscriptionPlan>} A promise that resolves to the free subscription plan.
+ *
+ * @throws {Error} If a database error occurs while retrieving the plan.
+ */
+async function getFreePlan(): Promise<SubscriptionPlan> {
+  const client = await getDB();
+  const { rows } = await client.query(`SELECT * FROM subscription_plans WHERE code = 'free'`);
+  return rows[0];
+}
+/**
+ * Retrieves a user's subscription along with its associated plan.
+ *
+ * If the user has no subscription or their subscription is not active,
+ * the default free subscription plan is returned instead. The subscription
+ * object is still returned (if it exists), allowing callers to inspect its
+ * current status.
+ *
+ * @async
+ * @function getActiveSubscriptionWithPlan
+ * @param {string} userId - The unique identifier of the user.
+ * @returns {Promise<{ subscription: UserSubscription | null; plan: SubscriptionPlan }>}
+ * A promise that resolves to an object containing:
+ * - `subscription`: The user's subscription, or `null` if none exists.
+ * - `plan`: The active subscription plan or the default free plan.
+ *
+ * @throws {Error} If a database error occurs while retrieving the subscription or plan.
+ */
+export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
+  subscription: UserSubscription | null;
+  plan: SubscriptionPlan;
+}> {
+  const client = await getDB();
+  const { rows } = await client.query(
+    `SELECT us.*, row_to_json(sp.*) AS plan
+     FROM user_subscriptions us
+     JOIN subscription_plans sp ON sp.id = us.plan_id
+     WHERE us.user_id = $1`,
+    [userId]
+  );
+
+  if (rows.length === 0 || rows[0].status !== "active") {
+    // no row, or row exists but not active (cancelled/expired/halted) -> free fallback
+    const plan = await getFreePlan();
+    return { subscription: rows[0] ?? null, plan };
   }
 
-  // ── 1. split payload into per-table buckets ──────────────
-  const planFields: Record<string, unknown> = {};
-  const planLimitFields: Record<string, unknown> = {};
-  const unknownFields: string[] = [];
+  const row = rows[0];
+  return { subscription: row, plan: row.plan };
+}
+/**
+ * Creates a Razorpay subscription for the specified user.
+ *
+ * This service validates the requested subscription plan, ensures the user
+ * exists, creates a Razorpay customer if one does not already exist, creates
+ * a Razorpay subscription, and stores or updates the user's subscription
+ * record in the database with a pending status.
+ *
+ * @async
+ * @function createSubscriptionService
+ * @param {string} userId - The unique identifier of the user.
+ * @param {string} planCode - The code of the subscription plan to subscribe to.
+ * @returns {Promise<{ subscriptionId: string; keyId: string | undefined }>}
+ * A promise that resolves to an object containing:
+ * - `subscriptionId`: The Razorpay subscription ID.
+ * - `keyId`: The Razorpay Key ID used by the client to complete the payment.
+ *
+ * @throws {Error} If:
+ * - The subscription plan does not exist or has no associated Razorpay plan ID.
+ * - The user cannot be found.
+ * - Creating the Razorpay customer or subscription fails.
+ * - Updating the database fails.
+ */
+export const createSubscriptionService = async (userId: string, planCode: string): Promise<{ subscriptionId: string; keyId: string | undefined }> => {
+  const client = await getDB();
 
-  for (const [key, value] of Object.entries(updateData)) {
-    if (PLAN_COLUMNS.has(key as keyof PlanFields)) {
-      planFields[key] = value;
-    } else if (PLAN_LIMIT_COLUMNS.has(key as keyof PlanLimitFields)) {
-      planLimitFields[key] = value;
-    } else {
-      unknownFields.push(key); // ignore unknown — never pass raw input to SQL
-    }
+  const plan = await getPlanByCode(planCode);
+  if (!plan.razorpay_plan_id) {
+    throw new Error(`Plan with code ${planCode} does not have a valid Razorpay plan ID.`);
   }
 
-  if (unknownFields.length > 0) {
-    // console.warn(`[updatePlanDetailService] unknown fields ignored:`, unknownFields);
+
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new Error(`User with ID ${userId} not found.`);
   }
 
-  const hasPlansUpdate = Object.keys(planFields).length > 0;
-  const hasLimitsUpdate = Object.keys(planLimitFields).length > 0;
-
-  if (!hasPlansUpdate && !hasLimitsUpdate) {
-    return { success: false, message: 'No valid fields provided to update' };
+  let customerId = user.razorpay_customer_id as string | null;
+  if (!customerId) {
+    const customer = await razorpay.customers.create({
+      name: user.name,
+      email: user.email ?? undefined,
+      contact: user.phone_number ?? "",
+      notes: { userId },
+    });
+    customerId = customer.id;
+    await client.query(`UPDATE users SET razorpay_customer_id = $1 WHERE id = $2`, [
+      customerId,
+      userId,
+    ]);
   }
 
-  // ── 2. run both updates inside a single transaction ──────
-  const client = await connectDB();
-  try {
-    await client.query('BEGIN');
+  const totalCount = plan.billing_cycle === "yearly" ? 1 : 12;
 
-    // ── 2a. UPDATE plans ──────────────────────────────────
-    if (hasPlansUpdate) {
-      const built = buildSetClause(planFields, 1);
-      if (built) {
-        const { clause, values, nextIndex } = built;
-        await client.query(
-          `UPDATE plans
-           SET    ${clause}, updated_at = now()
-           WHERE  id = $${nextIndex}`,
-          [...values, planId],
-        );
-      }
-    }
 
-    // ── 2b. UPDATE plan_limits ────────────────────────────
-    if (hasLimitsUpdate) {
-      const built = buildSetClause(planLimitFields, 1);
-      if (built) {
-        const { clause, values, nextIndex } = built;
-        await client.query(
-          `UPDATE plan_limits
-           SET    ${clause}
-           WHERE  plan_id = $${nextIndex}`,
-          [...values, planId],
-        );
-      }
-    }
+  const rpSubscription = await razorpay.subscriptions.create({
+    plan_id: plan.razorpay_plan_id,
+    customer_notify: 1,
+    total_count: totalCount,
+    notes: { userId, planCode },
+  });
 
-    await client.query('COMMIT');
-    return { success: true, message: 'Plan updated successfully' };
+  await client.query(
+    `INSERT INTO user_subscriptions (user_id, plan_id, razorpay_subscription_id, razorpay_customer_id, status)
+     VALUES ($1, $2, $3, $4, 'pending')
+     ON CONFLICT (user_id) DO UPDATE
+       SET plan_id = EXCLUDED.plan_id,
+           razorpay_subscription_id = EXCLUDED.razorpay_subscription_id,
+           razorpay_customer_id = EXCLUDED.razorpay_customer_id,
+           status = 'pending',
+           cancel_at_period_end = false,
+           updated_at = now()`,
+    [userId, plan.id, rpSubscription.id, customerId]
+  );
 
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('[updatePlanDetailService] transaction failed:', error);
-    return { success: false, message: 'Failed to update plan' };
-
-  }
-};
-
+  return {
+    subscriptionId: rpSubscription.id,
+    keyId: process.env.RAZORPAY_KEY_ID,
+  };
+}
 
 /**
- * Fetches detailed information for a subscription plan by plan ID.
+ * Verifies a Razorpay subscription payment for a user.
  *
- * This service:
- * - Connects to the database
- * - Retrieves plan information from the `plans` table
- * - Retrieves associated feature limits from the `plan_limits` table
- * - Returns a combined detailed subscription plan object
+ * This service validates the Razorpay checkout signature to ensure the
+ * payment response is authentic, then confirms that the subscription
+ * belongs to the requesting user before marking the verification as
+ * successful.
  *
- * @param planId - Unique identifier of the subscription plan
+ * @async
+ * @function verifySubscriptionPayment
+ * @param {string} userId - The unique identifier of the user attempting to verify the subscription.
+ * @param {VerifySubscriptionBody} body - Razorpay payment verification payload containing payment ID, subscription ID, and signature.
+ * @returns {Promise<{ verified: boolean }>} A promise that resolves with the verification status.
  *
- * @returns Promise resolving to a plan detail response object
- * - success: Indicates whether the operation succeeded
- * - data: Detailed subscription plan information (if found)
- * - message: Error or status message
- *
- * @throws Handles database query errors internally and returns failure response
+ * @throws {Error} If:
+ * - The Razorpay signature verification fails.
+ * - The subscription does not belong to the specified user.
+ * - A database operation fails.
  */
-export const getPlanDetailsByIdServices = async (planId: string): Promise<GetAllPlansWithDetailResponse> => {
-  const client = await connectDB();
-  try {
-    const query = `
-        SELECT
-    p.id AS plan_id,
-    p.name,
-    p.tier,
-    p.price,
-    p.billing_period,
-    p.razorpay_id,
-    p.is_active AS plan_status,
-    
-    pl.scans_per_month,
-    pl.landscape_gens_per_month,
-    pl.max_saved_plants,
-    pl.care_reminders,
-    pl.ad_free,
-    pl.ai_care_assistant,
-    pl.hd_renders,
-    pl.priority_support,
-    pl.pdf_export,
-    pl.priority_generation,
-    pl.premium_styles,
-    pl.before_after_downloads
-    FROM plans p
-    JOIN plan_limits pl
-        ON p.id = pl.plan_id
-    WHERE p.id = $1;
-        `;
-    const result = await client.query(query, [planId]);
+export async function verifySubscriptionPayment(
+  userId: string,
+  body: VerifySubscriptionBody
+): Promise<{ verified: boolean }> {
 
-    if (result.rows.length === 0) {
-      return {
-        success: false,
-        message: "Plan not found"
-      };
-    }
+  const client = await getDB();
 
-    return {
-      success: true,
-      data: result.rows[0] // return single plan details
-    };
-  } catch (error) {
-    console.error("Error fetching plan details:", error);
-    return {
-      success: false,
-      message: "Failed to fetch plan details"
-    };
+  const ok = verifyCheckoutSignature(body);
+  if (!ok) {
+    logger.warn("Razorpay signature mismatch on verify", { userId, body });
+    throw new Error("Signature verification failed");
   }
+  const { rows } = await client.query(
+    `SELECT 1 FROM user_subscriptions WHERE user_id = $1 AND razorpay_subscription_id = $2`,
+    [userId, body.razorpay_subscription_id]
+  );
+  if (rows.length === 0) {
+    throw new Error("Subscription does not belong to this user");
+  }
+  return { verified: true };
+
+}
+
+/**
+ * Retrieves the authenticated user's subscription details along with usage information.
+ *
+ * This service fetches the user's active subscription and associated plan details.
+ * If the user does not have an active paid subscription, the free plan is returned
+ * as a fallback. It also retrieves usage metrics for the current billing cycle.
+ *
+ * @async
+ * @function getMySubscriptionService
+ * @param {string} userId - The unique identifier of the user.
+ * @returns {Promise<{
+ *   plan: {
+ *     code: string;
+ *    tier: "free" | "starter" | "plus" | "pro";
+ *    billing_cycle: "monthly" | "yearly" | null;
+ *    features: {
+ *    diagnosis_scans: number | null;
+ *   landscape_gens: number | null;
+ *  saved_plants: number | null;
+ * ai_care_assistant: boolean;
+ * hd_renders: boolean;
+ * priority_support: boolean;
+ * pdf_export: boolean;
+ * priority_generation: boolean;
+ * premium_themes: boolean;
+ * before_after_download: boolean;
+ * ad_free: boolean;
+ * };
+ *   };
+ *   status: "active" | "pending" | "paused" | "halted" | "cancelled" | "expired";
+ *  current_period_end: Date | null;
+ *  cancel_at_period_end: boolean;
+ *  usage: {
+ *   diagnosis_scans_used: number;
+ *  landscape_gens_used: number;
+ * };
+ * }>} A promise that resolves to an object containing the user's subscription and usage details.
+ * @throws {Error} If a database error occurs while retrieving subscription or usage data.
+ */
+export async function getMySubscriptionService(userId: string): Promise<{
+  plan: {
+    code: string;
+    tier: "free" | "starter" | "plus" | "pro";
+    billing_cycle: "monthly" | "yearly" | null;
+    features: {
+      diagnosis_scans: number | null;
+      landscape_gens: number | null;
+      saved_plants: number | null;
+      ai_care_assistant: boolean;
+      hd_renders: boolean;
+      priority_support: boolean;
+      pdf_export: boolean;
+      priority_generation: boolean;
+      premium_themes: boolean;
+      before_after_download: boolean;
+      ad_free: boolean;
+    };
+  };
+  status: "active" | "pending" | "paused" | "halted" | "cancelled" | "expired";
+  current_period_end: Date | null;
+  cancel_at_period_end: boolean;
+  usage: {
+    diagnosis_scans_used: number;
+    landscape_gens_used: number;
+  };
+}> {
+  const client = await getDB();
+  const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
+
+  const cycleStart = subscription?.current_period_start ?? null;
+  let usage = { diagnosis_scans_used: 0, landscape_gens_used: 0 };
+
+  if (cycleStart) {
+    const { rows } = await client.query(
+      `SELECT diagnosis_scans_used, landscape_gens_used
+       FROM usage_tracking WHERE user_id = $1 AND cycle_start = $2::date`,
+      [userId, cycleStart]
+    );
+    if (rows.length > 0) usage = rows[0];
+  }
+
+  return {
+    plan: {
+      code: plan.code,
+      tier: plan.tier,
+      billing_cycle: plan.billing_cycle,
+      features: plan.features,
+    },
+    status: subscription?.status ?? "active", // free tier is implicitly "active"
+    current_period_end: subscription?.current_period_end ?? null,
+    cancel_at_period_end: subscription?.cancel_at_period_end ?? false,
+    usage,
+  };
 }
 
 
 /**
- * Creates a Razorpay payment order for a subscription plan.
+ * Cancels the authenticated user's active paid subscription.
  *
- * This service:
- * - Creates a new Razorpay order
- * - Converts amount into paise/cents (smallest currency unit)
- * - Stores subscription-related metadata in Razorpay order notes
- * - Returns the generated Razorpay order ID
+ * This service checks the user's current subscription status, prevents
+ * cancellation of free-tier subscriptions, requests Razorpay to cancel
+ * the subscription at the end of the current billing cycle, and updates
+ * the local subscription record to reflect the pending cancellation.
  *
- * @param amount - Subscription/payment amount
- * @param currency - Currency code (e.g. INR, USD)
- * @param billing_period - Subscription billing period (monthly/yearly)
- * @param userId - Unique user ID
- * @param planId - Subscription plan ID
+ * @async
+ * @function cancelSubscriptionService
+ * @param {string} userId - The unique identifier of the user whose subscription should be cancelled.
+ * @returns {Promise<{ cancel_at_period_end: boolean; active_until: Date | null }>}
+ * A promise that resolves to an object indicating:
+ * - `cancel_at_period_end`: true if the subscription is set to cancel at the end of the current cycle.
+ * - `active_until`: the date until which the subscription remains active.
  *
- * @returns Promise resolving to:
- * - success: Indicates whether order creation succeeded
- * - orderId: Razorpay generated order ID (if successful)
- * - message: Error message (if failed)
- *
- * @throws Handles Razorpay API errors internally and returns failure response
  */
-export const createRazorpayOrderService = async (
-  planId: string,
-  userId: string,
-  billing_period: string
-): Promise<{ success: boolean, message?: string, orderId?: string }> => {
-  try {
-    // For simplicity, using fixed amount and currency. In real implementation, fetch plan details to get these values
-    const client = await connectDB();
-    const planResult = await client.query(
-      `SELECT price_monthly, price_yearly FROM plans WHERE razorpay_id = $1`,
-      [planId]
-    );
-    if (planResult.rows.length === 0) {
-      return { success: false, message: "Plan not found" };
-    }
-
-    const razorpaySubscription = await razorpay.subscriptions.create({
-      plan_id: planId,
-      customer_notify: 1,
-      total_count: billing_period === "yearly" ? 12 : 1, // monthly = 1 payment, yearly = 12 payments
-      notes: {
-        userId,
-        planId,
-        billing_period,
-      },
-    });
-
-    return { success: true, orderId: razorpaySubscription.id };
-
-
-
-  } catch (err) {
-    // console.error("Error creating Razorpay order:", err);
-
-    return { success: false, message: `Failed to create Razorpay order error - ${err}` };
+export async function cancelSubscriptionService(userId: string):Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
+  const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
+  const client = await getDB();
+  if (!subscription || !subscription.razorpay_subscription_id) {
+    throw new Error("No active paid subscription to cancel");
   }
-};
-
-
-/**
- * Fetch Razorpay orders with optional user and date filtering.
- *
- * @param userId - Optional user ID to filter orders by notes.userId.
- * @param from - Optional start timestamp.
- * @param to - Optional end timestamp.
- * @param count - Number of orders to fetch.
- * @param skip - Number of orders to skip.
- * @returns Razorpay orders and total count.
- */
-export const getAllRazorpayOrdersService = async (
-  userId?: string,
-  from?: number,
-  to?: number,
-  count: number = 10,
-  skip: number = 0
-): Promise<{
-  success: boolean;
-  orders?: RazorpayOrder[];
-  totalCount?: number;
-  message?: string;
-}> => {
-  try {
-    const params: Record<string, string | number> = {
-      count,
-      skip,
-    };
-
-    if (from) params.from = from;
-    if (to) params.to = to;
-
-    const response = await razorpay.orders.all(params);
-    //  console.log("Fetched Razorpay orders:", response);
-
-    let orders = response.items as RazorpayOrder[];
-
-    // Filter by userId from notes if provided
-    if (userId) {
-      orders = orders.filter((order) => order.notes?.userId === userId);
-    }
-
-    return {
-      success: true,
-      orders,
-      totalCount: response.count,
-    };
-  } catch (err) {
-    console.error("Error fetching Razorpay orders:", err);
-    return { success: false, message: "Failed to fetch Razorpay orders" };
+  if (plan.code === "free") {
+    throw new Error( "Already on the free plan");
   }
-};
-
-/**
- * Verifies a Razorpay payment signature and activates the user's subscription.
- *
- * This service:
- * - Validates Razorpay webhook/payment signature
- * - Supports test bypass mode in non-production environments
- * - Fetches order metadata from Razorpay order notes
- * - Calculates subscription expiration date
- * - Creates or updates the user's active subscription in the database
- *
- * @param razorpay_payment_id - Razorpay payment ID
- * @param razorpay_subscription_id - Razorpay order ID
- * @param razorpay_signature - Razorpay generated payment signature
- *
- * @returns Promise resolving to:
- * - success: Indicates whether payment verification succeeded
- * - message: Verification or error message
- *
- * @throws Error if Razorpay secret key is not configured
- * @throws Handles invalid signatures and missing metadata gracefully
- */
-export const verifyRazorpayPaymentService = async (
-  razorpay_payment_id: string,
-  razorpay_subscription_id: string,
-  razorpay_signature: string
-): Promise<{ success: boolean; message: string }> => {
-
-  // ── Step 1: Guard env var ─────────────────────────────────
-  const secret = config.RAZORPAY_KEY_SECRET;
-  if (!secret) throw new Error("RAZORPAY_KEY_SECRET is not configured");
-
-  // ── Step 2: Test bypass (dev/staging only) ────────────────
-  const isTestBypass =
-    process.env.NODE_ENV !== "production" &&
-    razorpay_signature === "test_bypass";
-
-  if (!isTestBypass) {
-    const body = razorpay_payment_id + "|" + razorpay_subscription_id;
-    const expectedSignature = crypto
-      .createHmac("sha256", secret)
-      .update(body)
-      .digest("hex");
-
-    if (expectedSignature !== razorpay_signature) {
-      return { success: false, message: "Invalid payment signature" };
-    }
-  }
-
-  // ── Step 3: Fetch order notes from Razorpay ───────────────
-  const order = await razorpay.subscriptions.fetch(razorpay_subscription_id);
-  const { userId, planId, billing_period } = order.notes as {
-    userId: string;
-    planId: string;
-    billing_period: string;
-  };
-
-  if (!userId || !planId || !billing_period) {
-    return { success: false, message: "Order is missing required metadata" };
-  }
-
-  // ── Step 4: Calculate expires_at ─────────────────────────
-  const now = new Date();
-  const expires_at = new Date(now);
-
-  if (billing_period === "yearly") {
-    expires_at.setFullYear(expires_at.getFullYear() + 1);
-  } else {
-    expires_at.setMonth(expires_at.getMonth() + 1);
-  }
-
-  // ── Step 5: Upsert subscription via shared pool ───────────
-  const pool = await connectDB();
-  await pool.query(
-    `INSERT INTO subscriptions
-        (user_id, plan_id, billing_period, status, started_at, expires_at)
-     VALUES
-        ($1, $2, $3, 'active', now(), $4)
-     ON CONFLICT ON CONSTRAINT uq_user_active_sub
-     DO UPDATE SET
-       plan_id        = EXCLUDED.plan_id,
-       billing_period = EXCLUDED.billing_period,
-       status         = 'active',
-       started_at     = now(),
-       expires_at     = EXCLUDED.expires_at,
-       updated_at     = now()
-     RETURNING *`,
-    [userId, planId, billing_period, expires_at]
+ 
+  // cancel_at_cycle_end = 1 -> user keeps access till current_period_end, then falls back to free
+  await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id, {
+    cancel_at_cycle_end: 1,
+  } as any);//eslint-disable-line @typescript-eslint/no-explicit-any
+ 
+  await client.query(
+    `UPDATE user_subscriptions SET cancel_at_period_end = true, updated_at = now()
+     WHERE user_id = $1`,
+    [userId]
   );
-
-  return { success: true, message: "Payment verified and subscription activated" };
-};
+ 
+  return { cancel_at_period_end: true, active_until: subscription.current_period_end };
+}
+ 

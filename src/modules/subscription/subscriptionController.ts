@@ -1,11 +1,15 @@
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import { errorResponse, successResponse } from "../../core/utils/responseFormatter";
 import { AuthRequest } from "../../interface/auth";
-import { Response } from "express";
-import {  findUserById } from "../auth/authRepository";
+import { findUserById } from "../auth/authRepository";
 import { error } from "../../core/utils/logger";
-import {   getAllPlansWithDetailService } from "./subscriptionRepository";
+import { cancelSubscriptionService, createSubscriptionService, getAllPlansWithDetailService, getMySubscriptionService, verifySubscriptionPayment } from "./subscriptionRepository";
 import { AuthUserPayload } from "../../interface/user";
+import { Response, NextFunction } from "express";
+import logger from "../../core/config/logger";
+import { verifyWebhookSignature } from "./razorPay.service";
+import { handleSubscriptionEvent, recordWebhookEvent } from "./webhook.service";
+
 // import { VerifyPurchaseBody } from "../../interface/subscription";
 // import { getDB } from "../../core/config/db";
 // import { GooglePlayError, verifySubscriptionWithGoogle } from "./googlePlay.service";
@@ -39,7 +43,7 @@ import { AuthUserPayload } from "../../interface/user";
  */
 export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): Promise<void> => {
 
-    const userPayload = req.user as AuthUserPayload| undefined;
+    const userPayload = req.user as AuthUserPayload | undefined;
 
     if (!userPayload?.userId) {
         res
@@ -86,160 +90,257 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): P
     }
     // next();
 }
-// export const verifyPurchase=async(
-//   req: AuthRequest,
-//   res: Response
-// ):Promise<void>=> {
-//   const { purchaseToken, productId, packageName } =
-//     req.body as VerifyPurchaseBody;
 
-//   const userId = req.user as { userId?: string } | undefined;
+/**
+ * Creates a new subscription for the authenticated user.
+ *
+ * This endpoint validates the authenticated user and the provided
+ * subscription plan code before creating a subscription. It returns
+ * the created subscription details on success.
+ *
+ * @async
+ * @function createSubscription
+ * @param {AuthRequest} req - Express request object containing the authenticated user and request body.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express middleware callback.
+ * @returns {Promise<void>} Resolves when the subscription creation process is complete.
+ *
+ * @throws {401} If the user is not authenticated.
+ * @throws {400} If the `planCode` is missing from the request body.
+ * @throws {500} If an unexpected error occurs while creating the subscription.
+ */
+export const createSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    const userPayload = req.user as AuthUserPayload | undefined;
 
-//   try {
-//     // 1. Input validation
-//     if (!purchaseToken || !productId || !packageName) {
-//        res.status(400).json({
-//         error: "MISSING_FIELDS",
-//         message:
-//           "purchaseToken, productId, and packageName are required",
-//       });
-//       return;
-//     }
-//     const db = await getDB();
-//     // 2. Check if purchase token already processed
-//     const existingResult = await db.query(
-//       `
-//       SELECT
-//         us.*,
-//         p.tier,
-//         p.billing_period
-//       FROM user_subscriptions us
-//       LEFT JOIN plans p
-//         ON p.id = us.plan_id
-//       WHERE us.purchase_token = $1
-//       LIMIT 1
-//       `,
-//       [purchaseToken]
-//     );
+    if (!userPayload?.userId) {
+        res
+            .status(HTTP_STATUS.UNAUTHORIZED)
+            .json(errorResponse("Unauthorized request"));
+        return;
+    }
 
-//     const existing = existingResult.rows[0];
+    const { planCode } = req.body;
+    if (!planCode) {
+        res
+            .status(HTTP_STATUS.BAD_REQUEST)
+            .json(errorResponse("planCode is required"));
+        return;
+    }
+    try {
+        const result = await createSubscriptionService(userPayload.userId!, planCode);
+        res.status(HTTP_STATUS.OK).json(successResponse(result, "Subscription created successfully"));
+    } catch (err) {
+        await error("Error creating subscription", {
+            email: userPayload.userEmail,
+            action: "createSubscription",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while creating subscription"));
+    }
+    next();
 
-//     if (existing && existing.status === "active") {
-//        res.status(200).json({
-//         success: true,
-//         message: "Subscription already active",
-//         tier: existing.tier,
-//         billingPeriod: existing.billing_period,
-//         expiryDate: existing.expiry_date,
-//         alreadyProcessed: true,
-//       });
-//       return;
-//     }
 
-//     // 3. Verify with Google Play
-//     let googleData;
+}
+/**
+ * Verifies the payment for a Razorpay subscription.
+ *
+ * This endpoint validates the authenticated user and the required
+ * Razorpay payment details, then verifies the subscription payment
+ * signature and updates the subscription status accordingly.
+ *
+ * @async
+ * @function verifySubscription
+ * @param {AuthRequest} req - Express request object containing the authenticated user and Razorpay payment details.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express middleware callback.
+ * @returns {Promise<void>} Resolves when the subscription verification process is complete.
+ *
+ * @throws {401} If the user is not authenticated.
+ * @throws {400} If any required Razorpay payment fields are missing.
+ * @throws {500} If an unexpected error occurs while verifying the subscription.
+ */
+export const verifySubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const userPayload = req.user as AuthUserPayload | undefined;
 
-//     try {
-//       googleData = await verifySubscriptionWithGoogle(
-//         packageName,
-//         productId,
-//         purchaseToken
-//       );
-//     } catch (err) {
-//       if (err instanceof GooglePlayError) {
-//         if (
-//           err.code === "INVALID_TOKEN" ||
-//           err.code === "NOT_FOUND"
-//         ) {
-//            res.status(400).json({
-//             error: err.code,
-//             message: err.message,
-//           });
-//           return;
-//         }
+        if (!userPayload?.userId) {
+            res
+                .status(HTTP_STATUS.UNAUTHORIZED)
+                .json(errorResponse("Unauthorized request"));
+            return;
+        }
 
-//         if (err.code === "TOKEN_EXPIRED") {
-//            res.status(400).json({
-//             error: "TOKEN_EXPIRED",
-//             message:
-//               "This purchase has already expired",
-//           });
-//           return;
-//         }
+        const { razorpay_payment_id, razorpay_subscription_id, razorpay_signature } = req.body;
 
-//          res.status(502).json({
-//           error: "GOOGLE_API_UNAVAILABLE",
-//           message:
-//             "Could not verify with Google Play",
-//         });
-//         return;
-//       }
+        if (!razorpay_payment_id || !razorpay_subscription_id || !razorpay_signature) {
+            res.status(400).json({ error: "Missing required fields" });
+            return;
+        }
+        const result = await verifySubscriptionPayment(userPayload.userId, {
+            razorpay_payment_id,
+            razorpay_subscription_id,
+            razorpay_signature,
+        });
+        res.status(HTTP_STATUS.OK).json(successResponse(result, "Subscription verified successfully"));
+    } catch (err) {
+        await error("Error verifying subscription", {
+            action: "verifySubscription",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while verifying subscription"));
 
-//       throw err;
-//     }
+    }
+    next();
+}
+/**
+ * Retrieves the authenticated user's current subscription details.
+ *
+ * This endpoint validates the authenticated user and returns
+ * the user's active or latest subscription information.
+ *
+ * @async
+ * @function getMySubscription
+ * @param {AuthRequest} req - Express request object containing the authenticated user.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express middleware callback.
+ * @returns {Promise<void>} Resolves when the subscription retrieval process is complete.
+ *
+ * @throws {401} If the user is not authenticated.
+ * @throws {500} If an unexpected error occurs while fetching the subscription.
+ */
+export const getMySubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const userPayload = req.user as AuthUserPayload | undefined;
 
-//     // 4. Validate payment state
-//     if (googleData.paymentState === 0) {
-//        res.status(402).json({
-//         error: "PAYMENT_PENDING",
-//         message:
-//           "Payment is still being processed. Please try again later.",
-//       });
-//       return;
-//     }
+        if (!userPayload?.userId) {
+            res
+                .status(HTTP_STATUS.UNAUTHORIZED)
+                .json(errorResponse("Unauthorized request"));
+            return;
+        }
 
-//     if (
-//       googleData.paymentState !== 1 &&
-//       googleData.paymentState !== 2
-//     ) {
-//        res.status(400).json({
-//         error: "PAYMENT_NOT_CONFIRMED",
-//         message: "Payment not confirmed by Google",
-//       });
-//       return;
-//     }
+        const result = await getMySubscriptionService(userPayload.userId!);
+        res.status(HTTP_STATUS.OK).json(successResponse(result, "User subscription retrieved successfully"));
 
-//     // 5. Block test purchases in production
-//     if (
-//       googleData.purchaseType === 0 &&
-//       process.env.NODE_ENV === "production"
-//     ) {
-//        res.status(400).json({
-//         error: "TEST_PURCHASE",
-//         message:
-//           "Test purchases are not allowed in production",
-//       });
-//       return;
-//     }
+    } catch (err) {
+        await error("Error fetching user subscription", {
+            action: "getMySubscription",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while fetching user subscription"));
+    }
+    next();
+}
 
-//     // 6. Activate subscription
-//     const { subscription, plan } =
-//       await activateSubscription(
-//         userId,
-//         googleData,
-//         purchaseToken,
-//         productId,
-//         packageName
-//       );
+/**
+ * Cancels the authenticated user's active subscription.
+ *
+ * This endpoint validates the authenticated user and cancels
+ * their active subscription. The cancellation is processed
+ * through the subscription service and the updated subscription
+ * status is returned on success.
+ *
+ * @async
+ * @function cancelSubscription
+ * @param {AuthRequest} req - Express request object containing the authenticated user.
+ * @param {Response} res - Express response object used to send the API response.
+ * @param {NextFunction} next - Express middleware callback.
+ * @returns {Promise<void>} Resolves when the subscription cancellation process is complete.
+ *
+ * @throws {401} If the user is not authenticated.
+ * @throws {500} If an unexpected error occurs while cancelling the subscription.
+ */
+export const cancelSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const userPayload = req.user as AuthUserPayload | undefined;
 
-//      res.status(200).json({
-//       success: true,
-//       tier: plan.tier,
-//       billingPeriod: plan.billing_period,
-//       status: subscription.status,
-//       expiryDate: subscription.expiry_date,
-//       isTrial: googleData.paymentState === 2,
-//       autoRenew: googleData.autoRenewing,
-//     });
-    
-//   } catch (error) {
-//     console.error("verifyPurchase error:", error);
+        if (!userPayload?.userId) {
+            res
+                .status(HTTP_STATUS.UNAUTHORIZED)
+                .json(errorResponse("Unauthorized request"));
+            return;
+        }
+        const result = await cancelSubscriptionService(userPayload.userId!);
 
-//      res.status(500).json({
-//       error: "INTERNAL_SERVER_ERROR",
-//       message:
-//         "Something went wrong while verifying the purchase",
-//     });
-//     return; 
-//   }
-// }
+        res.status(HTTP_STATUS.OK).json(successResponse(result, "User subscription cancelled successfully"));
+
+    } catch (err) {
+        await error("Error cancelling user subscription", {
+            action: "cancelSubscription",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while cancelling user subscription"));
+    }
+    next();
+
+
+}
+
+/**
+ * Processes incoming Razorpay webhook events.
+ *
+ * This endpoint validates the Razorpay webhook signature, ensures the
+ * event has not already been processed (idempotency), and handles
+ * supported subscription-related webhook events.
+ *
+ * @async
+ * @function razorpayWebhook
+ * @param {AuthRequest} req - Express request object containing the raw webhook payload as a Buffer.
+ * @param {Response} res - Express response object used to acknowledge the webhook request.
+ * @param {NextFunction} next - Express middleware callback.
+ * @returns {Promise<void>} Resolves when the webhook has been validated and processed.
+ *
+ * @throws {400} If the webhook signature is missing or invalid.
+ * @throws {500} If an unexpected error occurs while processing the webhook.
+ */
+export const razorpayWebhook = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const signature = req.headers["x-razorpay-signature"] as string | undefined;
+        if (!signature) {
+            res.status(400).send("missing signature");
+            return;
+        }
+
+
+        const isValid = verifyWebhookSignature(req.body, signature); // req.body is Buffer here
+        if (!isValid) {
+            logger.warn("Invalid Razorpay webhook signature");
+            res.status(400).send("invalid signature");
+            return;
+        }
+
+        const payload = JSON.parse(req.body.toString("utf8"));
+
+        const isFresh = await recordWebhookEvent(payload);
+        if (!isFresh) {
+            // already processed this exact event, Razorpay retried delivery — ack and exit
+            res.status(200).send("already processed");
+            return;
+        }
+
+        await handleSubscriptionEvent(payload);
+        res.status(HTTP_STATUS.OK).json(successResponse(null, "Webhook processed successfully"));
+    } catch (err) {
+        await error("Error processing Razorpay webhook", {
+            action: "razorpayWebhook",
+            req,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse("An error occurred while processing Razorpay webhook"));
+    }
+    next();
+}
