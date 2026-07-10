@@ -305,14 +305,13 @@ export const cancelSubscription = async (req: AuthRequest, res: Response, next: 
  * @throws {400} If the webhook signature is missing or invalid.
  * @throws {500} If an unexpected error occurs while processing the webhook.
  */
-export const razorpayWebhook = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const razorpayWebhook = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const signature = req.headers["x-razorpay-signature"] as string | undefined;
         if (!signature) {
             res.status(400).send("missing signature");
             return;
         }
-
 
         const isValid = verifyWebhookSignature(req.body, signature); // req.body is Buffer here
         if (!isValid) {
@@ -332,15 +331,16 @@ export const razorpayWebhook = async (req: AuthRequest, res: Response, next: Nex
 
         await handleSubscriptionEvent(payload);
         res.status(HTTP_STATUS.OK).json(successResponse(null, "Webhook processed successfully"));
+        // no next() here — response already sent, nothing left for downstream middleware to do
     } catch (err) {
+        console.error("RAW WEBHOOK ERROR:", err); // temporary debug line
         await error("Error processing Razorpay webhook", {
             action: "razorpayWebhook",
             req,
             error: err instanceof Error ? err.message : String(err),
         });
-        res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse("An error occurred while processing Razorpay webhook"));
+        if (!res.headersSent) {
+            res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(errorResponse("An error occurred while processing Razorpay webhook"));
+        }
     }
-    next();
 }

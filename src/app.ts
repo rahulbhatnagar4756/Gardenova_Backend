@@ -64,8 +64,12 @@ const corsOptions = {
 app.use(detailedLogger);
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: "200mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  if (req.originalUrl === "/api/v1/plans/webhooks/razorpay") {
+    return next();
+  }
+  express.json({ limit: "200mb" })(req, res, next);
+});app.use(express.urlencoded({ extended: true }));
 // app.use(translationMiddleware()); // enable translation globally
 
 cron.schedule("0 0 * * *", async () => {
