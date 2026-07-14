@@ -96,6 +96,27 @@ export const getCurrentUserProfile = async (
     );
     const responseId = answerResponse.rows[0]?.response_id ?? null;
 
+    // ── subscription details ──
+    const { rows: subscriptionRows } = await client.query(
+      `
+      SELECT
+        us.plan_id,
+        sp.code   AS plan_code,
+        sp.tier   AS plan_tier,
+        us.status,
+        us.current_period_start,
+        us.current_period_end
+      FROM user_subscriptions us
+      JOIN subscription_plans sp ON sp.id = us.plan_id
+      WHERE us.user_id = $1
+      ORDER BY us.created_at DESC
+      LIMIT 1
+      `,
+      [user.id]
+    );
+
+    const subscription = subscriptionRows[0] ?? null;
+
     const baseUrl = env.APPDEV_URL || `${req.protocol}://${req.get("host")}`;
 
     const fullProfile: IFullUserProfile = {
@@ -125,6 +146,20 @@ export const getCurrentUserProfile = async (
       occupation: userProfile?.occupation ?? null,
       company: userProfile?.company ?? null,
       responseId,
+
+      subscription: subscription
+        ? {
+            planId: subscription.plan_id,
+            planName: subscription.plan_tier ?? subscription.plan_code ?? null,
+            status: subscription.status,
+            startedAt: subscription.current_period_start
+              ? new Date(subscription.current_period_start).toISOString()
+              : null,
+            expiresAt: subscription.current_period_end
+              ? new Date(subscription.current_period_end).toISOString()
+              : null,
+          }
+        : null,
     };
 
     res.status(HTTP_STATUS.OK).json(successResponse(fullProfile, "User profile retrieved successfully"));
@@ -144,7 +179,6 @@ export const getCurrentUserProfile = async (
     next(errorObj);
   }
 };
-
 /**
  * Updates the authenticated user's profile.
  *

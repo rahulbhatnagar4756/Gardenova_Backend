@@ -20,6 +20,13 @@ export interface IFullUserProfile {
   occupation: string | null;
   company: string | null;
   responseId?: string | null; // ✅ added responseId to the full profile interface
+  subscription: {
+    planId: string | null;
+    planName: string | null;
+    status: string | null;
+    startedAt: string | null;
+    expiresAt: string | null;
+  } | null;
 }
 
 export interface IUserProfile {
