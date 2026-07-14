@@ -123,6 +123,7 @@ app.use("/api/v1/reminders",reminderRoutes);
 app.use("/api/v1/blogs", blogRouter);
 
 app.use("/api/v1/contact", contactRoutes);
+app.use("/",blogRouter);
 // registerBlockExpiredTrialsCron();
 app.use(errorHandler);
 

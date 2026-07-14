@@ -130,17 +130,21 @@ export const createSubscription = async (req: AuthRequest, res: Response, next: 
         const result = await createSubscriptionService(userPayload.userId!, planCode);
         res.status(HTTP_STATUS.OK).json(successResponse(result, "Subscription created successfully"));
     } catch (err) {
-        await error("Error creating subscription", {
-            email: userPayload.userEmail,
-            action: "createSubscription",
-            req,
-            error: err instanceof Error ? err.message : String(err),
-        });
-        res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse("An error occurred while creating subscription"));
+        console.error("Error creating subscription:", err); // temporary debug line
+        if (HTTP_STATUS.INTERNAL_SERVER_ERROR) {
+            await error("Error creating subscription", {
+                email: userPayload.userEmail,
+                action: "createSubscription",
+                req,
+                error: err instanceof Error ? err.message : String(err),
+            });
+            res
+                .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+                .json(errorResponse("An error occurred while creating subscription"));
+        }
+         next();
     }
-    next();
+   
 
 
 }

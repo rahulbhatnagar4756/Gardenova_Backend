@@ -8,6 +8,7 @@ import {
   getBlogBySlug,
   updateBlog,
   deleteBlog,
+  getSitemapXml,
 } from "./blog.controller";
 /**
  * Configures local disk storage for blog image uploads.
@@ -116,6 +117,10 @@ const fields = upload.fields([
 
 const router = Router();
 
+
+router.get("/sitemap.xml", getSitemapXml);
+
+
 /**
  * @swagger
  * /api/blog:
@@ -223,7 +228,7 @@ router.get("/", getAllBlogs);
 router.get("/:slug", getBlogBySlug);
 
 
-router.put(   "/:id",    fields, updateBlog);
+router.put("/:id",    fields, updateBlog);
 router.delete("/:id",            deleteBlog);
 
 export default router;

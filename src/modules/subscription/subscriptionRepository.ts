@@ -66,7 +66,7 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
             label:
               f.diagnosis_scans === null
                 ? "Unlimited Diagnosis Scans"
-                : `${f.diagnosis_scans} Diagnosis Scans`,
+                : `${f.diagnosis_scans} Diagnosis Scans per months`,
             enabled: f.diagnosis_scans === null || f.diagnosis_scans > 0
           },
           {
@@ -74,7 +74,7 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
             label:
               f.landscape_gens === null
                 ? "Unlimited Landscape Generations"
-                : `${f.landscape_gens} Landscape Generations`,
+                : `${f.landscape_gens} Landscape Generations per months`,
             enabled: f.landscape_gens === null || f.landscape_gens > 0
           },
           {
@@ -258,7 +258,7 @@ export const createSubscriptionService = async (userId: string, planCode: string
   if (!user) {
     throw new Error(`User with ID ${userId} not found.`);
   }
-
+  
   let customerId = user.razorpay_customer_id as string | null;
   if (!customerId) {
     const customer = await razorpay.customers.create({

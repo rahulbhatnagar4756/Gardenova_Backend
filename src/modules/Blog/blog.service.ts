@@ -1,5 +1,5 @@
 import slugify from "slugify";
-import { connectDB } from "../../core/config/db";
+import { connectDB, getDB } from "../../core/config/db";
 
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -539,3 +539,32 @@ export async function deleteBlogPost(id: number):Promise<{ id: number } | null> 
   );
   return rows[0] ?? null;
 }
+
+
+export interface BlogSlugRow {
+  slug: string;
+  updated_at: Date | string;
+}
+/**
+ * Retrieves all published blog post slugs from the database.
+ *
+ * The results are ordered by the most recently updated posts first.
+ *
+ * @async
+ * @function getPublishedBlogSlugs
+ * @returns {Promise<BlogSlugRow[]>} A promise that resolves to an array of
+ * published blog slugs and their corresponding last updated timestamps.
+ * @throws {Error} Throws an error if the database connection or query fails.
+ */
+export const getPublishedBlogSlugs = async (): Promise<BlogSlugRow[]> => {
+  const pool = await getDB()
+  const query = `
+    SELECT slug, updated_at
+    FROM blog_posts
+    WHERE status = 'published'
+    ORDER BY updated_at DESC
+  `;
+  const { rows } = await pool.query<BlogSlugRow>(query);
+  // console.log("Fetched slugs:", rows.map(row => row.slug));
+  return rows;
+};
