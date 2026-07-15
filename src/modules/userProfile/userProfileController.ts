@@ -97,6 +97,23 @@ export const getCurrentUserProfile = async (
     const responseId = answerResponse.rows[0]?.response_id ?? null;
 
     // ── subscription details ──
+    // const { rows: subscriptionRows } = await client.query(
+    //   `
+    //   SELECT
+    //     us.plan_id,
+    //     sp.code   AS plan_code,
+    //     sp.tier   AS plan_tier,
+    //     us.status,
+    //     us.current_period_start,
+    //     us.current_period_end
+    //   FROM user_subscriptions us
+    //   JOIN subscription_plans sp ON sp.id = us.plan_id
+    //   WHERE us.user_id = $1
+    //   ORDER BY us.created_at DESC
+    //   LIMIT 1
+    //   `,
+    //   [user.id]
+    // );
     const { rows: subscriptionRows } = await client.query(
       `
       SELECT
@@ -109,9 +126,10 @@ export const getCurrentUserProfile = async (
       FROM user_subscriptions us
       JOIN subscription_plans sp ON sp.id = us.plan_id
       WHERE us.user_id = $1
+        AND us.status = 'active'
       ORDER BY us.created_at DESC
       LIMIT 1
-      `,
+  `,
       [user.id]
     );
 
@@ -149,16 +167,16 @@ export const getCurrentUserProfile = async (
 
       subscription: subscription
         ? {
-            planId: subscription.plan_id,
-            planName: subscription.plan_tier ?? subscription.plan_code ?? null,
-            status: subscription.status,
-            startedAt: subscription.current_period_start
-              ? new Date(subscription.current_period_start).toISOString()
-              : null,
-            expiresAt: subscription.current_period_end
-              ? new Date(subscription.current_period_end).toISOString()
-              : null,
-          }
+          planId: subscription.plan_id,
+          planName: subscription.plan_code ?? subscription.plan_tier ?? null,
+          status: subscription.status,
+          startedAt: subscription.current_period_start
+            ? new Date(subscription.current_period_start).toISOString()
+            : null,
+          expiresAt: subscription.current_period_end
+            ? new Date(subscription.current_period_end).toISOString()
+            : null,
+        }
         : null,
     };
 

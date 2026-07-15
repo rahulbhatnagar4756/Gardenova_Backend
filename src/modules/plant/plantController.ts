@@ -18,6 +18,7 @@ import { CustomError } from "../../interface/Error";
 import { IUser } from "../../interface/user";
 import { identifyPlantService } from "./plantRepository";
 import { AuthRequest } from "../../interface/auth";
+import { checkAndConsumeUsage } from "../../core/utils/planLimits";
 
 /**
  * AUTH + ROLE CHECK HELPER (ADMIN ONLY)
@@ -30,24 +31,24 @@ const validateAdminUser = async (
   res: Response
 ): Promise<IUser | null> => {
   const userPayload = req.user as
-    | { userEmail?: string; role?: string }
+    | { userEmail?: string; role?: string;userId?: string }
     | undefined;
 
-  if (!userPayload?.userEmail) {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized request"));
-    return null;
-  }
+  // if (!userPayload?.userId) {
+  //   res
+  //     .status(HTTP_STATUS.UNAUTHORIZED)
+  //     .json(errorResponse("Unauthorized request"));
+  //   return null;
+  // }
 
-  const user = await findUserByEmail(userPayload.userEmail);
+  const user = await findUserByEmail(userPayload?.userId!);
 
   if (!user) {
     res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
     return null;
   }
   const allowedRoles = ["Admin", "User"];
-  if (!allowedRoles.includes(userPayload.role!)) {
+  if (!allowedRoles.includes(userPayload?.role!)) {
     res
       .status(HTTP_STATUS.UNAUTHORIZED)
       .json(errorResponse("Unauthorized Role"));
@@ -315,7 +316,7 @@ export const diagnosePlantController = async (
     | { userEmail?: string; role?: string; userId?: string }
     | undefined;
 
-  if (!userPayload?.userEmail) {
+  if (!userPayload?.userId) {
     res
       .status(HTTP_STATUS.UNAUTHORIZED)
       .json(errorResponse("Unauthorized request"));
@@ -336,12 +337,28 @@ export const diagnosePlantController = async (
     return;
   }
   try {
+    // ── plan-based monthly limit check ──
+    const usage = await checkAndConsumeUsage(user.id!, "diagnosis");
+
+    if (!usage.allowed) {
+      res
+        .status(HTTP_STATUS.FORBIDDEN)
+        .json(
+          errorResponse(
+            `Monthly diagnosis scan limit reached (${usage.limit}). Upgrade your plan to continue.`
+          )
+        );
+      return;
+    }
+
+    
+
     const apiResponse = await identifyPlantService(req.body);
 
     // if(apiResponse.status === 200){
     res
       .status(HTTP_STATUS.OK)
-      .json(successResponse(apiResponse, "Plant diagnosed successfully"));
+      .json(successResponse( apiResponse,"Plant diagnosed successfully"));
     // }
 
   } catch (error: unknown) {

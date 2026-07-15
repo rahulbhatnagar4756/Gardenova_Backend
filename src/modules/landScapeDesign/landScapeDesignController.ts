@@ -1,6 +1,9 @@
 import { AuthRequest } from "../../interface/auth";
 import { Response, NextFunction } from "express";
 import { processDesign } from "./landScapeDesignService";
+import { checkAndConsumeUsage } from "../../core/utils/planLimits";
+import { HTTP_STATUS } from "../../core/utils/constants";
+import { errorResponse } from "../../core/utils/responseFormatter";
 
 
 /**
@@ -29,6 +32,7 @@ import { processDesign } from "./landScapeDesignService";
  * @throws Returns 500 if processing fails
  */
 export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    const userPayload = req.user as { userId: string }; // Assuming userId is stored in the JWT payload
     try {
         const { image_base64, prefs } = req.body;
         if (!image_base64) {
@@ -38,6 +42,19 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
             });
             return;
         }
+         const usage = await checkAndConsumeUsage(userPayload.userId, "landscape");
+
+    if (!usage.allowed) {
+      res
+        .status(HTTP_STATUS.FORBIDDEN)
+        .json(
+          errorResponse(
+            `Monthly landscape generation limit reached (${usage.limit}). Upgrade your plan to continue.`
+          )
+        );
+      return;
+    }
+
         const result = await processDesign({
             image_base64,
             prefs
