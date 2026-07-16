@@ -30,7 +30,7 @@ interface RazorpayWebhookPayload {
 export async function recordWebhookEvent(payload: RazorpayWebhookPayload): Promise<boolean> {
   const subscriptionEntity = payload.payload?.subscription?.entity;
   const eventId = `${subscriptionEntity?.id ?? "no-sub"}:${payload.event}:${payload.created_at}`;
-    const db = await getDB();
+  const db = await getDB();
   const { rowCount } = await db.query(
     `INSERT INTO razorpay_webhook_events (event_id, event_type, payload)
      VALUES ($1, $2, $3)
@@ -72,13 +72,13 @@ export async function handleSubscriptionEvent(payload: RazorpayWebhookPayload): 
       break;
 
     case "subscription.activated":
-      await activateSubscription(sub.id, sub.current_start, sub.current_end);
+      await activateSubscription(sub.id, sub.plan_id, sub.current_start, sub.current_end);
       break;
 
     case "subscription.charged":
-      await activateSubscription(sub.id, sub.current_start, sub.current_end);
-      await resetUsageCycle(sub.id, sub.current_start);
-      break;
+  await activateSubscription(sub.id, sub.plan_id, sub.current_start, sub.current_end);
+  await resetUsageCycle(sub.id, sub.current_start);
+  break;
 
     case "subscription.pending":
       await setStatus(sub.id, "pending");
@@ -113,24 +113,44 @@ export async function handleSubscriptionEvent(payload: RazorpayWebhookPayload): 
  * @async
  * @function activateSubscription
  * @param {string} razorpaySubId - The Razorpay subscription ID associated with the user subscription.
+ * @param razorpayPlanId
  * @param {number} periodStartUnix - The subscription period start timestamp in Unix format.
  * @param {number} periodEndUnix - The subscription period end timestamp in Unix format.
  * @returns {Promise<void>} Resolves when the subscription has been activated.
  *
  * @throws {Error} If a database error occurs while updating the subscription.
  */
-async function activateSubscription(razorpaySubId: string, periodStartUnix: number, periodEndUnix: number):Promise<void> {
-    const db = await getDB();
+async function activateSubscription(
+  razorpaySubId: string,
+  razorpayPlanId: string,
+  periodStartUnix: number,
+  periodEndUnix: number
+): Promise<void> {
+  const db = await getDB();
+
+  const { rows: planRows } = await db.query(
+    `SELECT id FROM subscription_plans WHERE razorpay_plan_id = $1`,
+    [razorpayPlanId]
+  );
+
   await db.query(
     `UPDATE user_subscriptions
      SET status = 'active',
-         current_period_start = to_timestamp($1),
-         current_period_end = to_timestamp($2),
+         plan_id = COALESCE($1, plan_id),
+         pending_plan_id = NULL,
+         current_period_start = to_timestamp($2),
+         current_period_end = to_timestamp($3),
          cancel_at_period_end = false,
          updated_at = now()
-     WHERE razorpay_subscription_id = $3`,
-    [periodStartUnix, periodEndUnix, razorpaySubId]
+     WHERE razorpay_subscription_id = $4`,
+    [planRows[0]?.id ?? null, periodStartUnix, periodEndUnix, razorpaySubId]
   );
+
+  if (planRows.length === 0) {
+    logger.warn(`No local plan found for razorpay_plan_id=${razorpayPlanId}, plan_id not synced`, {
+      razorpaySubId,
+    });
+  }
 }
 /**
  * Updates the status of a user subscription.
@@ -147,8 +167,8 @@ async function activateSubscription(razorpaySubId: string, periodStartUnix: numb
  *
  * @throws {Error} If a database error occurs while updating the subscription status.
  */
-async function setStatus(razorpaySubId: string, status: string):Promise<void> {
-    const db = await getDB();
+async function setStatus(razorpaySubId: string, status: string): Promise<void> {
+  const db = await getDB();
   await db.query(
     `UPDATE user_subscriptions SET status = $1, updated_at = now()
      WHERE razorpay_subscription_id = $2`,
@@ -171,8 +191,8 @@ async function setStatus(razorpaySubId: string, status: string):Promise<void> {
  *
  * @throws {Error} If a database error occurs while retrieving the user or creating the usage record.
  */
-async function resetUsageCycle(razorpaySubId: string, periodStartUnix: number):Promise<void> {
-    const db = await getDB();
+async function resetUsageCycle(razorpaySubId: string, periodStartUnix: number): Promise<void> {
+  const db = await getDB();
   const { rows } = await db.query(
     `SELECT user_id FROM user_subscriptions WHERE razorpay_subscription_id = $1`,
     [razorpaySubId]

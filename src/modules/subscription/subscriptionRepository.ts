@@ -245,7 +245,15 @@ export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
  * - Creating the Razorpay customer or subscription fails.
  * - Updating the database fails.
  */
-export const createSubscriptionService = async (userId: string, planCode: string): Promise<{ subscriptionId: string; keyId: string | undefined }> => {
+export const createSubscriptionService = async (
+  userId: string,
+  planCode: string
+): Promise<{
+  subscriptionId?: string;
+  keyId?: string | undefined;
+  scheduled?: boolean;
+  effective_at?: Date | null;
+}> => {
   const client = await getDB();
 
   const plan = await getPlanByCode(planCode);
@@ -253,12 +261,42 @@ export const createSubscriptionService = async (userId: string, planCode: string
     throw new Error(`Plan with code ${planCode} does not have a valid Razorpay plan ID.`);
   }
 
-
   const user = await findUserById(userId);
   if (!user) {
     throw new Error(`User with ID ${userId} not found.`);
   }
-  
+
+  // Check if user already has an active paid subscription — if so, this is
+  // a plan change (upgrade/downgrade), not a fresh subscription.
+  const { subscription: currentSubscription, plan: currentPlan } =
+    await getActiveSubscriptionWithPlan(userId);
+
+  if (currentPlan.code === planCode) {
+    throw new Error(`User is already on plan ${planCode}`);
+  }
+
+  if (currentSubscription?.razorpay_subscription_id && currentPlan.code !== "free") {
+    // Existing active paid subscription -> schedule the plan change for cycle end
+    await razorpay.subscriptions.update(currentSubscription.razorpay_subscription_id, {
+      plan_id: plan.razorpay_plan_id,
+      schedule_change_at: "cycle_end",
+      customer_notify: 1,
+    } as any); //eslint-disable-line @typescript-eslint/no-explicit-any
+
+    await client.query(
+      `UPDATE user_subscriptions
+         SET pending_plan_id = $1, updated_at = now()
+       WHERE user_id = $2`,
+      [plan.id, userId]
+    );
+
+    return {
+      scheduled: true,
+      effective_at: currentSubscription.current_period_end ?? null,
+    };
+  }
+
+  // No active paid subscription (free plan or none) -> create a fresh one, as before
   let customerId = user.razorpay_customer_id as string | null;
   if (!customerId) {
     const customer = await razorpay.customers.create({
@@ -275,7 +313,6 @@ export const createSubscriptionService = async (userId: string, planCode: string
   }
 
   const totalCount = plan.billing_cycle === "yearly" ? 1 : 12;
-
 
   const rpSubscription = await razorpay.subscriptions.create({
     plan_id: plan.razorpay_plan_id,
@@ -301,8 +338,7 @@ export const createSubscriptionService = async (userId: string, planCode: string
     subscriptionId: rpSubscription.id,
     keyId: process.env.RAZORPAY_KEY_ID,
   };
-}
-
+};
 /**
  * Verifies a Razorpay subscription payment for a user.
  *
