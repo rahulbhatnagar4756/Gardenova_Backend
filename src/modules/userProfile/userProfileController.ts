@@ -120,9 +120,11 @@ export const getCurrentUserProfile = async (
         us.plan_id,
         sp.code   AS plan_code,
         sp.tier   AS plan_tier,
+        sp.billing_cycle AS plan_billing_cycle,
         us.status,
         us.current_period_start,
-        us.current_period_end
+        us.current_period_end,
+        us.cancel_at_period_end
       FROM user_subscriptions us
       JOIN subscription_plans sp ON sp.id = us.plan_id
       WHERE us.user_id = $1
@@ -168,8 +170,10 @@ export const getCurrentUserProfile = async (
       subscription: subscription
         ? {
           planId: subscription.plan_id,
-          planName: subscription.plan_code ?? subscription.plan_tier ?? null,
+          planName: subscription.plan_tier,
           status: subscription.status,
+          billingCycle: subscription.plan_billing_cycle, // "monthly" | "yearly"
+          cancelAtPeriodEnd: subscription.cancel_at_period_end,
           startedAt: subscription.current_period_start
             ? new Date(subscription.current_period_start).toISOString()
             : null,

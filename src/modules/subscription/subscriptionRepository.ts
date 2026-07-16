@@ -66,7 +66,7 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
             label:
               f.diagnosis_scans === null
                 ? "Unlimited Diagnosis Scans"
-                : `${f.diagnosis_scans} Diagnosis Scans per months`,
+                : `${f.diagnosis_scans} Diagnosis Scans per month`,
             enabled: f.diagnosis_scans === null || f.diagnosis_scans > 0
           },
           {
@@ -74,7 +74,7 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
             label:
               f.landscape_gens === null
                 ? "Unlimited Landscape Generations"
-                : `${f.landscape_gens} Landscape Generations per months`,
+                : `${f.landscape_gens} Landscape Generations per month`,
             enabled: f.landscape_gens === null || f.landscape_gens > 0
           },
           {

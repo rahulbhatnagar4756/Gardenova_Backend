@@ -24,6 +24,8 @@ export interface IFullUserProfile {
     planId: string | null;
     planName: string | null;
     status: string | null;
+    billingCycle: "monthly" | "yearly" | null;
+    cancelAtPeriodEnd: boolean | null;
     startedAt: string | null;
     expiresAt: string | null;
   } | null;
