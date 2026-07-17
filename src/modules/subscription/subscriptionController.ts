@@ -110,7 +110,7 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): P
  * @throws {400} If the `planCode` is missing from the request body.
  * @throws {500} If an unexpected error occurs while creating the subscription.
  */
-export const createSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const createSubscription = async (req: AuthRequest, res: Response): Promise<void> => {
     const userPayload = req.user as AuthUserPayload | undefined;
 
     if (!userPayload?.userId) {
@@ -130,24 +130,24 @@ export const createSubscription = async (req: AuthRequest, res: Response, next: 
     try {
         const result = await createSubscriptionService(userPayload.userId!, planCode);
         res.status(HTTP_STATUS.OK).json(successResponse(result, "Subscription created successfully"));
-    } catch (err) {
+    }catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+
         console.error("Error creating subscription:", err); // temporary debug line
-        if (HTTP_STATUS.INTERNAL_SERVER_ERROR) {
-            await error("Error creating subscription", {
-                email: userPayload.userEmail,
-                action: "createSubscription",
-                req,
-                error: err instanceof Error ? err.message : String(err),
-            });
-            res
-                .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-                .json(errorResponse("An error occurred while creating subscription"));
-        }
-         next();
+
+        await error("Error creating subscription", {
+            email: userPayload.userEmail,
+            action: "createSubscription",
+            req,
+            error: message,
+            stack,
+        });
+
+        res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(errorResponse(message)); // send the actual message, not a generic one
     }
-   
-
-
 }
 /**
  * Verifies the payment for a Razorpay subscription.
