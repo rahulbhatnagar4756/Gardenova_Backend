@@ -222,6 +222,41 @@ export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
   const row = rows[0];
   return { subscription: row, plan: row.plan };
 }
+
+
+
+/**
+ * Maps Razorpay's subscription status values to this app's internal
+ * status enum, since they don't use identical naming.
+ * @param {string} razorpayStatus - The subscription status from Razorpay.
+ * @returns {"active" | "pending" | "paused" | "halted" | "cancelled" | "expired"}
+ * The corresponding internal subscription status.
+ * @throws {Error} If the Razorpay status is unrecognized, defaults to "expired" and logs a warning.
+ */
+function mapRazorpayStatusToLocal(
+  razorpayStatus: string
+): "active" | "pending" | "paused" | "halted" | "cancelled" | "expired" {
+  switch (razorpayStatus) {
+    case "active":
+    case "authenticated":
+      return "active";
+    case "created":
+    case "pending":
+      return "pending";
+    case "paused":
+      return "paused";
+    case "halted":
+      return "halted";
+    case "cancelled":
+      return "cancelled";
+    case "completed":
+    case "expired":
+      return "expired";
+    default:
+      logger.warn(`Unknown Razorpay subscription status: ${razorpayStatus}, defaulting to expired`);
+      return "expired";
+  }
+}
 /**
  * Creates a Razorpay subscription for the specified user.
  *
@@ -276,7 +311,28 @@ export const createSubscriptionService = async (
   }
 
   if (currentSubscription?.razorpay_subscription_id && currentPlan.code !== "free") {
-    // Existing active paid subscription -> schedule the plan change for cycle end
+    // ── Verify live status on Razorpay before attempting update ──
+    const liveSubscription = await razorpay.subscriptions.fetch(
+      currentSubscription.razorpay_subscription_id
+    );
+
+    if (!["authenticated", "active"].includes(liveSubscription.status)) {
+      // DB is stale — subscription is halted/completed/cancelled on Razorpay's side.
+      // Sync DB and let the caller know a fresh subscription is needed instead.
+      await client.query(
+  `UPDATE user_subscriptions
+     SET status = $1, updated_at = now()
+   WHERE user_id = $2`,
+  [mapRazorpayStatusToLocal(liveSubscription.status), userId]
+);
+
+      throw new Error(
+        `Cannot change plan — current subscription is "${liveSubscription.status}" on Razorpay. ` +
+        `Please start a new subscription instead.`
+      );
+    }
+
+    // Safe to schedule plan change now
     await razorpay.subscriptions.update(currentSubscription.razorpay_subscription_id, {
       plan_id: plan.razorpay_plan_id,
       schedule_change_at: "cycle_end",
@@ -285,8 +341,8 @@ export const createSubscriptionService = async (
 
     await client.query(
       `UPDATE user_subscriptions
-         SET pending_plan_id = $1, updated_at = now()
-       WHERE user_id = $2`,
+       SET pending_plan_id = $1, updated_at = now()
+     WHERE user_id = $2`,
       [plan.id, userId]
     );
 
@@ -494,27 +550,26 @@ export async function getMySubscriptionService(userId: string): Promise<{
  * - `active_until`: the date until which the subscription remains active.
  *
  */
-export async function cancelSubscriptionService(userId: string):Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
+export async function cancelSubscriptionService(userId: string): Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
   const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
   const client = await getDB();
   if (!subscription || !subscription.razorpay_subscription_id) {
     throw new Error("No active paid subscription to cancel");
   }
   if (plan.code === "free") {
-    throw new Error( "Already on the free plan");
+    throw new Error("Already on the free plan");
   }
- 
+
   // cancel_at_cycle_end = 1 -> user keeps access till current_period_end, then falls back to free
   await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id, {
     cancel_at_cycle_end: 1,
   } as any);//eslint-disable-line @typescript-eslint/no-explicit-any
- 
+
   await client.query(
     `UPDATE user_subscriptions SET cancel_at_period_end = true, updated_at = now()
      WHERE user_id = $1`,
     [userId]
   );
- 
+
   return { cancel_at_period_end: true, active_until: subscription.current_period_end };
 }
- 

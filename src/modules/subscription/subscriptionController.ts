@@ -9,6 +9,7 @@ import { Response, NextFunction } from "express";
 import logger from "../../core/config/logger";
 import { verifyWebhookSignature } from "./razorPay.service";
 import { handleSubscriptionEvent, recordWebhookEvent } from "./webhook.service";
+import { CustomError } from "../../interface/Error";
 
 // import { VerifyPurchaseBody } from "../../interface/subscription";
 // import { getDB } from "../../core/config/db";
@@ -277,18 +278,21 @@ export const cancelSubscription = async (req: AuthRequest, res: Response, next: 
 
         res.status(HTTP_STATUS.OK).json(successResponse(result, "User subscription cancelled successfully"));
 
-    } catch (err) {
+    } catch (err: unknown) {
+        const errorObj: CustomError = err instanceof Error
+            ? (err as CustomError)
+            : ({ name: "UnknownError", message: typeof err === "string" ? err : "An unknown error occurred" } as CustomError);
+
         await error("Error cancelling user subscription", {
+            userId: (req.user as AuthUserPayload | undefined)?.userId,
             action: "cancelSubscription",
             req,
-            error: err instanceof Error ? err.message : String(err),
+            error: errorObj.message,
+            stack: errorObj.stack,
         });
-        res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse("An error occurred while cancelling user subscription"));
-    }
-    next();
 
+        next(errorObj);
+    }
 
 }
 
