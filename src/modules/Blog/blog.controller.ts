@@ -390,7 +390,7 @@ const STATIC_PAGES: StaticPage[] = [
   { loc: "/ai-garden-vision", changefreq: "monthly", priority: "0.6" },
   { loc: "/contact", changefreq: "monthly", priority: "0.5" },
   { loc: "/blog", changefreq: "daily", priority: "0.9" },
-  { loc: "/t%26c", changefreq: "yearly", priority: "0.3" },
+  { loc: "/terms-and-conditions", changefreq: "yearly", priority: "0.3" },
   { loc: "/privacy-policy", changefreq: "yearly", priority: "0.3" },
 ];
 /**
