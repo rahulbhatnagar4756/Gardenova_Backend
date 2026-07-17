@@ -551,15 +551,21 @@ export async function getMySubscriptionService(userId: string): Promise<{
   const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
 
   const cycleStart = subscription?.current_period_start ?? null;
-  let usage = { diagnosis_scans_used: 0, landscape_gens_used: 0 };
+  const usage = { diagnosis_scans_used: 0, landscape_gens_used: 0 };
 
   if (cycleStart) {
+    const period = new Date(cycleStart).toISOString().slice(0, 7);
+
     const { rows } = await client.query(
-      `SELECT diagnosis_scans_used, landscape_gens_used
-       FROM usage_tracking WHERE user_id = $1 AND cycle_start = $2::date`,
-      [userId, cycleStart]
+      `SELECT feature_type, count FROM feature_usage
+     WHERE user_id = $1 AND period = $2`,
+      [userId, period]
     );
-    if (rows.length > 0) usage = rows[0];
+
+    for (const row of rows) {
+      if (row.feature_type === "diagnosis") usage.diagnosis_scans_used = row.count;
+      if (row.feature_type === "landscape") usage.landscape_gens_used = row.count;
+    }
   }
 
   return {
@@ -569,13 +575,12 @@ export async function getMySubscriptionService(userId: string): Promise<{
       billing_cycle: plan.billing_cycle,
       features: plan.features,
     },
-    status: subscription?.status ?? "active", // free tier is implicitly "active"
+    status: subscription?.status ?? "active",
     current_period_end: subscription?.current_period_end ?? null,
     cancel_at_period_end: subscription?.cancel_at_period_end ?? false,
     usage,
   };
 }
-
 
 /**
  * Cancels the authenticated user's active paid subscription.

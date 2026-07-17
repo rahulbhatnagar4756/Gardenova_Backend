@@ -199,10 +199,17 @@ async function resetUsageCycle(razorpaySubId: string, periodStartUnix: number): 
   );
   if (rows.length === 0) return;
 
-  await db.query(
-    `INSERT INTO usage_tracking (user_id, cycle_start)
-     VALUES ($1, to_timestamp($2)::date)
-     ON CONFLICT (user_id, cycle_start) DO NOTHING`,
-    [rows[0].user_id, periodStartUnix]
-  );
+  const userId = rows[0].user_id;
+  const period = new Date(periodStartUnix * 1000).toISOString().slice(0, 7); // "YYYY-MM"
+
+  const featureTypes: ("diagnosis" | "landscape")[] = ["diagnosis", "landscape"];
+
+  for (const featureType of featureTypes) {
+    await db.query(
+      `INSERT INTO feature_usage (user_id, feature_type, period, count)
+       VALUES ($1, $2, $3, 0)
+       ON CONFLICT (user_id, feature_type, period) DO NOTHING`,
+      [userId, featureType, period]
+    );
+  }
 }

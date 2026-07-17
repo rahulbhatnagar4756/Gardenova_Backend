@@ -46,6 +46,7 @@
 //     subscription: {
 //       entity: {
 //         id: subscriptionId,
+//         plan_id: process.argv[4] || "plan_TBietTV7tmLW6Z",
 //         status: eventType.split(".")[1], // rough mapping, fine for local testing
 //         current_start: now,
 //         current_end: oneMonthLater,
