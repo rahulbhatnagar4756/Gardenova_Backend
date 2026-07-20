@@ -145,8 +145,8 @@ export const createSubscription = async (req: AuthRequest, res: Response): Promi
         });
 
         res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(errorResponse(message)); // send the actual message, not a generic one
+            .status(HTTP_STATUS.BAD_REQUEST)
+            .json(errorResponse(message));
     }
 }
 /**

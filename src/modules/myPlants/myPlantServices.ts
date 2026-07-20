@@ -1897,10 +1897,14 @@ function buildUnionQuery(
     const branches = activities.map((activity) => {
         const cols = getColumns(activity);
 
-        // Completed: last_at falls within the current reminder cycle
+        // Completed only while the *next* due is still in the future.
+        // Without next_at >= NOW(), a prior complete keeps matching forever
+        // (last_at ≈ next_at - frequency), so overdue cycles never become missed
+        // and midnight auto-reschedule skips them.
         const completedCond = `
       up.${cols.last_at} IS NOT NULL
       AND up.${cols.next_at} IS NOT NULL
+      AND up.${cols.next_at} >= NOW()
       AND up.${cols.frequency} > 0
       AND up.${cols.last_at} >= (up.${cols.next_at} - (up.${cols.frequency} || ' days')::interval)
     `;
@@ -2265,14 +2269,17 @@ export const disableNotificationService = async (
     );
 };
 /**
- * Advances next_at for any overdue (missed), non-completed reminders,
- * across all activity types, for all users. Meant to run once daily
- * (e.g. at midnight IST) so a missed reminder only shows as "missed"
- * for one day before rolling forward to the next cycle.
+ * Advances next_at for any overdue (missed) reminders across all activity
+ * types, for all users. Meant to run once daily (e.g. at midnight IST) so a
+ * missed reminder only shows as "missed" for one day before rolling forward
+ * to the next cycle (upcoming).
  *
- * Jumps straight to the next future occurrence even if multiple
- * cycles were missed (e.g. server downtime), rather than advancing
- * one cycle per run.
+ * Jumps straight to the next future occurrence even if multiple cycles were
+ * missed (e.g. server downtime), rather than advancing one cycle per run.
+ *
+ * Note: do not exclude rows based on last_at ≈ next_at - frequency. After a
+ * prior complete that equality remains true when the next cycle goes overdue,
+ * which previously blocked roll-forward forever.
  *
  * @returns {Promise<void>}
  */
@@ -2294,10 +2301,6 @@ export const autoRescheduleMissedNotificationsService = async (): Promise<void> 
               AND ${cols.frequency} > 0
               AND ${cols.next_at} IS NOT NULL
               AND ${cols.next_at} < NOW()
-              AND NOT (
-                  ${cols.last_at} IS NOT NULL
-                  AND ${cols.last_at} >= (${cols.next_at} - (${cols.frequency} || ' days')::interval)
-              )
         `);
     }
 };
