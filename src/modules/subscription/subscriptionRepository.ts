@@ -319,21 +319,39 @@ export const createSubscriptionService = async (
       );
     }
 
+    const currentPeriodEnd = currentSubscription.current_period_end;
+    if (!currentPeriodEnd) {
+      throw new Error(
+        `Cannot schedule plan change — current subscription has no period end date.`
+      );
+    }
+
+    const periodStillValid = new Date(currentPeriodEnd).getTime() > Date.now();
+    const localIsActive = currentSubscription.status === "active";
+
     // ── Verify live status on Razorpay before attempting any change ──
     const liveSubscription = await razorpay.subscriptions.fetch(
       currentSubscription.razorpay_subscription_id
     );
     const liveStatus = liveSubscription.status;
-    const localIsActive = currentSubscription.status === "active";
-    // "created"/"pending" are OK when local is already active (webhook activated
-    // entitlement before / without a live charge state — common in test + races).
+    const liveHealthy = ["authenticated", "active"].includes(liveStatus);
+    const liveUncharged = ["created", "pending"].includes(liveStatus);
+    const liveTerminal = ["halted", "cancelled", "completed", "expired"].includes(liveStatus);
+
+    // Allow plan change when:
+    // - RP sub is healthy, OR
+    // - local is active and RP is still created/pending (webhook race), OR
+    // - local is still entitled for the current period even if RP already
+    //   shows cancelled/completed (e.g. a previous change attempt cancelled RP early)
     const liveAllowsChange =
-      ["authenticated", "active"].includes(liveStatus) ||
-      (localIsActive && ["created", "pending"].includes(liveStatus));
+      liveHealthy ||
+      (localIsActive && liveUncharged) ||
+      (localIsActive && periodStillValid && liveTerminal);
 
     if (!liveAllowsChange) {
-      const terminalStatuses = ["halted", "cancelled", "completed", "expired"];
-      if (terminalStatuses.includes(liveStatus)) {
+      // Only sync terminal RP status to local when the paid period is over.
+      // Never force the user to free mid-period just because RP fetch failed a change.
+      if (liveTerminal && !periodStillValid) {
         await client.query(
           `UPDATE user_subscriptions
              SET status = $1, updated_at = now()
@@ -348,21 +366,12 @@ export const createSubscriptionService = async (
       );
     }
 
-    const currentPeriodEnd = currentSubscription.current_period_end;
-    if (!currentPeriodEnd) {
-      throw new Error(
-        `Cannot schedule plan change — current subscription has no period end date.`
-      );
-    }
-
     const startAtUnix = Math.floor(new Date(currentPeriodEnd).getTime() / 1000);
     // Razorpay requires a finite total_count; after these cycles the sub completes
     // and the user must create a new subscription to continue paid access.
     const totalCount = plan.billing_cycle === "yearly" ? 1 : 12;
 
     // ── 1. Create new subscription, scheduled to start when old one ends ──
-    // Do this BEFORE cancelling the old one — if this call fails, the user
-    // keeps their current active subscription untouched.
     const newRpSubscription = await razorpay.subscriptions.create({
       plan_id: plan.razorpay_plan_id,
       customer_notify: 1,
@@ -371,28 +380,8 @@ export const createSubscriptionService = async (
       notes: { userId, planCode },
     } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
-    // ── 2. Cancel old subscription ──
-    // Uncharged ("created") subs cannot use cancel_at_cycle_end — cancel immediately.
-    try {
-      if (["created", "pending"].includes(liveStatus)) {
-        await razorpay.subscriptions.cancel(currentSubscription.razorpay_subscription_id);
-      } else {
-        await razorpay.subscriptions.cancel(currentSubscription.razorpay_subscription_id, {
-          cancel_at_cycle_end: 1,
-        } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-      }
-    } catch (cancelErr) {
-      // Roll back the new subscription so we don't end up with two active
-      // subscriptions for this user if the cancel step fails.
-      try {
-        await razorpay.subscriptions.cancel(newRpSubscription.id);
-      } catch {
-        // best-effort rollback; log and let alerting catch orphaned subscription
-      }
-      throw cancelErr;
-    }
-
-    // ── 3. Persist both — old one still active till cycle end, new one pending ──
+    // ── 2. Persist pending FIRST so a later cancel failure cannot leave the
+    // user without a scheduled target (and we never hard-cancel before DB write).
     await client.query(
       `UPDATE user_subscriptions
          SET pending_plan_id = $1,
@@ -402,6 +391,48 @@ export const createSubscriptionService = async (
        WHERE user_id = $3`,
       [plan.id, newRpSubscription.id, userId]
     );
+
+    // ── 3. Cancel old subscription at cycle end (never immediate while local
+    // is active — immediate cancel was dropping yearly users to free).
+    // Skip if RP is already terminal; just keep local entitlement until period end.
+    if (!liveTerminal) {
+      try {
+        await razorpay.subscriptions.cancel(currentSubscription.razorpay_subscription_id, {
+          cancel_at_cycle_end: 1,
+        } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+      } catch (cancelErr) {
+        const msg =
+          (cancelErr as { error?: { description?: string } })?.error?.description ||
+          (cancelErr instanceof Error ? cancelErr.message : String(cancelErr));
+
+        // Already marked to cancel at cycle end is fine — keep pending schedule.
+        const alreadyCancelling = /already|cancel/i.test(msg);
+        if (!alreadyCancelling) {
+          // Roll back pending + new RP sub so user stays on current plan cleanly.
+          try {
+            await razorpay.subscriptions.cancel(newRpSubscription.id);
+          } catch {
+            /* best-effort */
+          }
+          await client.query(
+            `UPDATE user_subscriptions
+               SET pending_plan_id = NULL,
+                   pending_razorpay_subscription_id = NULL,
+                   cancel_at_period_end = false,
+                   updated_at = now()
+             WHERE user_id = $1`,
+            [userId]
+          );
+          throw cancelErr;
+        }
+
+        logger.warn("Old subscription cancel_at_cycle_end soft-failed; keeping pending change", {
+          userId,
+          oldSub: currentSubscription.razorpay_subscription_id,
+          message: msg,
+        });
+      }
+    }
 
     return {
       subscriptionId: newRpSubscription.id,
@@ -638,12 +669,47 @@ export async function getMySubscriptionService(userId: string): Promise<{
 }
 
 /**
+ * Extracts a human-readable message from a Razorpay SDK error.
+ *
+ * @param {unknown} err - Error thrown by the Razorpay client.
+ * @returns {string} Description from Razorpay when available, otherwise a stringified error.
+ */
+function razorpayErrorMessage(err: unknown): string {
+  return (
+    (err as { error?: { description?: string } })?.error?.description ||
+    (err instanceof Error ? err.message : String(err))
+  );
+}
+
+/**
+ * Returns whether a Razorpay subscription status cannot be cancelled again.
+ *
+ * @param {string} status - Live Razorpay subscription status.
+ * @returns {boolean} True when status is completed, cancelled, or expired.
+ */
+function isNonCancellableRazorpayStatus(status: string): boolean {
+  return ["completed", "cancelled", "expired"].includes(status);
+}
+
+/**
+ * Returns whether a Razorpay error message indicates the subscription is not cancellable.
+ *
+ * @param {string} message - Error description from Razorpay.
+ * @returns {boolean} True when cancel should be treated as already terminal / non-cancellable.
+ */
+function isNonCancellableRazorpayError(message: string): boolean {
+  return /not cancellable|completed status|cancelled status|already.*cancel/i.test(message);
+}
+
+/**
  * Cancels the authenticated user's active paid subscription.
  *
  * This service checks the user's current subscription status, prevents
  * cancellation of free-tier subscriptions, requests Razorpay to cancel
  * the subscription at the end of the current billing cycle, and updates
  * the local subscription record to reflect the pending cancellation.
+ * If Razorpay reports the subscription as completed/cancelled, local cancel
+ * flags are still applied without failing the request.
  *
  * @async
  * @function cancelSubscriptionService
@@ -652,7 +718,6 @@ export async function getMySubscriptionService(userId: string): Promise<{
  * A promise that resolves to an object indicating:
  * - `cancel_at_period_end`: true if the subscription is set to cancel at the end of the current cycle.
  * - `active_until`: the date until which the subscription remains active.
- *
  */
 export async function cancelSubscriptionService(userId: string): Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
   const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
@@ -670,11 +735,14 @@ export async function cancelSubscriptionService(userId: string): Promise<{ cance
     try {
       await razorpay.subscriptions.cancel(subscription.pending_razorpay_subscription_id);
     } catch (err) {
-      logger.warn("Failed to cancel pending Razorpay subscription during user cancel", {
-        userId,
-        pendingId: subscription.pending_razorpay_subscription_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const msg = razorpayErrorMessage(err);
+      if (!isNonCancellableRazorpayError(msg)) {
+        logger.warn("Failed to cancel pending Razorpay subscription during user cancel", {
+          userId,
+          pendingId: subscription.pending_razorpay_subscription_id,
+          error: msg,
+        });
+      }
     }
     await client.query(
       `UPDATE user_subscriptions
@@ -689,36 +757,72 @@ export async function cancelSubscriptionService(userId: string): Promise<{ cance
   // cancel_at_cycle_end = 1 -> user keeps access till current_period_end, then falls back to free
   // Skip RP cancel if already scheduled at cycle end from a prior plan-change.
   if (!subscription.cancel_at_period_end) {
+    let liveStatus: string | null = null;
     try {
-      await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id, {
-        cancel_at_cycle_end: 1,
-      } as any);//eslint-disable-line @typescript-eslint/no-explicit-any
+      const live = await razorpay.subscriptions.fetch(subscription.razorpay_subscription_id);
+      liveStatus = live.status;
     } catch (err) {
-      logger.warn("Failed to cancel Razorpay subscription at cycle end, trying immediate cancel", {
+      logger.warn("Failed to fetch Razorpay subscription before cancel", {
         userId,
         subscriptionId: subscription.razorpay_subscription_id,
-        error: err instanceof Error ? err.message : String(err),
+        error: razorpayErrorMessage(err),
       });
-      // Uncharged subscriptions ("created") often reject cancel_at_cycle_end — try immediate cancel.
+    }
+
+    // Yearly total_count=1 often ends as "completed" — Razorpay rejects cancel.
+    // Still mark local cancel_at_period_end so the app ends access at period end.
+    if (!liveStatus || !isNonCancellableRazorpayStatus(liveStatus)) {
       try {
-        await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id);
-      } catch (err2) {
-        const msg =
-          (err2 as { error?: { description?: string } })?.error?.description ||
-          (err2 instanceof Error ? err2.message : "Failed to cancel subscription on Razorpay");
-        throw new Error(msg);
+        await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id, {
+          cancel_at_cycle_end: 1,
+        } as any);//eslint-disable-line @typescript-eslint/no-explicit-any
+      } catch (err) {
+        const msg = razorpayErrorMessage(err);
+        if (isNonCancellableRazorpayError(msg)) {
+          logger.info("Razorpay sub already non-cancellable; applying local cancel only", {
+            userId,
+            subscriptionId: subscription.razorpay_subscription_id,
+            liveStatus,
+            message: msg,
+          });
+        } else {
+          // Uncharged ("created") often rejects cancel_at_cycle_end — try immediate cancel.
+          try {
+            await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id);
+          } catch (err2) {
+            const msg2 = razorpayErrorMessage(err2);
+            if (!isNonCancellableRazorpayError(msg2)) {
+              throw new Error(msg2);
+            }
+            logger.info("Razorpay immediate cancel skipped — already non-cancellable", {
+              userId,
+              message: msg2,
+            });
+          }
+        }
       }
+    } else {
+      logger.info("Skipping Razorpay cancel — subscription already terminal", {
+        userId,
+        subscriptionId: subscription.razorpay_subscription_id,
+        liveStatus,
+      });
     }
   }
+
+  const periodEnded =
+    !!subscription.current_period_end &&
+    new Date(subscription.current_period_end).getTime() <= Date.now();
 
   await client.query(
     `UPDATE user_subscriptions
        SET cancel_at_period_end = true,
            pending_plan_id = NULL,
            pending_razorpay_subscription_id = NULL,
+           status = CASE WHEN $2 THEN 'expired' ELSE status END,
            updated_at = now()
      WHERE user_id = $1`,
-    [userId]
+    [userId, periodEnded]
   );
 
   return { cancel_at_period_end: true, active_until: subscription.current_period_end };
