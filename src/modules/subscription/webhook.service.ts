@@ -127,37 +127,28 @@ async function activateSubscription(
 ): Promise<void> {
   const db = await getDB();
 
-  const { rows: planRows } = await db.query(
-    `SELECT id FROM subscription_plans WHERE razorpay_plan_id = $1`,
-    [razorpayPlanId]
-  );
-
-  const planId = planRows[0]?.id ?? null;
-
+  // Single round-trip: resolve plan_id and update the subscription row together.
   const { rowCount } = await db.query(
-    `UPDATE user_subscriptions
+    `UPDATE user_subscriptions us
      SET status = 'active',
          razorpay_subscription_id = $4,
-         plan_id = COALESCE($1, plan_id),
+         plan_id = COALESCE(
+           (SELECT id FROM subscription_plans WHERE razorpay_plan_id = $1 LIMIT 1),
+           us.plan_id
+         ),
          pending_plan_id = NULL,
          pending_razorpay_subscription_id = NULL,
          current_period_start = to_timestamp($2),
          current_period_end = to_timestamp($3),
          cancel_at_period_end = false,
          updated_at = now()
-     WHERE razorpay_subscription_id = $4
-        OR pending_razorpay_subscription_id = $4`,
-    [planId, periodStartUnix, periodEndUnix, razorpaySubId]
+     WHERE us.razorpay_subscription_id = $4
+        OR us.pending_razorpay_subscription_id = $4`,
+    [razorpayPlanId, periodStartUnix, periodEndUnix, razorpaySubId]
   );
 
   if (!rowCount) {
     logger.warn(`activateSubscription matched no row for razorpaySubId=${razorpaySubId}`);
-  }
-
-  if (planRows.length === 0) {
-    logger.warn(`No local plan found for razorpay_plan_id=${razorpayPlanId}, plan_id not synced`, {
-      razorpaySubId,
-    });
   }
 }
 /**
@@ -272,14 +263,12 @@ async function resetUsageCycle(razorpaySubId: string, periodStartUnix: number): 
   const userId = rows[0].user_id;
   const period = new Date(periodStartUnix * 1000).toISOString().slice(0, 7); // "YYYY-MM"
 
-  const featureTypes: ("diagnosis" | "landscape")[] = ["diagnosis", "landscape"];
-
-  for (const featureType of featureTypes) {
-    await db.query(
-      `INSERT INTO feature_usage (user_id, feature_type, period, count)
-       VALUES ($1, $2, $3, 0)
-       ON CONFLICT (user_id, feature_type, period) DO NOTHING`,
-      [userId, featureType, period]
-    );
-  }
+  await db.query(
+    `INSERT INTO feature_usage (user_id, feature_type, period, count)
+     VALUES
+       ($1, 'diagnosis', $2, 0),
+       ($1, 'landscape', $2, 0)
+     ON CONFLICT (user_id, feature_type, period) DO NOTHING`,
+    [userId, period]
+  );
 }

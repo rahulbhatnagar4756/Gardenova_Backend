@@ -337,9 +337,18 @@ export const razorpayWebhook = async (req: AuthRequest, res: Response): Promise<
             return;
         }
 
-        await handleSubscriptionEvent(payload);
-        res.status(HTTP_STATUS.OK).json(successResponse(null, "Webhook processed successfully"));
-        // no next() here — response already sent, nothing left for downstream middleware to do
+        // ACK Razorpay immediately — do not block the HTTP response on DB work.
+        // Razorpay expects a fast 2xx; slow handlers cause retries and perceived lag.
+        res.status(HTTP_STATUS.OK).json(successResponse(null, "Webhook received"));
+
+        setImmediate(() => {
+            void handleSubscriptionEvent(payload).catch((err) => {
+                logger.error("Async Razorpay webhook processing failed", {
+                    event: payload?.event,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            });
+        });
     } catch (err) {
         console.error("RAW WEBHOOK ERROR:", err); // temporary debug line
         await error("Error processing Razorpay webhook", {
