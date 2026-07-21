@@ -1897,16 +1897,18 @@ function buildUnionQuery(
     const branches = activities.map((activity) => {
         const cols = getColumns(activity);
 
-        // Completed only while the *next* due is still in the future.
-        // Without next_at >= NOW(), a prior complete keeps matching forever
-        // (last_at ≈ next_at - frequency), so overdue cycles never become missed
-        // and midnight auto-reschedule skips them.
+        // Completed only on the IST calendar day the user marked it done.
+        // Next day (even if next_at is still in the future) → upcoming.
+        // Also requires next_at still in the future so an overdue cycle becomes
+        // missed (then midnight auto-reschedule rolls it forward).
         const completedCond = `
       up.${cols.last_at} IS NOT NULL
       AND up.${cols.next_at} IS NOT NULL
       AND up.${cols.next_at} >= NOW()
       AND up.${cols.frequency} > 0
       AND up.${cols.last_at} >= (up.${cols.next_at} - (up.${cols.frequency} || ' days')::interval)
+      AND (up.${cols.last_at} AT TIME ZONE 'Asia/Kolkata')::date
+            = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
     `;
 
         const missedCond = `
