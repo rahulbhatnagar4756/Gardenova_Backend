@@ -43,6 +43,7 @@ export interface UserSubscription {
   current_period_end: Date | null;
   cancel_at_period_end: boolean;
   pending_plan_id: string | null;
+  pending_razorpay_subscription_id: string | null;
 }
 
 export interface CreateSubscriptionBody {
