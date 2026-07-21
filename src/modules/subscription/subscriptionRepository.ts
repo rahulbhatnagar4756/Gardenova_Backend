@@ -223,6 +223,57 @@ export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
   return { subscription: row, plan: row.plan };
 }
 
+/**
+ * Loads the user's subscription row with its actual plan (no free fallback).
+ * Used by create/plan-change so a non-active status cannot hide a paid plan.
+ *
+ * @param {string} userId - User UUID.
+ * @returns {Promise<{ subscription: UserSubscription; plan: SubscriptionPlan } | null>}
+ */
+async function getSubscriptionRowWithPlan(
+  userId: string
+): Promise<{ subscription: UserSubscription; plan: SubscriptionPlan } | null> {
+  const client = await getDB();
+  const { rows } = await client.query(
+    `SELECT us.*, row_to_json(sp.*) AS plan
+     FROM user_subscriptions us
+     JOIN subscription_plans sp ON sp.id = us.plan_id
+     WHERE us.user_id = $1`,
+    [userId]
+  );
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  return { subscription: row, plan: row.plan };
+}
+
+/**
+ * Whether the user still has a paid subscription that should use plan-change
+ * (schedule) instead of a brand-new subscribe flow.
+ *
+ * @param {UserSubscription | null | undefined} subscription - Local subscription row.
+ * @param {SubscriptionPlan} plan - Plan linked on that row (not free-fallback).
+ * @returns {boolean} True when create should schedule an upgrade/downgrade.
+ */
+function shouldSchedulePlanChange(
+  subscription: UserSubscription | null | undefined,
+  plan: SubscriptionPlan
+): boolean {
+  if (!subscription?.razorpay_subscription_id) return false;
+  if (!plan || plan.code === "free" || plan.tier === "free") return false;
+
+  if (subscription.status === "active") return true;
+
+  // Still entitled until period end (cancelled/completed locally but access remains).
+  if (
+    subscription.current_period_end &&
+    new Date(subscription.current_period_end).getTime() > Date.now()
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 
 
 /**
@@ -302,24 +353,30 @@ export const createSubscriptionService = async (
     throw new Error(`User with ID ${userId} not found.`);
   }
 
-  // Check if user already has an active paid subscription — if so, this is
-  // a plan change (upgrade/downgrade), not a fresh subscription.
-  const { subscription: currentSubscription, plan: currentPlan } =
-    await getActiveSubscriptionWithPlan(userId);
+  // Use the real plan on the subscription row — getActiveSubscriptionWithPlan
+  // falls back to "free" when status !== active, which incorrectly sent
+  // monthly→yearly through the fresh-create path (no scheduled/effective_at).
+  const existing = await getSubscriptionRowWithPlan(userId);
+  const currentSubscription = existing?.subscription ?? null;
+  const currentPlan = existing?.plan ?? (await getFreePlan());
 
-  if (currentPlan.code === planCode) {
+  if (currentPlan.code === planCode && currentSubscription?.status === "active") {
     throw new Error(`The requested plan is already active.`);
   }
 
-  if (currentSubscription?.razorpay_subscription_id && currentPlan.code !== "free") {
+  if (shouldSchedulePlanChange(currentSubscription, currentPlan)) {
+    if (currentPlan.code === planCode) {
+      throw new Error(`The requested plan is already active.`);
+    }
+
     // Prevent double-scheduling before any Razorpay calls
-    if (currentSubscription.cancel_at_period_end || currentSubscription.pending_plan_id) {
+    if (currentSubscription!.cancel_at_period_end || currentSubscription!.pending_plan_id) {
       throw new Error(
         `A subscription change is already scheduled.`
       );
     }
 
-    const currentPeriodEnd = currentSubscription.current_period_end;
+    const currentPeriodEnd = currentSubscription!.current_period_end;
     if (!currentPeriodEnd) {
       throw new Error(
         `Cannot schedule plan change — current subscription has no period end date.`
@@ -327,11 +384,12 @@ export const createSubscriptionService = async (
     }
 
     const periodStillValid = new Date(currentPeriodEnd).getTime() > Date.now();
-    const localIsActive = currentSubscription.status === "active";
+    const localIsActive =
+      currentSubscription!.status === "active" || periodStillValid;
 
     // ── Verify live status on Razorpay before attempting any change ──
     const liveSubscription = await razorpay.subscriptions.fetch(
-      currentSubscription.razorpay_subscription_id
+      currentSubscription!.razorpay_subscription_id!
     );
     const liveStatus = liveSubscription.status;
     const liveHealthy = ["authenticated", "active"].includes(liveStatus);
@@ -340,7 +398,7 @@ export const createSubscriptionService = async (
 
     // Allow plan change when:
     // - RP sub is healthy, OR
-    // - local is active and RP is still created/pending (webhook race), OR
+    // - local is entitled and RP is still created/pending (webhook race), OR
     // - local is still entitled for the current period even if RP already
     //   shows cancelled/completed (e.g. a previous change attempt cancelled RP early)
     const liveAllowsChange =
@@ -393,11 +451,11 @@ export const createSubscriptionService = async (
     );
 
     // ── 3. Cancel old subscription at cycle end (never immediate while local
-    // is active — immediate cancel was dropping yearly users to free).
+    // is entitled — immediate cancel was dropping yearly users to free).
     // Skip if RP is already terminal; just keep local entitlement until period end.
     if (!liveTerminal) {
       try {
-        await razorpay.subscriptions.cancel(currentSubscription.razorpay_subscription_id, {
+        await razorpay.subscriptions.cancel(currentSubscription!.razorpay_subscription_id!, {
           cancel_at_cycle_end: 1,
         } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
       } catch (cancelErr) {
@@ -428,7 +486,7 @@ export const createSubscriptionService = async (
 
         logger.warn("Old subscription cancel_at_cycle_end soft-failed; keeping pending change", {
           userId,
-          oldSub: currentSubscription.razorpay_subscription_id,
+          oldSub: currentSubscription!.razorpay_subscription_id,
           message: msg,
         });
       }
