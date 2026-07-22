@@ -131,13 +131,17 @@ router.post("/subscriptions/create", auth, createSubscription);
  * @swagger
  * /api/v1/plans/subscriptions/verify:
  *   post:
- *     summary: Verify a Razorpay Checkout payment signature
+ *     summary: Verify Razorpay Checkout payment and wait for activation
  *     description: >
  *       Called by the frontend immediately after Razorpay Checkout's handler
  *       callback fires. Confirms the payment signature is valid and belongs to
- *       the authenticated user. This does NOT activate the subscription —
- *       activation happens via the /webhooks/razorpay endpoint, which is the
- *       source of truth. This endpoint exists purely for fast UI feedback.
+ *       the authenticated user, then waits (up to ~15 seconds) for the
+ *       /webhooks/razorpay handler to activate the subscription locally.
+ *       If the webhook is slow, falls back to fetching live status from
+ *       Razorpay and activating when the subscription is already
+ *       active/authenticated. May take up to ~15s — show a loading state.
+ *       Treat verified=true + status=pending as payment OK (still confirming);
+ *       do not start a second checkout.
  *     tags:
  *       - Subscription Plans
  *     security:
@@ -164,7 +168,7 @@ router.post("/subscriptions/create", auth, createSubscription);
  *                 example: 5f7e2a8c9b1d3e4f5a6b7c8d9e0f1a2b...
  *     responses:
  *       200:
- *         description: Signature verified successfully
+ *         description: Payment signature verified (activation may still be pending)
  *         content:
  *           application/json:
  *             schema:
@@ -175,11 +179,18 @@ router.post("/subscriptions/create", auth, createSubscription);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: Payment verified successfully
+ *                   example: Subscription verified successfully
  *                 data:
  *                   type: object
  *                   properties:
  *                     verified:
+ *                       type: boolean
+ *                       example: true
+ *                     status:
+ *                       type: string
+ *                       enum: [active, pending]
+ *                       example: active
+ *                     activated:
  *                       type: boolean
  *                       example: true
  *       400:

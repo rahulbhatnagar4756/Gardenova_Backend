@@ -152,9 +152,10 @@ export const createSubscription = async (req: AuthRequest, res: Response): Promi
 /**
  * Verifies the payment for a Razorpay subscription.
  *
- * This endpoint validates the authenticated user and the required
- * Razorpay payment details, then verifies the subscription payment
- * signature and updates the subscription status accordingly.
+ * Validates checkout fields/signature, then waits for local activation
+ * (webhook or Razorpay fetch fallback). Response includes `status` and
+ * `activated` so the client can distinguish full success from
+ * "payment received, still confirming".
  *
  * @async
  * @function verifySubscription
@@ -189,7 +190,10 @@ export const verifySubscription = async (req: AuthRequest, res: Response, next: 
             razorpay_subscription_id,
             razorpay_signature,
         });
-        res.status(HTTP_STATUS.OK).json(successResponse(result, "Subscription verified successfully"));
+        const message = result.activated
+            ? "Subscription verified and activated successfully"
+            : "Payment verified — subscription activation is still pending";
+        res.status(HTTP_STATUS.OK).json(successResponse(result, message));
     } catch (err) {
         await error("Error verifying subscription", {
             action: "verifySubscription",

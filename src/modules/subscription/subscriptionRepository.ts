@@ -5,6 +5,10 @@ import Razorpay from "razorpay";
 import { findUserById } from "../auth/authRepository";
 import logger from "../../core/config/logger";
 import { verifyCheckoutSignature } from "./razorPay.service";
+import { activateSubscriptionByRazorpayId } from "./webhook.service";
+
+const VERIFY_WAIT_MS = 15_000;
+const VERIFY_POLL_MS = 500;
 
 const razorpay = new Razorpay({
   key_id: config.RAZORPAY_KEY_ID,
@@ -335,11 +339,11 @@ export const createSubscriptionService = async (
   userId: string,
   planCode: string
 ): Promise<{
-  subscriptionId?: string;
+  subscriptionId?: string | undefined;
   keyId?: string | undefined;
   scheduled?: boolean;
   effective_at?: Date | null;
-  pending_plan_code?: string;
+  pending_plan_code?: string | undefined;
 }> => {
   const client = await getDB();
 
@@ -360,6 +364,31 @@ export const createSubscriptionService = async (
   const currentSubscription = existing?.subscription ?? null;
   const currentPlan = existing?.plan ?? (await getFreePlan());
 
+  // Buy same plan after cancel-at-period-end = resume (undo cancel), not "already active"
+  if (
+    currentSubscription?.status === "active" &&
+    currentPlan.code === planCode &&
+    currentSubscription.cancel_at_period_end &&
+    !currentSubscription.pending_plan_id
+  ) {
+    await client.query(
+      `UPDATE user_subscriptions
+         SET cancel_at_period_end = false,
+             pending_plan_id = NULL,
+             pending_razorpay_subscription_id = NULL,
+             updated_at = now()
+       WHERE user_id = $1`,
+      [userId]
+    );
+    return {
+      subscriptionId: currentSubscription.razorpay_subscription_id ?? undefined,
+      keyId: process.env.RAZORPAY_KEY_ID,
+      scheduled: false,
+      effective_at: null,
+      pending_plan_code: undefined,
+    };
+  }
+
   if (currentPlan.code === planCode && currentSubscription?.status === "active") {
     throw new Error(`The requested plan is already active.`);
   }
@@ -369,8 +398,9 @@ export const createSubscriptionService = async (
       throw new Error(`The requested plan is already active.`);
     }
 
-    // Prevent double-scheduling before any Razorpay calls
-    if (currentSubscription!.cancel_at_period_end || currentSubscription!.pending_plan_id) {
+    // Only block when a real plan-change is pending.
+    // cancel_at_period_end alone means "cancel → free" — user may buy a new plan.
+    if (currentSubscription!.pending_plan_id) {
       throw new Error(
         `A subscription change is already scheduled.`
       );
@@ -453,7 +483,8 @@ export const createSubscriptionService = async (
     // ── 3. Cancel old subscription at cycle end (never immediate while local
     // is entitled — immediate cancel was dropping yearly users to free).
     // Skip if RP is already terminal; just keep local entitlement until period end.
-    if (!liveTerminal) {
+    // Also skip if already cancel_at_period_end locally (user cancelled then buys another plan).
+    if (!liveTerminal && !currentSubscription!.cancel_at_period_end) {
       try {
         await razorpay.subscriptions.cancel(currentSubscription!.razorpay_subscription_id!, {
           cancel_at_cycle_end: 1,
@@ -464,7 +495,7 @@ export const createSubscriptionService = async (
           (cancelErr instanceof Error ? cancelErr.message : String(cancelErr));
 
         // Already marked to cancel at cycle end is fine — keep pending schedule.
-        const alreadyCancelling = /already|cancel/i.test(msg);
+        const alreadyCancelling = /already|cancel|not cancellable|completed status/i.test(msg);
         if (!alreadyCancelling) {
           // Roll back pending + new RP sub so user stays on current plan cleanly.
           try {
@@ -549,18 +580,56 @@ export const createSubscriptionService = async (
   };
 };
 /**
+ * Checks whether a specific Razorpay subscription is marked as active
+ * for the given user in the local database.
+ *
+ * This function only verifies the subscription status stored locally.
+ * It does not make any API calls to Razorpay or validate the subscription's
+ * current status with the payment provider.
+ *
+ * @param {string} userId - The unique identifier of the user.
+ * @param {string} razorpaySubscriptionId - The Razorpay subscription ID to verify.
+ * @returns {Promise<boolean>} Resolves to `true` if an active matching subscription
+ * exists in the local database; otherwise, `false`.
+ */
+async function isSubscriptionLocallyActive(
+  userId: string,
+  razorpaySubscriptionId: string
+): Promise<boolean> {
+  const client = await getDB();
+  const { rows } = await client.query(
+    `SELECT 1 FROM user_subscriptions
+     WHERE user_id = $1
+       AND status = 'active'
+       AND razorpay_subscription_id = $2
+     LIMIT 1`,
+    [userId, razorpaySubscriptionId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Sleep helper for verify polling.
+ * @param {number} ms - Milliseconds to sleep.
+ * @returns {Promise<void>} Resolves after the specified delay.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Verifies a Razorpay subscription payment for a user.
  *
- * This service validates the Razorpay checkout signature to ensure the
- * payment response is authentic, then confirms that the subscription
- * belongs to the requesting user before marking the verification as
- * successful.
+ * Validates the checkout signature and ownership, then waits (polls) for the
+ * webhook to activate the subscription locally. If still pending after the
+ * wait window, fetches live status from Razorpay and activates locally when
+ * the subscription is already active/authenticated.
  *
  * @async
  * @function verifySubscriptionPayment
  * @param {string} userId - The unique identifier of the user attempting to verify the subscription.
  * @param {VerifySubscriptionBody} body - Razorpay payment verification payload containing payment ID, subscription ID, and signature.
- * @returns {Promise<{ verified: boolean }>} A promise that resolves with the verification status.
+ * @returns {Promise<{ verified: boolean; status: 'active' | 'pending'; activated: boolean }>}
  *
  * @throws {Error} If:
  * - The Razorpay signature verification fails.
@@ -570,15 +639,16 @@ export const createSubscriptionService = async (
 export async function verifySubscriptionPayment(
   userId: string,
   body: VerifySubscriptionBody
-): Promise<{ verified: boolean }> {
-
+): Promise<{ verified: boolean; status: "active" | "pending"; activated: boolean }> {
   const client = await getDB();
+  const razorpaySubscriptionId = body.razorpay_subscription_id;
 
   const ok = verifyCheckoutSignature(body);
   if (!ok) {
     logger.warn("Razorpay signature mismatch on verify", { userId, body });
     throw new Error("Signature verification failed");
   }
+
   const { rows } = await client.query(
     `SELECT 1 FROM user_subscriptions
      WHERE user_id = $1
@@ -586,13 +656,69 @@ export async function verifySubscriptionPayment(
          razorpay_subscription_id = $2
          OR pending_razorpay_subscription_id = $2
        )`,
-    [userId, body.razorpay_subscription_id]
+    [userId, razorpaySubscriptionId]
   );
   if (rows.length === 0) {
     throw new Error("Subscription does not belong to this user");
   }
-  return { verified: true };
 
+  // Wait for webhook (or a concurrent activate) to flip local status to active.
+  const deadline = Date.now() + VERIFY_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (await isSubscriptionLocallyActive(userId, razorpaySubscriptionId)) {
+      return { verified: true, status: "active", activated: true };
+    }
+    await sleep(VERIFY_POLL_MS);
+  }
+
+  // Webhook slow/missing — confirm with Razorpay and activate if already live.
+  try {
+    const live = await razorpay.subscriptions.fetch(razorpaySubscriptionId);
+    const liveStatus = live.status;
+    const canActivate = liveStatus === "active" || liveStatus === "authenticated";
+
+    if (canActivate) {
+      const periodStart =
+        typeof live.current_start === "number"
+          ? live.current_start
+          : Math.floor(Date.now() / 1000);
+      const periodEnd =
+        typeof live.current_end === "number"
+          ? live.current_end
+          : periodStart + 30 * 24 * 60 * 60;
+
+      const activated = await activateSubscriptionByRazorpayId(
+        razorpaySubscriptionId,
+        live.plan_id,
+        periodStart,
+        periodEnd
+      );
+
+      if (activated || (await isSubscriptionLocallyActive(userId, razorpaySubscriptionId))) {
+        logger.info("Verify activated subscription via Razorpay fetch fallback", {
+          userId,
+          razorpaySubscriptionId,
+          liveStatus,
+        });
+        return { verified: true, status: "active", activated: true };
+      }
+    }
+
+    logger.warn("Verify payment OK but subscription still pending after wait", {
+      userId,
+      razorpaySubscriptionId,
+      liveStatus,
+    });
+  } catch (err) {
+    logger.warn("Verify Razorpay fetch fallback failed", {
+      userId,
+      razorpaySubscriptionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Signature was valid — payment received; activation still in flight.
+  return { verified: true, status: "pending", activated: false };
 }
 
 /**

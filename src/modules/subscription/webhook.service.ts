@@ -72,11 +72,11 @@ export async function handleSubscriptionEvent(payload: RazorpayWebhookPayload): 
       break;
 
     case "subscription.activated":
-      await activateSubscription(sub.id, sub.plan_id, sub.current_start, sub.current_end);
+      await activateSubscriptionByRazorpayId(sub.id, sub.plan_id, sub.current_start, sub.current_end);
       break;
 
     case "subscription.charged":
-      await activateSubscription(sub.id, sub.plan_id, sub.current_start, sub.current_end);
+      await activateSubscriptionByRazorpayId(sub.id, sub.plan_id, sub.current_start, sub.current_end);
       await resetUsageCycle(sub.id, sub.current_start);
       break;
 
@@ -109,22 +109,25 @@ export async function handleSubscriptionEvent(payload: RazorpayWebhookPayload): 
  * `pending_razorpay_subscription_id` (plan change / upgrade-downgrade handoff).
  * When the pending id matches, promotes it to the active subscription fields.
  *
+ * Shared by webhook handlers and verify-payment fallback so activation SQL
+ * does not drift between the two paths.
+ *
  * @async
- * @function activateSubscription
+ * @function activateSubscriptionByRazorpayId
  * @param {string} razorpaySubId - The Razorpay subscription ID associated with the user subscription.
- * @param razorpayPlanId
+ * @param {string} razorpayPlanId - Razorpay plan id on the subscription entity.
  * @param {number} periodStartUnix - The subscription period start timestamp in Unix format.
  * @param {number} periodEndUnix - The subscription period end timestamp in Unix format.
- * @returns {Promise<void>} Resolves when the subscription has been activated.
+ * @returns {Promise<boolean>} True when a local subscription row was updated.
  *
  * @throws {Error} If a database error occurs while updating the subscription.
  */
-async function activateSubscription(
+export async function activateSubscriptionByRazorpayId(
   razorpaySubId: string,
   razorpayPlanId: string,
   periodStartUnix: number,
   periodEndUnix: number
-): Promise<void> {
+): Promise<boolean> {
   const db = await getDB();
 
   // Single round-trip: resolve plan_id and update the subscription row together.
@@ -149,7 +152,9 @@ async function activateSubscription(
 
   if (!rowCount) {
     logger.warn(`activateSubscription matched no row for razorpaySubId=${razorpaySubId}`);
+    return false;
   }
+  return true;
 }
 /**
  * Updates the status of a user subscription from a Razorpay lifecycle event.
