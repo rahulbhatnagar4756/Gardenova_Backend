@@ -2156,21 +2156,24 @@ export const rescheduleNotificationService = async (
         generic: 'generic_care',
     };
 
-    // If preferred_time > NOW()::time → today is day 1, so add (frequency - 1) days
-    // If preferred_time <= NOW()::time → today not counted, so add frequency days
+    // Preferred time is an IST wall-clock string. Build next_at as
+    // (IST date + preferred time) AT TIME ZONE 'Asia/Kolkata' so the result
+    // is a correct timestamptz regardless of the DB session TimeZone.
     await pool.query(
         `UPDATE user_plants
      SET
        ${cols.next_at} = (
-         (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date + $1::time
-         + (
-             CASE
-               WHEN $1::time > (NOW() AT TIME ZONE 'Asia/Kolkata')::time
-               THEN ($2 - 1)
-               ELSE $2
-             END
-           ) * INTERVAL '1 day'
-         - INTERVAL '5 hours 30 minutes'
+         (
+           (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+           + $1::time
+           + (
+               CASE
+                 WHEN $1::time > (NOW() AT TIME ZONE 'Asia/Kolkata')::time
+                 THEN ($2 - 1)
+                 ELSE $2
+               END
+             ) * INTERVAL '1 day'
+         ) AT TIME ZONE 'Asia/Kolkata'
        ),
        ${cols.preferred_time} = $1,
        ${cols.frequency}      = $2,
@@ -2213,12 +2216,15 @@ export const completeNotificationService = async (
     const activity = resolveActivity(activityType);
     const cols = getActionColumns(activity);
 
-    // Fetch frequency to calculate next_at
+    // Fetch frequency + preferred_time so next_at keeps the IST wall-clock preference
     const freqRes = await pool.query(
-        `SELECT ${cols.frequency} AS frequency FROM user_plants WHERE id = $1`,
+        `SELECT ${cols.frequency} AS frequency,
+                ${cols.preferred_time} AS preferred_time
+         FROM user_plants WHERE id = $1`,
         [userPlantId]
     );
     const frequency: number = freqRes.rows[0]?.frequency ?? 0;
+    const preferredTime: string = freqRes.rows[0]?.preferred_time ?? "09:00:00";
 
     if (frequency <= 0) {
         throw new Error(
@@ -2226,14 +2232,27 @@ export const completeNotificationService = async (
         );
     }
 
+    // Same IST preferred-time math as rescheduleNotificationService — never NOW()+days
+    // (that would shift the clock away from preferred_time).
     await pool.query(
         `UPDATE user_plants
          SET
            ${cols.last_at} = NOW(),
-           ${cols.next_at} = NOW() + ($1 || ' days')::interval,
+           ${cols.next_at} = (
+             (
+               (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date + $1::time
+               + (
+                   CASE
+                     WHEN $1::time > (NOW() AT TIME ZONE 'Asia/Kolkata')::time
+                     THEN ($2 - 1)
+                     ELSE $2
+                   END
+                 ) * INTERVAL '1 day'
+             ) AT TIME ZONE 'Asia/Kolkata'
+           ),
            updated_at = NOW()
-         WHERE id = $2 AND user_id = $3`,
-        [frequency, userPlantId, userId]
+         WHERE id = $3 AND user_id = $4`,
+        [preferredTime, frequency, userPlantId, userId]
     );
 };
 /**
@@ -2276,12 +2295,16 @@ export const disableNotificationService = async (
  * missed reminder only shows as "missed" for one day before rolling forward
  * to the next cycle (upcoming).
  *
+ * Preferred time is stored as a plain HH:MM:SS string (IST wall clock, no TZ).
+ * Do NOT merely add day intervals to next_at — that keeps whatever UTC clock
+ * was already on the column (e.g. after complete used NOW()). Rebuild the
+ * timestamp from the rolled IST calendar date + preferred_time via
+ * `(ist_date + preferred_time) AT TIME ZONE 'Asia/Kolkata'` (same idea as
+ * rescheduleNotificationService). Do not subtract a hard-coded 5h30m from a
+ * naive timestamp — that depends on the DB session TimeZone and drifts.
+ *
  * Jumps straight to the next future occurrence even if multiple cycles were
  * missed (e.g. server downtime), rather than advancing one cycle per run.
- *
- * Note: do not exclude rows based on last_at ≈ next_at - frequency. After a
- * prior complete that equality remains true when the next cycle goes overdue,
- * which previously blocked roll-forward forever.
  *
  * @returns {Promise<void>}
  */
@@ -2293,10 +2316,33 @@ export const autoRescheduleMissedNotificationsService = async (): Promise<void> 
 
         await pool.query(`
             UPDATE user_plants
-            SET ${cols.next_at} = ${cols.next_at} + (
-                    ${cols.frequency} || ' days'
-                )::interval * CEIL(
-                    EXTRACT(EPOCH FROM (NOW() - ${cols.next_at})) / (${cols.frequency} * 86400)
+            SET ${cols.next_at} = (
+                  WITH rolled AS (
+                    SELECT
+                      (
+                        (${cols.next_at} AT TIME ZONE 'Asia/Kolkata')::date
+                        + (
+                            (${cols.frequency})::int * GREATEST(
+                              1,
+                              CEIL(
+                                EXTRACT(EPOCH FROM (NOW() - ${cols.next_at}))
+                                / (NULLIF(${cols.frequency}, 0) * 86400.0)
+                              )::int
+                            )
+                          )
+                      ) AS ist_date,
+                      COALESCE(${cols.preferred_time}, '09:00:00')::time AS pref
+                  ),
+                  candidate AS (
+                    -- Treat (IST date + preferred HH:MM:SS) as Asia/Kolkata wall clock
+                    SELECT ((ist_date + pref) AT TIME ZONE 'Asia/Kolkata') AS ts
+                    FROM rolled
+                  )
+                  SELECT CASE
+                    WHEN ts > NOW() THEN ts
+                    ELSE ts + (${cols.frequency} || ' days')::interval
+                  END
+                  FROM candidate
                 ),
                 updated_at = NOW()
             WHERE ${cols.enabled} = true
