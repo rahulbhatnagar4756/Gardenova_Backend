@@ -406,7 +406,7 @@ export const sendVerificationEmail = async (email:string, code:string, expiratio
   const mailOptions = {
     from: process.env.EMAIL_FROM,
     to: email,
-    subject: "Email Verification - Your 4-Digit Code",
+    subject: "Email Verification - Your Verification Code",
     html: sendVerificationEmailTemplate(code, expiration),
   };
   await transporter.sendMail(mailOptions);

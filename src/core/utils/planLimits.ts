@@ -41,7 +41,7 @@ export const getUserActivePlan = async (userId: string): Promise<ActivePlan | nu
     FROM user_subscriptions us
     JOIN subscription_plans sp ON sp.id = us.plan_id
     WHERE us.user_id = $1
-      AND us.status = 'active'
+      AND us.status IN ('active', 'in_grace')
     ORDER BY us.created_at DESC
     LIMIT 1
     `,

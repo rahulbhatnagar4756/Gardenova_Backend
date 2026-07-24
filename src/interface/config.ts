@@ -30,8 +30,8 @@ export interface Config {
   FB_APP_ID: string;
   // APPDEV_URL: string;
   FB_APP_SECRET: string;
-  RAZORPAY_KEY_ID: string;
-  RAZORPAY_KEY_SECRET: string;
+  GOOGLE_PLAY_PACKAGE_NAME: string;
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: string;
   TWILIO_ACCOUNT_SID: string;
   TWILIO_AUTH_TOKEN: string;
   TWILIO_PHONE_NUMBER: string;

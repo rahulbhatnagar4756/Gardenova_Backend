@@ -49,8 +49,9 @@ const config: Config = {
   FB_APP_ID: getEnv("FB_APP_ID"),
   // APPDEV_URL: getEnv("APPDEV_URL"),
   FB_APP_SECRET: getEnv("FB_APP_SECRET"),
-  RAZORPAY_KEY_ID: getEnv("RAZORPAY_KEY_ID"),
-  RAZORPAY_KEY_SECRET: getEnv("RAZORPAY_KEY_SECRET"),
+  // Billing (Google Play). Optional at boot — verify/RTDN throw if missing.
+  GOOGLE_PLAY_PACKAGE_NAME: process.env.GOOGLE_PLAY_PACKAGE_NAME ?? "",
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON ?? "",
   TWILIO_ACCOUNT_SID: getEnv("TWILIO_ACCOUNT_SID"),
   TWILIO_AUTH_TOKEN: getEnv("TWILIO_AUTH_TOKEN"),
   TWILIO_PHONE_NUMBER: getEnv("TWILIO_PHONE_NUMBER"),

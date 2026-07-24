@@ -1,69 +1,53 @@
-import { connectDB, getDB } from "../../core/config/db";
-import config from "../../core/config/env";
-import { GetAllPlansWithDetailResponse, SubscriptionPlan, UserSubscription, VerifySubscriptionBody } from "../../interface/subscription";
-import Razorpay from "razorpay";
-import { findUserById } from "../auth/authRepository";
+import { getDB } from "../../core/config/db";
+import {
+  GetAllPlansWithDetailResponse,
+  SubscriptionPlan,
+  UserSubscription,
+  VerifySubscriptionBody,
+} from "../../interface/subscription";
 import logger from "../../core/config/logger";
-import { verifyCheckoutSignature } from "./razorPay.service";
-import { activateSubscriptionByRazorpayId } from "./webhook.service";
-
-const VERIFY_WAIT_MS = 15_000;
-const VERIFY_POLL_MS = 500;
-
-const razorpay = new Razorpay({
-  key_id: config.RAZORPAY_KEY_ID,
-  key_secret: config.RAZORPAY_KEY_SECRET,
-});
+import {
+  acknowledgePlaySubscription,
+  extractLineItem,
+  fetchPlaySubscription,
+  mapPlayStateToLocal,
+} from "./googlePlay.service";
+import { syncSubscriptionFromPlay } from "./webhook.service";
 
 /**
- * Fetch all active subscription plans along with their limits/details.
+ * Fetch all active subscription plans with feature display labels.
  *
- * This service queries the database to retrieve:
- * - Plan metadata (name, tier, pricing, status)
- * - Plan limits and feature entitlements (scans, AI features, exports, etc.)
- *
- * It joins `plans` and `plan_limits` tables to return a unified dataset
- * for all active subscription plans.
- *
- * @async
- * @function getAllPlansWithDetailService
- *
- * @returns {Promise<GetAllPlansWithDetailResponse>} Returns an object containing:
- * - `success`: boolean indicating operation status
- * - `data`: array of subscription plans with details (if successful)
- * - `message`: error message (if failed)
- *
- * @throws Does not throw; errors are caught and returned in a structured response:
- * - `{ success: false, message: "Failed to fetch plans" }`
+ * @returns {Promise<GetAllPlansWithDetailResponse>} Plans payload or failure message.
  */
 export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDetailResponse> => {
-  const client = await connectDB();
+  const client = getDB();
   try {
     const query = `
       SELECT
-        id,
-        code,
-        tier,
-        billing_cycle,
-        price_inr,
-        razorpay_plan_id,
-        features
+        id, code, tier, billing_cycle, price_inr,
+        google_product_id, google_base_plan_id, google_offer_id, features
       FROM subscription_plans
       WHERE is_active = true
-      ORDER BY price_inr ASC
+      ORDER BY
+        CASE tier
+          WHEN 'free' THEN 0 WHEN 'starter' THEN 1
+          WHEN 'plus' THEN 2 WHEN 'pro' THEN 3 ELSE 4
+        END,
+        CASE billing_cycle WHEN 'monthly' THEN 0 WHEN 'yearly' THEN 1 ELSE 2 END
     `;
-    const result = await client.query(query);
+    const { rows } = await client.query(query);
 
-    const plans = result.rows.map((plan) => {
-      const f = plan.features; // JSONB column comes back as parsed JS object already
-
+    const data = rows.map((plan) => {
+      const f = plan.features;
       return {
         id: plan.id,
         code: plan.code,
         tier: plan.tier,
         billing_cycle: plan.billing_cycle,
         price_inr: plan.price_inr,
-        razorpay_plan_id: plan.razorpay_plan_id,
+        google_product_id: plan.google_product_id,
+        google_base_plan_id: plan.google_base_plan_id,
+        google_offer_id: plan.google_offer_id,
         features: [
           {
             key: "diagnosis_scans",
@@ -71,7 +55,7 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
               f.diagnosis_scans === null
                 ? "Unlimited Diagnosis Scans"
                 : `${f.diagnosis_scans} Diagnosis Scans per month`,
-            enabled: f.diagnosis_scans === null || f.diagnosis_scans > 0
+            enabled: f.diagnosis_scans === null || f.diagnosis_scans > 0,
           },
           {
             key: "landscape_gens",
@@ -79,130 +63,101 @@ export const getAllPlansWithDetailService = async (): Promise<GetAllPlansWithDet
               f.landscape_gens === null
                 ? "Unlimited Landscape Generations"
                 : `${f.landscape_gens} Landscape Generations per month`,
-            enabled: f.landscape_gens === null || f.landscape_gens > 0
+            enabled: f.landscape_gens === null || f.landscape_gens > 0,
           },
           {
             key: "saved_plants",
             label:
-              f.saved_plants === null ? "Unlimited Plants" : `${f.saved_plants} Plants`,
-            enabled: f.saved_plants === null || f.saved_plants > 0
+              f.saved_plants === null
+                ? "Unlimited Saved Plants"
+                : `${f.saved_plants} Saved Plants`,
+            enabled: f.saved_plants === null || f.saved_plants > 0,
           },
-          {
-            key: "ai_care_assistant",
-            label: "AI Care Assistant",
-            enabled: f.ai_care_assistant
-          },
-          {
-            key: "hd_renders",
-            label: "HD Renders",
-            enabled: f.hd_renders
-          },
-          {
-            key: "pdf_export",
-            label: "PDF Export",
-            enabled: f.pdf_export
-          },
+          { key: "ai_care_assistant", label: "AI Care Assistant", enabled: !!f.ai_care_assistant },
+          { key: "hd_renders", label: "HD Renders", enabled: !!f.hd_renders },
+          { key: "priority_support", label: "Priority Support", enabled: !!f.priority_support },
+          { key: "pdf_export", label: "PDF Export", enabled: !!f.pdf_export },
           {
             key: "priority_generation",
             label: "Priority Generation",
-            enabled: f.priority_generation
+            enabled: !!f.priority_generation,
           },
-          {
-            key: "premium_themes",
-            label: "Premium Styles/Themes",
-            enabled: f.premium_themes
-          },
+          { key: "premium_themes", label: "Premium Themes", enabled: !!f.premium_themes },
           {
             key: "before_after_download",
-            label: "Before/After Comparison Downloads",
-            enabled: f.before_after_download
+            label: "Before/After Download",
+            enabled: !!f.before_after_download,
           },
-          {
-            key: "priority_support",
-            label: "Priority Support",
-            enabled: f.priority_support
-          },
-          {
-            key: "ad_free",
-            label: "Ad-Free Experience",
-            enabled: f.ad_free
-          }
-        ]
+          { key: "ad_free", label: "Ad Free", enabled: !!f.ad_free },
+        ],
       };
     });
 
-    return {
-      success: true,
-      data: plans
-    };
-  } catch (error) {
-    console.error("Error fetching plans:", error);
-    return {
-      success: false,
-      message: "Failed to fetch plans"
-    };
+    return { success: true, data };
+  } catch (err) {
+    logger.error("getAllPlansWithDetailService failed", { err });
+    return { success: false, message: "Failed to fetch plans" };
   }
 };
+
 /**
- * Retrieves an active subscription plan by its unique code.
+ * Looks up an active plan by its code.
  *
- * Queries the database for an active subscription plan matching the
- * provided plan code. Throws an error if no active plan is found.
- *
- * @async
- * @function getPlanByCode
- * @param {string} planCode - The unique code identifying the subscription plan.
- * @returns {Promise<SubscriptionPlan>} A promise that resolves to the matching active subscription plan.
- *
- * @throws {Error} If no active subscription plan exists for the specified plan code.
+ * @param {string} planCode - Plan code (e.g. starter_monthly).
+ * @returns {Promise<SubscriptionPlan>} Matching subscription plan.
  */
 export const getPlanByCode = async (planCode: string): Promise<SubscriptionPlan> => {
   const client = await getDB();
+  const { rows } = await client.query(
+    `SELECT * FROM subscription_plans WHERE code = $1 AND is_active = true`,
+    [planCode]
+  );
+  if (!rows[0]) throw new Error(`Plan with code ${planCode} not found.`);
+  return rows[0] as SubscriptionPlan;
+};
 
-  const query = `
-    select * from subscription_plans where code = $1 and is_active = true
-    `;
-  const result = await client.query(query, [planCode]);
-
-  if (result.rows.length === 0) {
-    throw new Error(`No active plan found for code: ${planCode}`);
-  }
-  return result.rows[0];
-}
 /**
- * Retrieves the default free subscription plan.
+ * Loads the free plan row.
  *
- * Queries the database for the subscription plan with the code
- * `free` and returns it.
- *
- * @async
- * @function getFreePlan
- * @returns {Promise<SubscriptionPlan>} A promise that resolves to the free subscription plan.
- *
- * @throws {Error} If a database error occurs while retrieving the plan.
+ * @returns {Promise<SubscriptionPlan>} Free subscription plan.
  */
 async function getFreePlan(): Promise<SubscriptionPlan> {
   const client = await getDB();
   const { rows } = await client.query(`SELECT * FROM subscription_plans WHERE code = 'free'`);
-  return rows[0];
+  if (!rows[0]) throw new Error("Free plan not found.");
+  return rows[0] as SubscriptionPlan;
 }
+
 /**
- * Retrieves a user's subscription along with its associated plan.
+ * Resolves a local plan from Google Play product / base plan ids.
  *
- * If the user has no subscription or their subscription is not active,
- * the default free subscription plan is returned instead. The subscription
- * object is still returned (if it exists), allowing callers to inspect its
- * current status.
+ * @param {string} productId - Google Play product id.
+ * @param {string | null | undefined} [basePlanId] - Optional base plan id.
+ * @returns {Promise<SubscriptionPlan | null>} Matching plan, or null if unmapped.
+ */
+async function getPlanByGoogleIds(
+  productId: string,
+  basePlanId?: string | null
+): Promise<SubscriptionPlan | null> {
+  const client = await getDB();
+  const { rows } = await client.query(
+    `SELECT * FROM subscription_plans
+     WHERE google_product_id = $1
+       AND ($2::text IS NULL OR google_base_plan_id = $2)
+       AND is_active = true
+     ORDER BY CASE WHEN google_base_plan_id = $2 THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [productId, basePlanId ?? null]
+  );
+  return (rows[0] as SubscriptionPlan) ?? null;
+}
+
+/**
+ * Returns the user's active/in-grace subscription with plan, or free plan fallback.
  *
- * @async
- * @function getActiveSubscriptionWithPlan
- * @param {string} userId - The unique identifier of the user.
- * @returns {Promise<{ subscription: UserSubscription | null; plan: SubscriptionPlan }>}
- * A promise that resolves to an object containing:
- * - `subscription`: The user's subscription, or `null` if none exists.
- * - `plan`: The active subscription plan or the default free plan.
- *
- * @throws {Error} If a database error occurs while retrieving the subscription or plan.
+ * @param {string} userId - User UUID.
+ * @returns {Promise<{ subscription: UserSubscription | null, plan: SubscriptionPlan }>}
+ * Active subscription (if any) and resolved plan.
  */
 export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
   subscription: UserSubscription | null;
@@ -213,573 +168,178 @@ export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
     `SELECT us.*, row_to_json(sp.*) AS plan
      FROM user_subscriptions us
      JOIN subscription_plans sp ON sp.id = us.plan_id
-     WHERE us.user_id = $1`,
-    [userId]
-  );
-
-  if (rows.length === 0 || rows[0].status !== "active") {
-    // no row, or row exists but not active (cancelled/expired/halted) -> free fallback
-    const plan = await getFreePlan();
-    return { subscription: rows[0] ?? null, plan };
-  }
-
-  const row = rows[0];
-  return { subscription: row, plan: row.plan };
-}
-
-/**
- * Loads the user's subscription row with its actual plan (no free fallback).
- * Used by create/plan-change so a non-active status cannot hide a paid plan.
- *
- * @param {string} userId - User UUID.
- * @returns {Promise<{ subscription: UserSubscription; plan: SubscriptionPlan } | null>}
- */
-async function getSubscriptionRowWithPlan(
-  userId: string
-): Promise<{ subscription: UserSubscription; plan: SubscriptionPlan } | null> {
-  const client = await getDB();
-  const { rows } = await client.query(
-    `SELECT us.*, row_to_json(sp.*) AS plan
-     FROM user_subscriptions us
-     JOIN subscription_plans sp ON sp.id = us.plan_id
-     WHERE us.user_id = $1`,
-    [userId]
-  );
-  if (rows.length === 0) return null;
-  const row = rows[0];
-  return { subscription: row, plan: row.plan };
-}
-
-/**
- * Whether the user still has a paid subscription that should use plan-change
- * (schedule) instead of a brand-new subscribe flow.
- *
- * @param {UserSubscription | null | undefined} subscription - Local subscription row.
- * @param {SubscriptionPlan} plan - Plan linked on that row (not free-fallback).
- * @returns {boolean} True when create should schedule an upgrade/downgrade.
- */
-function shouldSchedulePlanChange(
-  subscription: UserSubscription | null | undefined,
-  plan: SubscriptionPlan
-): boolean {
-  if (!subscription?.razorpay_subscription_id) return false;
-  if (!plan || plan.code === "free" || plan.tier === "free") return false;
-
-  if (subscription.status === "active") return true;
-
-  // Still entitled until period end (cancelled/completed locally but access remains).
-  if (
-    subscription.current_period_end &&
-    new Date(subscription.current_period_end).getTime() > Date.now()
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-
-
-/**
- * Maps Razorpay's subscription status values to this app's internal
- * status enum, since they don't use identical naming.
- * @param {string} razorpayStatus - The subscription status from Razorpay.
- * @returns {"active" | "pending" | "paused" | "halted" | "cancelled" | "expired"}
- * The corresponding internal subscription status.
- * @throws {Error} If the Razorpay status is unrecognized, defaults to "expired" and logs a warning.
- */
-function mapRazorpayStatusToLocal(
-  razorpayStatus: string
-): "active" | "pending" | "paused" | "halted" | "cancelled" | "expired" {
-  switch (razorpayStatus) {
-    case "active":
-    case "authenticated":
-      return "active";
-    case "created":
-    case "pending":
-      return "pending";
-    case "paused":
-      return "paused";
-    case "halted":
-      return "halted";
-    case "cancelled":
-      return "cancelled";
-    case "completed":
-    case "expired":
-      return "expired";
-    default:
-      logger.warn(`Unknown Razorpay subscription status: ${razorpayStatus}, defaulting to expired`);
-      return "expired";
-  }
-}
-/**
- * Creates a Razorpay subscription for the specified user.
- *
- * This service validates the requested subscription plan, ensures the user
- * exists, creates a Razorpay customer if one does not already exist, creates
- * a Razorpay subscription, and stores or updates the user's subscription
- * record in the database with a pending status.
- *
- * @async
- * @function createSubscriptionService
- * @param {string} userId - The unique identifier of the user.
- * @param {string} planCode - The code of the subscription plan to subscribe to.
- * @returns {Promise<{ subscriptionId: string; keyId: string | undefined }>}
- * A promise that resolves to an object containing:
- * - `subscriptionId`: The Razorpay subscription ID.
- * - `keyId`: The Razorpay Key ID used by the client to complete the payment.
- *
- * @throws {Error} If:
- * - The subscription plan does not exist or has no associated Razorpay plan ID.
- * - The user cannot be found.
- * - Creating the Razorpay customer or subscription fails.
- * - Updating the database fails.
- */
-export const createSubscriptionService = async (
-  userId: string,
-  planCode: string
-): Promise<{
-  subscriptionId?: string | undefined;
-  keyId?: string | undefined;
-  scheduled?: boolean;
-  effective_at?: Date | null;
-  pending_plan_code?: string | undefined;
-}> => {
-  const client = await getDB();
-
-  const plan = await getPlanByCode(planCode);
-  if (!plan.razorpay_plan_id) {
-    throw new Error(`Plan with code ${planCode} does not have a valid Razorpay plan ID.`);
-  }
-
-  const user = await findUserById(userId);
-  if (!user) {
-    throw new Error(`User with ID ${userId} not found.`);
-  }
-
-  // Use the real plan on the subscription row — getActiveSubscriptionWithPlan
-  // falls back to "free" when status !== active, which incorrectly sent
-  // monthly→yearly through the fresh-create path (no scheduled/effective_at).
-  const existing = await getSubscriptionRowWithPlan(userId);
-  const currentSubscription = existing?.subscription ?? null;
-  const currentPlan = existing?.plan ?? (await getFreePlan());
-
-  // Buy same plan after cancel-at-period-end = resume (undo cancel), not "already active"
-  if (
-    currentSubscription?.status === "active" &&
-    currentPlan.code === planCode &&
-    currentSubscription.cancel_at_period_end &&
-    !currentSubscription.pending_plan_id
-  ) {
-    await client.query(
-      `UPDATE user_subscriptions
-         SET cancel_at_period_end = false,
-             pending_plan_id = NULL,
-             pending_razorpay_subscription_id = NULL,
-             updated_at = now()
-       WHERE user_id = $1`,
-      [userId]
-    );
-    return {
-      subscriptionId: currentSubscription.razorpay_subscription_id ?? undefined,
-      keyId: process.env.RAZORPAY_KEY_ID,
-      scheduled: false,
-      effective_at: null,
-      pending_plan_code: undefined,
-    };
-  }
-
-  if (currentPlan.code === planCode && currentSubscription?.status === "active") {
-    throw new Error(`The requested plan is already active.`);
-  }
-
-  if (shouldSchedulePlanChange(currentSubscription, currentPlan)) {
-    if (currentPlan.code === planCode) {
-      throw new Error(`The requested plan is already active.`);
-    }
-
-    // Only block when a real plan-change is pending.
-    // cancel_at_period_end alone means "cancel → free" — user may buy a new plan.
-    if (currentSubscription!.pending_plan_id) {
-      throw new Error(
-        `A subscription change is already scheduled.`
-      );
-    }
-
-    const currentPeriodEnd = currentSubscription!.current_period_end;
-    if (!currentPeriodEnd) {
-      throw new Error(
-        `Cannot schedule plan change — current subscription has no period end date.`
-      );
-    }
-
-    const periodStillValid = new Date(currentPeriodEnd).getTime() > Date.now();
-    const localIsActive =
-      currentSubscription!.status === "active" || periodStillValid;
-
-    // ── Verify live status on Razorpay before attempting any change ──
-    const liveSubscription = await razorpay.subscriptions.fetch(
-      currentSubscription!.razorpay_subscription_id!
-    );
-    const liveStatus = liveSubscription.status;
-    const liveHealthy = ["authenticated", "active"].includes(liveStatus);
-    const liveUncharged = ["created", "pending"].includes(liveStatus);
-    const liveTerminal = ["halted", "cancelled", "completed", "expired"].includes(liveStatus);
-
-    // Allow plan change when:
-    // - RP sub is healthy, OR
-    // - local is entitled and RP is still created/pending (webhook race), OR
-    // - local is still entitled for the current period even if RP already
-    //   shows cancelled/completed (e.g. a previous change attempt cancelled RP early)
-    const liveAllowsChange =
-      liveHealthy ||
-      (localIsActive && liveUncharged) ||
-      (localIsActive && periodStillValid && liveTerminal);
-
-    if (!liveAllowsChange) {
-      // Only sync terminal RP status to local when the paid period is over.
-      // Never force the user to free mid-period just because RP fetch failed a change.
-      if (liveTerminal && !periodStillValid) {
-        await client.query(
-          `UPDATE user_subscriptions
-             SET status = $1, updated_at = now()
-           WHERE user_id = $2`,
-          [mapRazorpayStatusToLocal(liveStatus), userId]
-        );
-      }
-
-      throw new Error(
-        `Cannot change plan — current subscription is "${liveStatus}" on Razorpay. ` +
-        `Please start a new subscription instead.`
-      );
-    }
-
-    const startAtUnix = Math.floor(new Date(currentPeriodEnd).getTime() / 1000);
-    // Razorpay requires a finite total_count; after these cycles the sub completes
-    // and the user must create a new subscription to continue paid access.
-    const totalCount = plan.billing_cycle === "yearly" ? 1 : 12;
-
-    // ── 1. Create new subscription, scheduled to start when old one ends ──
-    const newRpSubscription = await razorpay.subscriptions.create({
-      plan_id: plan.razorpay_plan_id,
-      customer_notify: 1,
-      total_count: totalCount,
-      start_at: startAtUnix,
-      notes: { userId, planCode },
-    } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-
-    // ── 2. Persist pending FIRST so a later cancel failure cannot leave the
-    // user without a scheduled target (and we never hard-cancel before DB write).
-    await client.query(
-      `UPDATE user_subscriptions
-         SET pending_plan_id = $1,
-             pending_razorpay_subscription_id = $2,
-             cancel_at_period_end = true,
-             updated_at = now()
-       WHERE user_id = $3`,
-      [plan.id, newRpSubscription.id, userId]
-    );
-
-    // ── 3. Cancel old subscription at cycle end (never immediate while local
-    // is entitled — immediate cancel was dropping yearly users to free).
-    // Skip if RP is already terminal; just keep local entitlement until period end.
-    // Also skip if already cancel_at_period_end locally (user cancelled then buys another plan).
-    if (!liveTerminal && !currentSubscription!.cancel_at_period_end) {
-      try {
-        await razorpay.subscriptions.cancel(currentSubscription!.razorpay_subscription_id!, {
-          cancel_at_cycle_end: 1,
-        } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-      } catch (cancelErr) {
-        const msg =
-          (cancelErr as { error?: { description?: string } })?.error?.description ||
-          (cancelErr instanceof Error ? cancelErr.message : String(cancelErr));
-
-        // Already marked to cancel at cycle end is fine — keep pending schedule.
-        const alreadyCancelling = /already|cancel|not cancellable|completed status/i.test(msg);
-        if (!alreadyCancelling) {
-          // Roll back pending + new RP sub so user stays on current plan cleanly.
-          try {
-            await razorpay.subscriptions.cancel(newRpSubscription.id);
-          } catch {
-            /* best-effort */
-          }
-          await client.query(
-            `UPDATE user_subscriptions
-               SET pending_plan_id = NULL,
-                   pending_razorpay_subscription_id = NULL,
-                   cancel_at_period_end = false,
-                   updated_at = now()
-             WHERE user_id = $1`,
-            [userId]
-          );
-          throw cancelErr;
-        }
-
-        logger.warn("Old subscription cancel_at_cycle_end soft-failed; keeping pending change", {
-          userId,
-          oldSub: currentSubscription!.razorpay_subscription_id,
-          message: msg,
-        });
-      }
-    }
-
-    return {
-      subscriptionId: newRpSubscription.id,
-      keyId: process.env.RAZORPAY_KEY_ID,
-      scheduled: true,
-      effective_at: new Date(currentPeriodEnd),
-      pending_plan_code: planCode,
-    };
-  }
-
-  // No active paid subscription (free plan or none) -> create a fresh one
-  let customerId = user.razorpay_customer_id as string | null;
-  if (!customerId) {
-    const customer = await razorpay.customers.create({
-      name: user.name,
-      email: user.email ?? undefined,
-      contact: user.phone_number ?? "",
-      notes: { userId },
-    });
-    customerId = customer.id;
-    await client.query(`UPDATE users SET razorpay_customer_id = $1 WHERE id = $2`, [
-      customerId,
-      userId,
-    ]);
-  }
-
-  // Razorpay requires a finite total_count; after these cycles the sub completes
-  // and the user must create a new subscription to continue paid access.
-  const totalCount = plan.billing_cycle === "yearly" ? 1 : 12;
-
-  const rpSubscription = await razorpay.subscriptions.create({
-    plan_id: plan.razorpay_plan_id,
-    customer_notify: 1,
-    total_count: totalCount,
-    notes: { userId, planCode },
-  });
-
-  await client.query(
-    `INSERT INTO user_subscriptions (user_id, plan_id, razorpay_subscription_id, razorpay_customer_id, status)
-     VALUES ($1, $2, $3, $4, 'pending')
-     ON CONFLICT (user_id) DO UPDATE
-       SET plan_id = EXCLUDED.plan_id,
-           razorpay_subscription_id = EXCLUDED.razorpay_subscription_id,
-           razorpay_customer_id = EXCLUDED.razorpay_customer_id,
-           status = 'pending',
-           pending_plan_id = NULL,
-           pending_razorpay_subscription_id = NULL,
-           cancel_at_period_end = false,
-           updated_at = now()`,
-    [userId, plan.id, rpSubscription.id, customerId]
-  );
-
-  return {
-    subscriptionId: rpSubscription.id,
-    keyId: process.env.RAZORPAY_KEY_ID,
-  };
-};
-/**
- * Checks whether a specific Razorpay subscription is marked as active
- * for the given user in the local database.
- *
- * This function only verifies the subscription status stored locally.
- * It does not make any API calls to Razorpay or validate the subscription's
- * current status with the payment provider.
- *
- * @param {string} userId - The unique identifier of the user.
- * @param {string} razorpaySubscriptionId - The Razorpay subscription ID to verify.
- * @returns {Promise<boolean>} Resolves to `true` if an active matching subscription
- * exists in the local database; otherwise, `false`.
- */
-async function isSubscriptionLocallyActive(
-  userId: string,
-  razorpaySubscriptionId: string
-): Promise<boolean> {
-  const client = await getDB();
-  const { rows } = await client.query(
-    `SELECT 1 FROM user_subscriptions
-     WHERE user_id = $1
-       AND status = 'active'
-       AND razorpay_subscription_id = $2
+     WHERE us.user_id = $1
+       AND us.status IN ('active', 'in_grace')
      LIMIT 1`,
-    [userId, razorpaySubscriptionId]
+    [userId]
   );
-  return rows.length > 0;
+
+  if (rows.length === 0) {
+    return { subscription: null, plan: await getFreePlan() };
+  }
+
+  const row = rows[0];
+  const { plan, ...subscription } = row;
+  return {
+    subscription: subscription as UserSubscription,
+    plan: plan as SubscriptionPlan,
+  };
 }
 
 /**
- * Sleep helper for verify polling.
- * @param {number} ms - Milliseconds to sleep.
- * @returns {Promise<void>} Resolves after the specified delay.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Verifies a Razorpay subscription payment for a user.
+ * Verifies a Google Play purchase, acknowledges it, and activates the local subscription.
  *
- * Validates the checkout signature and ownership, then waits (polls) for the
- * webhook to activate the subscription locally. If still pending after the
- * wait window, fetches live status from Razorpay and activates locally when
- * the subscription is already active/authenticated.
- *
- * @async
- * @function verifySubscriptionPayment
- * @param {string} userId - The unique identifier of the user attempting to verify the subscription.
- * @param {VerifySubscriptionBody} body - Razorpay payment verification payload containing payment ID, subscription ID, and signature.
- * @returns {Promise<{ verified: boolean; status: 'active' | 'pending'; activated: boolean }>}
- *
- * @throws {Error} If:
- * - The Razorpay signature verification fails.
- * - The subscription does not belong to the specified user.
- * - A database operation fails.
+ * @param {string} userId - Purchasing user UUID.
+ * @param {VerifySubscriptionBody} body - Purchase token and product identifiers.
+ * @returns {Promise<{ verified: boolean, status: string, activated: boolean, planCode: string }>}
+ * Verification outcome and local plan code.
  */
 export async function verifySubscriptionPayment(
   userId: string,
   body: VerifySubscriptionBody
-): Promise<{ verified: boolean; status: "active" | "pending"; activated: boolean }> {
+): Promise<{
+  verified: boolean;
+  status: string;
+  activated: boolean;
+  planCode: string;
+}> {
   const client = await getDB();
-  const razorpaySubscriptionId = body.razorpay_subscription_id;
+  const { purchaseToken, productId, basePlanId, orderId } = body;
 
-  const ok = verifyCheckoutSignature(body);
-  if (!ok) {
-    logger.warn("Razorpay signature mismatch on verify", { userId, body });
-    throw new Error("Signature verification failed");
+  if (!purchaseToken || !productId) {
+    throw new Error("purchaseToken and productId are required");
   }
 
-  const { rows } = await client.query(
-    `SELECT 1 FROM user_subscriptions
-     WHERE user_id = $1
-       AND (
-         razorpay_subscription_id = $2
-         OR pending_razorpay_subscription_id = $2
-       )`,
-    [userId, razorpaySubscriptionId]
+  const play = await fetchPlaySubscription(purchaseToken);
+  const line = extractLineItem(play);
+  const resolvedProductId = line.productId || productId;
+  const resolvedBasePlanId = line.basePlanId || basePlanId || null;
+
+  if (line.productId && line.productId !== productId) {
+    logger.warn("Verify productId mismatch with Play line item", {
+      bodyProductId: productId,
+      playProductId: line.productId,
+    });
+  }
+
+  const plan = await getPlanByGoogleIds(resolvedProductId, resolvedBasePlanId);
+  if (!plan) {
+    throw new Error(
+      `No local plan mapped for productId=${resolvedProductId} basePlanId=${resolvedBasePlanId}`
+    );
+  }
+
+  const status = mapPlayStateToLocal(play.subscriptionState);
+  const activatable = status === "active" || status === "in_grace";
+
+  let acknowledged = play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+  if (!acknowledged && activatable) {
+    try {
+      await acknowledgePlaySubscription(resolvedProductId, purchaseToken);
+      acknowledged = true;
+    } catch (err) {
+      logger.warn("Acknowledge failed during verify", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const periodStart = play.startTime ? new Date(play.startTime) : new Date();
+  const periodEnd = line.expiryTime;
+
+  await client.query(
+    `INSERT INTO google_play_purchases
+       (user_id, product_id, base_plan_id, purchase_token, order_id, acknowledged, raw_response)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (purchase_token) DO UPDATE SET
+       acknowledged = EXCLUDED.acknowledged,
+       raw_response = EXCLUDED.raw_response,
+       updated_at = now()`,
+    [
+      userId,
+      resolvedProductId,
+      resolvedBasePlanId,
+      purchaseToken,
+      orderId ?? play.latestOrderId ?? null,
+      acknowledged,
+      play,
+    ]
   );
-  if (rows.length === 0) {
-    throw new Error("Subscription does not belong to this user");
-  }
 
-  // Wait for webhook (or a concurrent activate) to flip local status to active.
-  const deadline = Date.now() + VERIFY_WAIT_MS;
-  while (Date.now() < deadline) {
-    if (await isSubscriptionLocallyActive(userId, razorpaySubscriptionId)) {
-      return { verified: true, status: "active", activated: true };
-    }
-    await sleep(VERIFY_POLL_MS);
-  }
-
-  // Webhook slow/missing — confirm with Razorpay and activate if already live.
-  try {
-    const live = await razorpay.subscriptions.fetch(razorpaySubscriptionId);
-    const liveStatus = live.status;
-    const canActivate = liveStatus === "active" || liveStatus === "authenticated";
-
-    if (canActivate) {
-      const periodStart =
-        typeof live.current_start === "number"
-          ? live.current_start
-          : Math.floor(Date.now() / 1000);
-      const periodEnd =
-        typeof live.current_end === "number"
-          ? live.current_end
-          : periodStart + 30 * 24 * 60 * 60;
-
-      const activated = await activateSubscriptionByRazorpayId(
-        razorpaySubscriptionId,
-        live.plan_id,
-        periodStart,
-        periodEnd
-      );
-
-      if (activated || (await isSubscriptionLocallyActive(userId, razorpaySubscriptionId))) {
-        logger.info("Verify activated subscription via Razorpay fetch fallback", {
-          userId,
-          razorpaySubscriptionId,
-          liveStatus,
-        });
-        return { verified: true, status: "active", activated: true };
-      }
-    }
-
-    logger.warn("Verify payment OK but subscription still pending after wait", {
+  await client.query(
+    `INSERT INTO user_subscriptions (
+       user_id, plan_id, status, purchase_token, order_id,
+       linked_purchase_token, auto_renewing, acknowledged,
+       current_period_start, current_period_end, cancel_at_period_end,
+       raw_play_payload, updated_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now()
+     )
+     ON CONFLICT (user_id) DO UPDATE SET
+       plan_id = EXCLUDED.plan_id,
+       status = EXCLUDED.status,
+       purchase_token = EXCLUDED.purchase_token,
+       order_id = COALESCE(EXCLUDED.order_id, user_subscriptions.order_id),
+       linked_purchase_token = COALESCE(EXCLUDED.linked_purchase_token, user_subscriptions.linked_purchase_token),
+       auto_renewing = EXCLUDED.auto_renewing,
+       acknowledged = EXCLUDED.acknowledged,
+       current_period_start = EXCLUDED.current_period_start,
+       current_period_end = EXCLUDED.current_period_end,
+       cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+       raw_play_payload = EXCLUDED.raw_play_payload,
+       pending_plan_id = NULL,
+       updated_at = now()`,
+    [
       userId,
-      razorpaySubscriptionId,
-      liveStatus,
-    });
-  } catch (err) {
-    logger.warn("Verify Razorpay fetch fallback failed", {
-      userId,
-      razorpaySubscriptionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+      plan.id,
+      status,
+      purchaseToken,
+      orderId ?? play.latestOrderId ?? null,
+      play.linkedPurchaseToken ?? null,
+      line.autoRenewing,
+      acknowledged,
+      periodStart,
+      periodEnd,
+      line.autoRenewing === false && status === "active",
+      play,
+    ]
+  );
+
+  // Link purchase audit row to subscription
+  await client.query(
+    `UPDATE google_play_purchases g
+       SET user_subscription_id = us.id, updated_at = now()
+     FROM user_subscriptions us
+     WHERE g.purchase_token = $1 AND us.user_id = $2`,
+    [purchaseToken, userId]
+  );
+
+  if (activatable) {
+    await syncSubscriptionFromPlay(purchaseToken, play);
   }
 
-  // Signature was valid — payment received; activation still in flight.
-  return { verified: true, status: "pending", activated: false };
+  return {
+    verified: true,
+    status,
+    activated: activatable,
+    planCode: plan.code,
+  };
 }
 
 /**
- * Retrieves the authenticated user's subscription details along with usage information.
+ * Builds the "my subscription" API payload including usage and pending plan.
  *
- * This service fetches the user's active subscription and associated plan details.
- * If the user does not have an active paid subscription, the free plan is returned
- * as a fallback. It also retrieves usage metrics for the current billing cycle.
- *
- * @async
- * @function getMySubscriptionService
- * @param {string} userId - The unique identifier of the user.
- * @returns {Promise<{
- *   plan: {
- *     code: string;
- *    tier: "free" | "starter" | "plus" | "pro";
- *    billing_cycle: "monthly" | "yearly" | null;
- *    features: {
- *    diagnosis_scans: number | null;
- *   landscape_gens: number | null;
- *  saved_plants: number | null;
- * ai_care_assistant: boolean;
- * hd_renders: boolean;
- * priority_support: boolean;
- * pdf_export: boolean;
- * priority_generation: boolean;
- * premium_themes: boolean;
- * before_after_download: boolean;
- * ad_free: boolean;
- * };
- *   };
- *   status: "active" | "pending" | "paused" | "halted" | "cancelled" | "expired";
- *  current_period_end: Date | null;
- *  cancel_at_period_end: boolean;
- *  usage: {
- *   diagnosis_scans_used: number;
- *  landscape_gens_used: number;
- * };
- * }>} A promise that resolves to an object containing the user's subscription and usage details.
- * @throws {Error} If a database error occurs while retrieving subscription or usage data.
+ * @param {string} userId - User UUID.
+ * @returns {Promise<object>} Current plan, status, pending change, and feature usage.
  */
 export async function getMySubscriptionService(userId: string): Promise<{
   plan: {
     code: string;
     tier: "free" | "starter" | "plus" | "pro";
     billing_cycle: "monthly" | "yearly" | null;
-    features: {
-      diagnosis_scans: number | null;
-      landscape_gens: number | null;
-      saved_plants: number | null;
-      ai_care_assistant: boolean;
-      hd_renders: boolean;
-      priority_support: boolean;
-      pdf_export: boolean;
-      priority_generation: boolean;
-      premium_themes: boolean;
-      before_after_download: boolean;
-      ad_free: boolean;
-    };
+    features: SubscriptionPlan["features"];
   };
-  status: "active" | "pending" | "paused" | "halted" | "cancelled" | "expired";
+  status: string;
   current_period_end: Date | null;
   cancel_at_period_end: boolean;
   pending_plan: {
@@ -788,10 +348,7 @@ export async function getMySubscriptionService(userId: string): Promise<{
     billing_cycle: "monthly" | "yearly" | null;
   } | null;
   pending_effective_at: Date | null;
-  usage: {
-    diagnosis_scans_used: number;
-    landscape_gens_used: number;
-  };
+  usage: { diagnosis_scans_used: number; landscape_gens_used: number };
 }> {
   const client = await getDB();
   const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
@@ -801,13 +358,11 @@ export async function getMySubscriptionService(userId: string): Promise<{
 
   if (cycleStart) {
     const period = new Date(cycleStart).toISOString().slice(0, 7);
-
     const { rows } = await client.query(
       `SELECT feature_type, count FROM feature_usage
-     WHERE user_id = $1 AND period = $2`,
+       WHERE user_id = $1 AND period = $2`,
       [userId, period]
     );
-
     for (const row of rows) {
       if (row.feature_type === "diagnosis") usage.diagnosis_scans_used = row.count;
       if (row.feature_type === "landscape") usage.landscape_gens_used = row.count;
@@ -853,161 +408,37 @@ export async function getMySubscriptionService(userId: string): Promise<{
 }
 
 /**
- * Extracts a human-readable message from a Razorpay SDK error.
+ * Marks local cancel_at_period_end. Actual Play cancel is done in the Play Store /
+ * BillingClient; RTDN will sync status afterward.
  *
- * @param {unknown} err - Error thrown by the Razorpay client.
- * @returns {string} Description from Razorpay when available, otherwise a stringified error.
+ * @param {string} userId - User UUID.
+ * @returns {Promise<{ cancel_at_period_end: boolean, active_until: Date | null }>}
+ * Cancellation flags and access end date.
  */
-function razorpayErrorMessage(err: unknown): string {
-  return (
-    (err as { error?: { description?: string } })?.error?.description ||
-    (err instanceof Error ? err.message : String(err))
-  );
-}
-
-/**
- * Returns whether a Razorpay subscription status cannot be cancelled again.
- *
- * @param {string} status - Live Razorpay subscription status.
- * @returns {boolean} True when status is completed, cancelled, or expired.
- */
-function isNonCancellableRazorpayStatus(status: string): boolean {
-  return ["completed", "cancelled", "expired"].includes(status);
-}
-
-/**
- * Returns whether a Razorpay error message indicates the subscription is not cancellable.
- *
- * @param {string} message - Error description from Razorpay.
- * @returns {boolean} True when cancel should be treated as already terminal / non-cancellable.
- */
-function isNonCancellableRazorpayError(message: string): boolean {
-  return /not cancellable|completed status|cancelled status|already.*cancel/i.test(message);
-}
-
-/**
- * Cancels the authenticated user's active paid subscription.
- *
- * This service checks the user's current subscription status, prevents
- * cancellation of free-tier subscriptions, requests Razorpay to cancel
- * the subscription at the end of the current billing cycle, and updates
- * the local subscription record to reflect the pending cancellation.
- * If Razorpay reports the subscription as completed/cancelled, local cancel
- * flags are still applied without failing the request.
- *
- * @async
- * @function cancelSubscriptionService
- * @param {string} userId - The unique identifier of the user whose subscription should be cancelled.
- * @returns {Promise<{ cancel_at_period_end: boolean; active_until: Date | null }>}
- * A promise that resolves to an object indicating:
- * - `cancel_at_period_end`: true if the subscription is set to cancel at the end of the current cycle.
- * - `active_until`: the date until which the subscription remains active.
- */
-export async function cancelSubscriptionService(userId: string): Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
+export async function cancelSubscriptionService(
+  userId: string
+): Promise<{ cancel_at_period_end: boolean; active_until: Date | null }> {
   const { subscription, plan } = await getActiveSubscriptionWithPlan(userId);
   const client = await getDB();
-  if (!subscription || !subscription.razorpay_subscription_id) {
-    throw new Error("No active paid subscription to cancel");
-  }
-  if (plan.code === "free") {
+
+  if (!subscription || plan.code === "free") {
     throw new Error("Already on the free plan");
   }
-
-  // If a plan change is scheduled, drop the pending Razorpay sub first so cancel
-  // means "paid until period end → free", not "keep the pending upgrade".
-  if (subscription.pending_razorpay_subscription_id) {
-    try {
-      await razorpay.subscriptions.cancel(subscription.pending_razorpay_subscription_id);
-    } catch (err) {
-      const msg = razorpayErrorMessage(err);
-      if (!isNonCancellableRazorpayError(msg)) {
-        logger.warn("Failed to cancel pending Razorpay subscription during user cancel", {
-          userId,
-          pendingId: subscription.pending_razorpay_subscription_id,
-          error: msg,
-        });
-      }
-    }
-    await client.query(
-      `UPDATE user_subscriptions
-         SET pending_plan_id = NULL,
-             pending_razorpay_subscription_id = NULL,
-             updated_at = now()
-       WHERE user_id = $1`,
-      [userId]
-    );
+  if (!subscription.purchase_token) {
+    throw new Error("No Google Play purchase to cancel");
   }
-
-  // cancel_at_cycle_end = 1 -> user keeps access till current_period_end, then falls back to free
-  // Skip RP cancel if already scheduled at cycle end from a prior plan-change.
-  if (!subscription.cancel_at_period_end) {
-    let liveStatus: string | null = null;
-    try {
-      const live = await razorpay.subscriptions.fetch(subscription.razorpay_subscription_id);
-      liveStatus = live.status;
-    } catch (err) {
-      logger.warn("Failed to fetch Razorpay subscription before cancel", {
-        userId,
-        subscriptionId: subscription.razorpay_subscription_id,
-        error: razorpayErrorMessage(err),
-      });
-    }
-
-    // Yearly total_count=1 often ends as "completed" — Razorpay rejects cancel.
-    // Still mark local cancel_at_period_end so the app ends access at period end.
-    if (!liveStatus || !isNonCancellableRazorpayStatus(liveStatus)) {
-      try {
-        await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id, {
-          cancel_at_cycle_end: 1,
-        } as any);//eslint-disable-line @typescript-eslint/no-explicit-any
-      } catch (err) {
-        const msg = razorpayErrorMessage(err);
-        if (isNonCancellableRazorpayError(msg)) {
-          logger.info("Razorpay sub already non-cancellable; applying local cancel only", {
-            userId,
-            subscriptionId: subscription.razorpay_subscription_id,
-            liveStatus,
-            message: msg,
-          });
-        } else {
-          // Uncharged ("created") often rejects cancel_at_cycle_end — try immediate cancel.
-          try {
-            await razorpay.subscriptions.cancel(subscription.razorpay_subscription_id);
-          } catch (err2) {
-            const msg2 = razorpayErrorMessage(err2);
-            if (!isNonCancellableRazorpayError(msg2)) {
-              throw new Error(msg2);
-            }
-            logger.info("Razorpay immediate cancel skipped — already non-cancellable", {
-              userId,
-              message: msg2,
-            });
-          }
-        }
-      }
-    } else {
-      logger.info("Skipping Razorpay cancel — subscription already terminal", {
-        userId,
-        subscriptionId: subscription.razorpay_subscription_id,
-        liveStatus,
-      });
-    }
-  }
-
-  const periodEnded =
-    !!subscription.current_period_end &&
-    new Date(subscription.current_period_end).getTime() <= Date.now();
 
   await client.query(
     `UPDATE user_subscriptions
        SET cancel_at_period_end = true,
-           pending_plan_id = NULL,
-           pending_razorpay_subscription_id = NULL,
-           status = CASE WHEN $2 THEN 'expired' ELSE status END,
+           auto_renewing = false,
            updated_at = now()
      WHERE user_id = $1`,
-    [userId, periodEnded]
+    [userId]
   );
 
-  return { cancel_at_period_end: true, active_until: subscription.current_period_end };
+  return {
+    cancel_at_period_end: true,
+    active_until: subscription.current_period_end,
+  };
 }

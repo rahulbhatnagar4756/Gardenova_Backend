@@ -9,8 +9,8 @@ import {
   googleAuth,
   facebookAuth,
   appleAuth,
-  sendPhoneOtp,
-  verifyPhoneOtp,
+  resendEmailOtp,
+  verifyEmailOtp,
 } from "./authController";
 import {
   registerValidation,
@@ -22,8 +22,8 @@ import {
   googleAuthValidation,
   facebookAuthValidation,
   appleAuthValidation,
-  sendOtpValidation,
-  verifyOtpValidation,
+  sendEmailOtpValidation,
+  verifyEmailOtpValidation,
 } from "./authValidations";
 import validateRequest from "../../core/middleware/validateRequest";
 import auth from "../../core/middleware/authMiddleware";
@@ -43,8 +43,8 @@ const router = Router();
  *   post:
  *     summary: Register a new user
  *     description: |
- *       Supports email registration only.
- *       For phone registration, use `/phone/send-otp` → `/phone/verify-otp` → `/phone/complete-profile`
+ *       Creates a pending account and sends a 6-digit OTP to the email.
+ *       Call `/email/verify-otp` to complete registration.
  *     tags:
  *       - Auth
  *     requestBody:
@@ -57,6 +57,7 @@ const router = Router();
  *               - name
  *               - email
  *               - password
+ *               - phoneNumber
  *               - roleCode
  *             properties:
  *               name:
@@ -69,21 +70,81 @@ const router = Router();
  *               password:
  *                 type: string
  *                 example: Secret@123#
- *               roleCode:
- *                 type: string
- *                 example: U
  *               phoneNumber:
  *                 type: string
  *                 example: "+919876543210"
+ *               roleCode:
+ *                 type: string
+ *                 example: U
  *     responses:
  *       201:
- *         description: User registered successfully
+ *         description: OTP sent to email
  *       400:
  *         description: Validation failed
  *       409:
- *         description: Email already registered
+ *         description: Email or phone already registered
  */
 router.post("/register", validateRequest(registerValidation), register);
+
+/**
+ * @swagger
+ * /api/v1/auth/email/send-otp:
+ *   post:
+ *     summary: Resend email verification OTP
+ *     description: Resends OTP for an unverified registration email. 1-minute cooldown.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: john@example.com
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *       404:
+ *         description: User not found
+ *       429:
+ *         description: Cooldown active
+ */
+router.post("/email/send-otp", validateRequest(sendEmailOtpValidation), resendEmailOtp);
+
+/**
+ * @swagger
+ * /api/v1/auth/email/verify-otp:
+ *   post:
+ *     summary: Verify email OTP and complete registration
+ *     description: Marks email as verified and returns a JWT token.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: john@example.com
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Email verified; JWT returned
+ *       400:
+ *         description: Invalid or expired OTP
+ */
+router.post("/email/verify-otp", validateRequest(verifyEmailOtpValidation), verifyEmailOtp);
 
 /**
  * @swagger
@@ -116,117 +177,10 @@ router.post("/register", validateRequest(registerValidation), register);
  *         description: Login successful
  *       401:
  *         description: Invalid credentials
+ *       403:
+ *         description: Email not verified
  */
 router.post("/login", validateRequest(loginValidation), login);
-
-/**
- * @swagger
- * /api/v1/auth/phone/send-otp:
- *   post:
- *     summary: Send OTP to phone number
- *     description: |
- *       Works for both login and registration.
- *       OTP is valid for 5 minutes.
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - phoneNumber
- *             properties:
- *               phoneNumber:
- *                 type: string
- *                 description: E.164 format
- *                 example: "+919876543210"
- *     responses:
- *       200:
- *         description: OTP sent successfully
- *       400:
- *         description: Invalid phone number format
- */
-router.post("/phone/send-otp", validateRequest(sendOtpValidation), sendPhoneOtp);
-
-/**
- * @swagger
- * /api/v1/auth/phone/verify-otp:
- *   post:
- *     summary: Verify OTP and get token
- *     description: |
- *       Verifies OTP and handles both flows automatically:
- *       - **Existing user** → returns JWT token (`isNewUser: false`)
- *       - **New user** → creates user entry, returns JWT token (`isNewUser: true`) — then call `/phone/complete-profile`
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - phoneNumber
- *               - otp
- *             properties:
- *               phoneNumber:
- *                 type: string
- *                 example: "+919876543210"
- *               otp:
- *                 type: string
- *                 example: "123456"
- *     responses:
- *       200:
- *         description: Existing user logged in
- *         content:
- *           application/json:
- *             example:
- *               token: "eyJ..."
- *               role: "user"
- *               isNewUser: false
- *       201:
- *         description: New user created
- *         content:
- *           application/json:
- *             example:
- *               token: "eyJ..."
- *               role: "user"
- *               isNewUser: true
- *       401:
- *         description: Invalid or expired OTP
- */
-router.post("/phone/verify-otp", validateRequest(verifyOtpValidation), verifyPhoneOtp);
-
-// /**
-//  * @swagger
-//  * /api/v1/auth/phone/complete-profile:
-//  *   post:
-//  *     summary: Complete profile for new phone users
-//  *     description: |
-//  *       Called after `/phone/verify-otp` when `isNewUser: true`.
-//  *       Requires Bearer token received from verify-otp.
-//  *     tags: [Auth]
-//  *     security:
-//  *       - bearerAuth: []
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             required:
-//  *               - name
-//  *             properties:
-//  *               name:
-//  *                 type: string
-//  *                 example: John Doe
-//  *     responses:
-//  *       200:
-//  *         description: Profile completed successfully
-//  *       401:
-//  *         description: Unauthorized
-//  */
-// router.post("/phone/complete-profile", auth, validateRequest(completeProfileValidation), completePhoneProfile);
 
 /**
  * @swagger
@@ -311,30 +265,10 @@ router.patch(
  *     responses:
  *       200:
  *         description: Password reset successful
- *         content:
- *           application/json:
- *             example:
- *               success: true
- *               data:
- *                 message: "Password has been reset successfully"
- *                 email: "john@example.com"
- *               message: "Password reset successful"
  *       401:
  *         description: Unauthorized (missing or invalid JWT)
- *         content:
- *           application/json:
- *             example:
- *               success: false
- *               message: "Unauthorized access"
  *       404:
  *         description: User not found
- *         content:
- *           application/json:
- *             example:
- *               success: false
- *               message: "User not found"
- *       500:
- *         description: Server error
  */
 router.patch(
   "/resetPassword/auth",
@@ -377,7 +311,7 @@ router.patch(
  */
 router.post(
   "/passwordResetToken",
-  validateRequest(handlePasswordResetTokenValidation), // you can merge validations if needed
+  validateRequest(handlePasswordResetTokenValidation),
   handlePasswordResetToken
 );
 
@@ -411,7 +345,6 @@ router.post(
  *       404:
  *         description: User not found
  */
-
 router.post(
   "/verifyToken",
   validateRequest(verifyPasswordResetTokenValidation),
@@ -435,59 +368,12 @@ router.post(
  *             properties:
  *               googleAccessToken:
  *                 type: string
- *                 description: Google Access token obtained from Google Sign-In
- *                 example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjFkYzBmM...
  *               roleCode:
  *                 type: string
- *                 description: Optional role code for new users.
  *                 example: U
  *     responses:
  *       200:
  *         description: Authentication successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Login successful
- *                 data:
- *                   type: object
- *                   properties:
- *                     token:
- *                       type: string
- *                       description: Your backend JWT token for API authentication
- *                       example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... *
- *       400:
- *         description: Validation error or invalid Google token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Google Access token is required
- *       401:
- *         description: Invalid or expired Google token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Invalid or expired Google token
  */
 router.post("/google", validateRequest(googleAuthValidation), googleAuth);
 
@@ -509,81 +395,22 @@ router.post("/google", validateRequest(googleAuthValidation), googleAuth);
  *             properties:
  *               facebookAccessToken:
  *                 type: string
- *                 description: >
- *                   Facebook access token obtained from Facebook Login.
- *                   Typically used by Android or web clients.
- *                 example: EAAJZCZA7C5wB0BAKZAyZA7ZCZAyZA7CZA...
  *               facebookIdToken:
  *                 type: string
- *                 description: >
- *                   Facebook ID token (JWT) obtained from Facebook Login.
- *                   Typically used by iOS clients.
- *                 example: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
  *               roleCode:
  *                 type: string
- *                 description: Optional role code for new users
  *                 example: U
  *     responses:
  *       200:
  *         description: Authentication successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Login successful
- *                 data:
- *                   type: object
- *                   properties:
- *                     token:
- *                       type: string
- *                       description: Backend JWT token for API authentication
- *                       example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *       400:
- *         description: Validation error or missing Facebook token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Either Facebook access token or Facebook ID token is required
- *       401:
- *         description: Invalid or expired Facebook token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Invalid or expired Facebook token
  */
 router.post("/facebook", validateRequest(facebookAuthValidation), facebookAuth);
-
 
 /**
  * @swagger
  * /api/v1/auth/apple:
  *   post:
  *     summary: Sign in or sign up with Apple
- *     description: >
- *       Authenticates a user using Apple Sign-In.
- *       Verifies the Apple identity token, creates a new user on first login,
- *       or logs in an existing user.
- *       Apple provides firstName and lastName **only on the first authorization**.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -596,79 +423,23 @@ router.post("/facebook", validateRequest(facebookAuthValidation), facebookAuth);
  *             properties:
  *               appleIdToken:
  *                 type: string
- *                 description: Apple identity token (JWT) obtained from Apple Sign-In
- *                 example: eyJraWQiOiJBMkJDM0QiLCJhbGciOiJSUzI1NiJ9...
  *               firstName:
  *                 type: string
- *                 description: Optional first name (returned only once by Apple on first login)
- *                 example: John
  *               lastName:
  *                 type: string
- *                 description: Optional last name (returned only once by Apple on first login)
- *                 example: Doe
  *               email:
  *                 type: string
- *                 description: Optional email (returned by Apple or provided by frontend)
- *                 example: john.doe@example.com
  *               roleCode:
  *                 type: string
- *                 description: Optional role code for new users
  *                 example: U
  *     responses:
  *       200:
  *         description: Authentication successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Login successful
- *                 data:
- *                   type: object
- *                   properties:
- *                     token:
- *                       type: string
- *                       description: Backend JWT token for API authentication
- *                       example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *       400:
- *         description: Validation error or missing Apple identity token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Apple identity token is required
- *       401:
- *         description: Invalid or expired Apple identity token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Invalid or expired Apple token
- *       500:
- *         description: Internal server error
  */
 router.post(
   "/apple",
   validateRequest(appleAuthValidation),
   appleAuth
 );
-
 
 export default router;

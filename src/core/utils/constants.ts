@@ -16,11 +16,15 @@ export const HTTP_STATUS = {
 export const MESSAGES = {
   //#region Authentication Messages
   USER_CREATED: "User registered successfully",
+  USER_REGISTER_OTP_SENT: "Registration successful. Please verify the OTP sent to your email",
   LOGIN_SUCCESS: "Login successful",
   INVALID_CREDENTIALS: "Invalid email or password",
+  EMAIL_NOT_VERIFIED: "Please verify your email before logging in",
   USER_EXISTS: "User with this email already exists",
   USER_NOTFOUND: "Invalid email or password. Please try again.",
   USER_PHONE_EXISTS: "User with this phone number already exists",
+  OTP_SENT: "OTP sent successfully",
+  OTP_INVALID: "Invalid or expired OTP",
   // Token and Auth-related Messages
   TOKEN_INVALID: "Invalid token",
   TOKEN_EXPIRED: "Token has expired",

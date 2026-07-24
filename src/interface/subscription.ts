@@ -1,14 +1,16 @@
 export type BillingCycle = "monthly" | "yearly";
+
 export type SubscriptionStatus =
   | "active"
   | "pending"
   | "paused"
-  | "halted"
-  | "cancelled"
+  | "on_hold"
+  | "in_grace"
+  | "canceled"
   | "expired";
 
 export interface PlanFeatures {
-  diagnosis_scans: number | null; // null = unlimited
+  diagnosis_scans: number | null;
   landscape_gens: number | null;
   saved_plants: number | null;
   ai_care_assistant: boolean;
@@ -27,7 +29,9 @@ export interface SubscriptionPlan {
   tier: "free" | "starter" | "plus" | "pro";
   billing_cycle: BillingCycle | null;
   price_inr: number;
-  razorpay_plan_id: string | null;
+  google_product_id: string | null;
+  google_base_plan_id: string | null;
+  google_offer_id: string | null;
   features: PlanFeatures;
   is_active: boolean;
 }
@@ -36,27 +40,26 @@ export interface UserSubscription {
   id: string;
   user_id: string;
   plan_id: string;
-  razorpay_subscription_id: string | null;
-  razorpay_customer_id: string | null;
   status: SubscriptionStatus;
+  purchase_token: string | null;
+  order_id: string | null;
+  linked_purchase_token: string | null;
+  auto_renewing: boolean | null;
+  acknowledged: boolean;
   current_period_start: Date | null;
   current_period_end: Date | null;
   cancel_at_period_end: boolean;
   pending_plan_id: string | null;
-  pending_razorpay_subscription_id: string | null;
+  raw_play_payload: unknown | null;
 }
 
-export interface CreateSubscriptionBody {
-  planCode: string;
-}
-
+/** Body from Android BillingClient after a successful purchase. */
 export interface VerifySubscriptionBody {
-  razorpay_payment_id: string;
-  razorpay_subscription_id: string;
-  razorpay_signature: string;
+  purchaseToken: string;
+  productId: string;
+  basePlanId?: string;
+  orderId?: string;
 }
-
-
 
 interface PlanFeatureDisplay {
   key: string;
@@ -70,7 +73,9 @@ interface PlanWithDetail {
   tier: "free" | "starter" | "plus" | "pro";
   billing_cycle: "monthly" | "yearly" | null;
   price_inr: number;
-  razorpay_plan_id: string | null;
+  google_product_id: string | null;
+  google_base_plan_id: string | null;
+  google_offer_id: string | null;
   features: PlanFeatureDisplay[];
 }
 

@@ -43,21 +43,18 @@ export const registerValidation = Joi.object({
     .length(1)
     .valid(...Object.keys(RoleCodeMap))
     .required(),
-
-  email: Joi.string().email().optional(),
-  password: Joi.when("email", {
-    is: Joi.exist(),
-    then: Joi.string()
-      .min(6)
-      .required()
-      .custom(passwordComplexity, "Password complexity validation"),
-    otherwise: Joi.forbidden(), // phone users can't send password
-  }),
-
+  email: Joi.string().email().required(),
+  password: Joi.string()
+    .min(6)
+    .required()
+    .custom(passwordComplexity, "Password complexity validation"),
   phoneNumber: Joi.string()
     .pattern(/^\+[1-9]\d{7,14}$/)
-    .optional(),
-}).or("email", "phoneNumber");
+    .required()
+    .messages({
+      "string.pattern.base": "Phone number must be in E.164 format (e.g. +919876543210)",
+    }),
+});
 
 export const loginValidation = Joi.object({
   email: Joi.string().email().required(),
@@ -65,6 +62,15 @@ export const loginValidation = Joi.object({
   loginType: Joi.string()
                   .valid("professional", "user")
                   .optional(),
+});
+
+export const sendEmailOtpValidation = Joi.object({
+  email: Joi.string().email().required(),
+});
+
+export const verifyEmailOtpValidation = Joi.object({
+  email: Joi.string().email().required(),
+  otp: Joi.string().length(6).pattern(/^\d+$/).required(),
 });
 
 // Unified Validation for Send/Resend Password Reset Token
@@ -237,12 +243,3 @@ export const appleAuthValidation = Joi.object({
   }),
 })
 
-export const sendOtpValidation = Joi.object({
-  phoneNumber: Joi.string().pattern(/^\+[1-9]\d{7,14}$/).required(),
-});
-
-export const verifyOtpValidation = Joi.object({
-  phoneNumber: Joi.string().pattern(/^\+[1-9]\d{7,14}$/).required(),
-  otp:         Joi.string().length(6).pattern(/^\d+$/).required(),
-  reqType:    Joi.string().valid("login", "register", "resetPassword").optional(),
-});

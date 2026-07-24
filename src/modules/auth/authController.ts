@@ -21,7 +21,6 @@ import {
 } from "../../core/services/firebaseAdmin";
 import {
   comparePassword,
-  createPhoneUser,
   createUserFromOAuth,
   createUserProfile,
   createUserProfileWithImage,
@@ -33,9 +32,11 @@ import {
   findUserById,
   getRoleById,
   getRoleByName,
+  markEmailVerified,
   resetPasswordResetFields,
-  sendOtp,
+  sendEmailOtp,
   updatePasswordResetToken,
+  updateUnverifiedUserRegistration,
   updateUserFromOAuth,
   updateUserPassword,
   verifyAppleIdToken,
@@ -50,7 +51,6 @@ import { handleProfessionalLogin } from "../professional/professionalRepositry";
 import { getDB } from "../../core/config/db";
 import fs from "fs";
 import path from "path";
-import logger from "../../core/config/logger";
 import { OtpCooldownError } from "../../core/middleware/errorHandler";
 
 /**
@@ -98,13 +98,52 @@ export const register = async (
       return;
     }
 
+    const normalizedEmail = email.toLowerCase();
+
     // Check if email OR phone already exists
     const existingUserResult = await findUserByEmailOrPhone(
-      email.toLowerCase(),
+      normalizedEmail,
       phoneNumber
     );
 
     if (existingUserResult.user) {
+      const existing = existingUserResult.user;
+
+      // Allow re-registration for unverified email (update details + resend OTP)
+      if (
+        existingUserResult.conflictField === "email" &&
+        !existing.is_email_verified
+      ) {
+        await updateUnverifiedUserRegistration(existing.id!, {
+          name,
+          password,
+          phoneNumber,
+          roleId: role.id!,
+        });
+
+        try {
+          await sendEmailOtp(normalizedEmail);
+        } catch (otpErr) {
+          if (otpErr instanceof OtpCooldownError) {
+            res
+              .status(HTTP_STATUS.TOO_MANY_REQUESTS)
+              .json(errorResponse(otpErr.message));
+            return;
+          }
+          throw otpErr;
+        }
+
+        res
+          .status(HTTP_STATUS.OK)
+          .json(
+            successResponse(
+              { email: normalizedEmail, requiresEmailVerification: true },
+              MESSAGES.USER_REGISTER_OTP_SENT
+            )
+          );
+        return;
+      }
+
       await warn(
         "User already exists",
         { email, phoneNumber, conflict: existingUserResult.conflictField },
@@ -119,29 +158,49 @@ export const register = async (
       }
 
       if (existingUserResult.conflictField === "phone") {
-        res
-          .status(HTTP_STATUS.CONFLICT)
-          .json(errorResponse(MESSAGES.USER_PHONE_EXISTS));
-        return;
+        // Phone taken by another account
+        if (
+          existing.email?.toLowerCase() !== normalizedEmail ||
+          existing.is_email_verified
+        ) {
+          res
+            .status(HTTP_STATUS.CONFLICT)
+            .json(errorResponse(MESSAGES.USER_PHONE_EXISTS));
+          return;
+        }
       }
     }
 
-    //  Create user with validation
+    // Create user pending email verification
     const newUser = await createValidatedUser({
       name,
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       password,
       roleId: role.id,
       phoneNumber,
-      isEmailVerified: true,
+      isEmailVerified: false,
     });
 
-    //  Create empty user profile (if you have a `user_profiles` table)
     await createUserProfile(newUser.id!);
 
-    res
-      .status(HTTP_STATUS.CREATED)
-      .json(successResponse(null, MESSAGES.USER_CREATED));
+    try {
+      await sendEmailOtp(normalizedEmail);
+    } catch (otpErr) {
+      if (otpErr instanceof OtpCooldownError) {
+        res
+          .status(HTTP_STATUS.TOO_MANY_REQUESTS)
+          .json(errorResponse(otpErr.message));
+        return;
+      }
+      throw otpErr;
+    }
+
+    res.status(HTTP_STATUS.CREATED).json(
+      successResponse(
+        { email: normalizedEmail, requiresEmailVerification: true },
+        MESSAGES.USER_REGISTER_OTP_SENT
+      )
+    );
   } catch (err: unknown) {
     // 🔹 Handle validation errors (Zod)
     if (err instanceof ZodError) {
@@ -260,6 +319,22 @@ export const login = async (
         .json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
       return;
     }
+
+    if (!user.is_email_verified) {
+      await warn(
+        "Login failed - email not verified",
+        { email, userId: user.id },
+        { userId: user.id!, source: "auth.login", req }
+      );
+      res.status(HTTP_STATUS.FORBIDDEN).json(
+        errorResponse(MESSAGES.EMAIL_NOT_VERIFIED, {
+          requiresEmailVerification: true,
+          email: email.toLowerCase(),
+        })
+      );
+      return;
+    }
+
     const client = getDB();
     // Fetch role from roles table
     const role = await getRoleById(user.role_id);
@@ -387,30 +462,37 @@ export const login = async (
   }
 };
 /**
- * Sends an OTP to the user's registered phone number.
+ * Resends registration email OTP for an unverified account.
  *
- * This controller extracts the phone number from the request body,
- * triggers the OTP sending process, logs the successful operation,
- * and returns a success response to the client.
- *
- * @async
- *
- * @param {Request} req - Express request object containing the phone number in the request body.
- * @param {Response} res - Express response object used to send the API response.
- * @param {NextFunction} next - Express middleware function for forwarding errors.
- *
- * @returns {Promise<void>} Resolves when the OTP response is sent or an error is passed to the next middleware.
- * @throws {Error} Passes any error encountered during OTP generation or sending to the error handler.
- *
+ * @param {Request} req - Express request with `email` in the body.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function for error handling.
+ * @returns {Promise<void>} Resolves when the OTP response is sent.
  */
-export const sendPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const resendEmailOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const { phoneNumber } = req.body;
+    const email = String(req.body.email).toLowerCase();
+    const user = await findUserByEmail(email);
 
-    await sendOtp(phoneNumber);
+    if (!user) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
+      return;
+    }
 
-    await logger.info("OTP sent", { phoneNumber }, { source: "auth.sendPhoneOtp", req });
-    res.status(HTTP_STATUS.OK).json(successResponse(null, "OTP sent successfully"));
+    if (user.is_email_verified) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Email is already verified"));
+      return;
+    }
+
+    await sendEmailOtp(email);
+
+    res.status(HTTP_STATUS.OK).json(
+      successResponse({ email, requiresEmailVerification: true }, MESSAGES.OTP_SENT)
+    );
   } catch (err) {
     if (err instanceof OtpCooldownError) {
       res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json(errorResponse(err.message));
@@ -419,98 +501,66 @@ export const sendPhoneOtp = async (req: Request, res: Response, next: NextFuncti
     next(err);
   }
 };
+
 /**
- * Verifies a user's phone OTP and authenticates the user.
+ * Verifies registration email OTP and completes signup (issues JWT).
  *
- * This controller validates the OTP provided for a phone number. If the OTP
- * is valid, it checks whether the user exists. For new users, it creates a
- * user account with the default role and initializes the user profile.
- *
- * After successful verification, it generates a JWT authentication token and
- * returns the user's role, token, and account creation status.
- *
- * @async
- *
- * @param {Request} req - Express request object containing:
- * - `phoneNumber` {string}: User's phone number.
- * - `otp` {string}: OTP code received by the user.
- *
- * @param {Response} res - Express response object used to send the API response.
- *
- * @param {NextFunction} next - Express middleware function for forwarding errors.
- *
- * @returns {Promise<void>} Resolves after sending the authentication response
- * or passing an error to the next middleware.
- *
- * @throws {Error} Passes errors from OTP verification, user lookup, user creation,
- * role retrieval, or token generation to the error handler.
+ * @param {Request} req - Express request with `email` and `otp` in the body.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function for error handling.
+ * @returns {Promise<void>} Resolves when verification completes or an error is forwarded.
  */
-export const verifyPhoneOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const verifyEmailOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const { phoneNumber, otp, reqType } = req.body;
+    const email = String(req.body.email).toLowerCase();
+    const { otp } = req.body;
     const client = getDB();
 
-    const isValid = await verifyOtp(phoneNumber, otp);
-    if(reqType==="register" && !isValid){
-      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid or expired OTP"));
-      return;
-    }
-    if(reqType ==="register" && isValid){
-      res.status(HTTP_STATUS.OK).json(successResponse(null, "OTP verified successfully"));
-      return;
-    }
-    if (!isValid) {
-      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid or expired OTP"));
-      return;
-    }
-
-    const result = await findUserByEmailOrPhone(undefined, phoneNumber);
-    let user = result.user;
-    let isNewUser = false;
-
-    // ── New user → pehle create karo ─────────────────────────
+    const user = await findUserByEmail(email);
     if (!user) {
-      const defaultRole = await getRoleByName("User");
-      if (!defaultRole) {
-        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(errorResponse("Default role not found"));
-        return;
-      }
-
-      user = await createPhoneUser({
-        phoneNumber,
-        roleId: defaultRole.id!,
-      });
-
-      await createUserProfile(user.id!);
-      
-    }
-    isNewUser= user.name !== null && user.name !== undefined && user.name !== "" ? false : true;
-
-    if (user.isdeleted) {
-      res.status(HTTP_STATUS.OK).json(errorResponse("User profile is deleted"));
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse(MESSAGES.PROFILE_USER_NOTFOUND));
       return;
     }
+
+    if (user.is_email_verified) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Email is already verified"));
+      return;
+    }
+
+    const isValid = await verifyOtp(email, otp);
+    if (!isValid) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(MESSAGES.OTP_INVALID));
+      return;
+    }
+
+    await markEmailVerified(user.id!);
 
     const role = await getRoleById(user.role_id);
-    const token = generatePhoneToken(phoneNumber, role!.name, user.id!);
+    if (!role) {
+      res.status(HTTP_STATUS.OK).json(errorResponse("Role not found"));
+      return;
+    }
 
+    const token = generateToken(email, role.name, user.id!);
     const response_id = await client.query(
-        "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-        [user.id]
-      );
-
-
-    res.status(isNewUser ? HTTP_STATUS.CREATED : HTTP_STATUS.OK).json(
-      successResponse(
-        { token, role: role!.name,
-           isNewUser,
-            responseId: response_id.rows[0]?.response_id || null
-           },
-        isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS,
-       
-      )
+      "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [user.id]
     );
 
+    res.status(HTTP_STATUS.OK).json(
+      successResponse(
+        {
+          token,
+          role: role.name,
+          responseId: response_id.rows[0]?.response_id || null,
+        },
+        MESSAGES.EMAIL_VERIFICATION_SUCCESS
+      )
+    );
   } catch (err) {
     next(err);
   }

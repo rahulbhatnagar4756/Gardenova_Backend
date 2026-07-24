@@ -6,9 +6,8 @@ import { getDB } from "../../core/config/db";
 import JwksClient from "jwks-rsa";
 import jwt, { JwtHeader } from "jsonwebtoken";
 import { AppleJwtPayload } from "../../interface/auth";
-import config from "../../core/config/env";
-import  Twilio  from "twilio";
 import { OtpCooldownError } from "../../core/middleware/errorHandler";
+import { sendVerificationEmail } from "../../core/services/emailService";
 
 /**
  * Hash password helper
@@ -189,7 +188,7 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
       parsedData.roleId,
       parsedData.phoneNumber ?? null,
       parsedData.isEmailVerified ?? false,
-      true,
+      false,
     ];
 
     const result = await client.query(query, values);
@@ -659,34 +658,24 @@ export function verifyFacebookIdToken(
 
 
 
-const twilioClient = Twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
 /**
- * Generates and sends an OTP to a user's phone number.
+ * Generates and sends a 6-digit OTP to the given email.
+ * Invalidates previous unverified OTPs for the same email. 1-minute cooldown.
  *
- * This function creates a six-digit OTP, invalidates any previously generated
- * unverified OTPs for the same phone number, stores the new OTP with a
- * five-minute expiration time, and sends it to the user through Twilio SMS.
- *
- * @async
- *
- * @param {string} phoneNumber - The recipient's phone number in international format.
- *
- * @returns {Promise<void>} Resolves when the OTP is generated, stored, and sent successfully.
- *
- * @throws {Error} Throws an error if database operations fail or the OTP message
- * cannot be sent through Twilio.
+ * @param {string} email - Recipient email address.
+ * @returns {Promise<void>} Resolves when the OTP is stored and the email is sent.
  */
-export const sendOtp = async (phoneNumber: string): Promise<void> => {
+export const sendEmailOtp = async (email: string): Promise<void> => {
   const db = getDB();
+  const identifier = email.toLowerCase();
 
-  // ── 1 min cooldown check ──────────────────────────────────
   const lastOtp = await db.query(
     `SELECT created_at FROM otp_verifications
      WHERE identifier = $1
        AND verified = FALSE
      ORDER BY created_at DESC
      LIMIT 1`,
-    [phoneNumber]
+    [identifier]
   );
 
   if (lastOtp.rows.length > 0) {
@@ -702,43 +691,29 @@ export const sendOtp = async (phoneNumber: string): Promise<void> => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  // Purane OTPs invalidate karo
   await db.query(
     `UPDATE otp_verifications SET verified = TRUE WHERE identifier = $1 AND verified = FALSE`,
-    [phoneNumber]
+    [identifier]
   );
 
   await db.query(
     `INSERT INTO otp_verifications (identifier, otp, expires_at) VALUES ($1, $2, $3)`,
-    [phoneNumber, otp, expiresAt]
+    [identifier, otp, expiresAt]
   );
 
-  await twilioClient.messages.create({
-    body: `Your OTP is: ${otp}. Valid for 5 minutes. Do not share with anyone.`,
-    from: config.TWILIO_PHONE_NUMBER,
-    to: phoneNumber,
-  });
+  await sendVerificationEmail(identifier, otp, expiresAt);
 };
+
 /**
- * Verifies a user's phone OTP.
+ * Verifies an email OTP for the given identifier (email).
  *
- * This function checks whether the provided OTP exists for the given phone number,
- * is still valid, and has not already been verified. If a valid OTP is found,
- * it marks the OTP record as verified and returns a successful verification result.
- *
- * @async
- *
- * @param {string} phoneNumber - The user's phone number associated with the OTP.
- * @param {string} otp - The OTP code provided by the user for verification.
- *
- * @returns {Promise<boolean>} Returns `true` if the OTP is valid and successfully
- * verified; otherwise returns `false`.
- *
- * @throws {Error} Throws an error if database operations fail during OTP lookup
- * or verification update.
+ * @param {string} identifier - Email used as the OTP identifier.
+ * @param {string} otp - Six-digit OTP code to verify.
+ * @returns {Promise<boolean>} True if the OTP is valid and marked verified.
  */
-export const verifyOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
+export const verifyOtp = async (identifier: string, otp: string): Promise<boolean> => {
   const db = getDB();
+  const normalized = identifier.toLowerCase();
 
   const result = await db.query(
     `SELECT id FROM otp_verifications
@@ -748,12 +723,11 @@ export const verifyOtp = async (phoneNumber: string, otp: string): Promise<boole
        AND expires_at > NOW()
      ORDER BY created_at DESC
      LIMIT 1`,
-    [phoneNumber, otp]
+    [normalized, otp]
   );
 
   if (result.rowCount === 0) return false;
 
-  // Mark as verified
   await db.query(
     `UPDATE otp_verifications SET verified = TRUE WHERE id = $1`,
     [result.rows[0].id]
@@ -761,47 +735,52 @@ export const verifyOtp = async (phoneNumber: string, otp: string): Promise<boole
 
   return true;
 };
+
 /**
- * Creates a new user account using a phone number.
+ * Marks a user's email as verified.
  *
- * This function inserts a new user record into the users table with the provided
- * phone number and role ID. The phone verification status is automatically marked
- * as verified since the user has completed OTP verification before account creation.
- *
- * @async
- *
- * @param {Object} data - User creation data.
- * @param {string} data.phoneNumber - The user's verified phone number.
- * @param {string} data.roleId - The ID of the role assigned to the user.
- *
- * @returns {Promise<IUser>} Returns the newly created user object containing
- * user details and verification status.
- *
- * @throws {Error} Throws an error if the database insert operation fails.
+ * @param {string} userId - ID of the user to mark as email-verified.
+ * @returns {Promise<void>} Resolves when the update completes.
  */
-export async function createPhoneUser(data: {
-  phoneNumber: string;
-  roleId: string;
-}): Promise<IUser> {
+export async function markEmailVerified(userId: string): Promise<void> {
   const client = getDB();
+  await client.query(
+    `UPDATE users SET is_email_verified = TRUE, updated_at = NOW() WHERE id = $1`,
+    [userId]
+  );
+}
 
-  const query = `
-    INSERT INTO users (
-      phone_number,
-      role_id,
-      is_phone_verified,
-      created_at,
-      updated_at
-    )
-    VALUES ($1, $2, TRUE, NOW(), NOW())
-    RETURNING id, name, email, role_id, phone_number,
-              is_email_verified, is_phone_verified, created_at, updated_at;
-  `;
+/**
+ * Updates registration fields for an unverified user (re-register / resend flow).
+ *
+ * @param {string} userId - ID of the unverified user.
+ * @param {Object} data - Updated registration fields.
+ * @param {string} data.name - User display name.
+ * @param {string} data.password - Plain-text password to hash and store.
+ * @param {string} data.phoneNumber - Phone number in E.164 format.
+ * @param {string} data.roleId - Role UUID to assign.
+ * @returns {Promise<IUser>} Updated user row.
+ */
+export async function updateUnverifiedUserRegistration(
+  userId: string,
+  data: { name: string; password: string; phoneNumber: string; roleId: string }
+): Promise<IUser> {
+  const client = getDB();
+  const hashedPassword = await hashPassword(data.password);
 
-  const result = await client.query(query, [
-    data.phoneNumber,
-    data.roleId,
-  ]);
+  const result = await client.query(
+    `UPDATE users
+     SET name = $1,
+         password = $2,
+         phone_number = $3,
+         role_id = $4,
+         updated_at = NOW()
+     WHERE id = $5
+       AND is_email_verified = FALSE
+     RETURNING id, name, email, role_id, phone_number,
+               is_email_verified, is_phone_verified, created_at, updated_at`,
+    [data.name, hashedPassword, data.phoneNumber, data.roleId, userId]
+  );
 
   return result.rows[0] as IUser;
 }
