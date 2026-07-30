@@ -28,6 +28,12 @@ export interface IFullUserProfile {
     cancelAtPeriodEnd: boolean | null;
     startedAt: string | null;
     expiresAt: string | null;
+    pendingPlan: {
+      planId: string;
+      planName: string;
+      billingCycle: "monthly" | "yearly" | null;
+      effectiveAt: string | null;
+    } | null;
   } | null;
 }
 

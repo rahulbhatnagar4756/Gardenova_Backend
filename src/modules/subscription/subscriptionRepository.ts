@@ -1,5 +1,6 @@
 import { getDB } from "../../core/config/db";
 import {
+  comparePlanChange,
   GetAllPlansWithDetailResponse,
   SubscriptionPlan,
   UserSubscription,
@@ -8,6 +9,7 @@ import {
 import logger from "../../core/config/logger";
 import {
   acknowledgePlaySubscription,
+  extractDeferredReplacement,
   extractLineItem,
   fetchPlaySubscription,
   mapPlayStateToLocal,
@@ -135,7 +137,7 @@ async function getFreePlan(): Promise<SubscriptionPlan> {
  * @param {string | null | undefined} [basePlanId] - Optional base plan id.
  * @returns {Promise<SubscriptionPlan | null>} Matching plan, or null if unmapped.
  */
-async function getPlanByGoogleIds(
+export async function getPlanByGoogleIds(
   productId: string,
   basePlanId?: string | null
 ): Promise<SubscriptionPlan | null> {
@@ -186,23 +188,28 @@ export async function getActiveSubscriptionWithPlan(userId: string): Promise<{
   };
 }
 
+export type VerifySubscriptionResult = {
+  verified: boolean;
+  status: string;
+  activated: boolean;
+  deferred: boolean;
+  planCode: string;
+  pendingPlanCode: string | null;
+  pendingEffectiveAt: Date | null;
+};
+
 /**
- * Verifies a Google Play purchase, acknowledges it, and activates the local subscription.
+ * Verifies a Google Play purchase, acknowledges it, and either activates immediately
+ * (upgrade / first purchase) or schedules a pending plan (downgrade / Play deferred).
  *
  * @param {string} userId - Purchasing user UUID.
  * @param {VerifySubscriptionBody} body - Purchase token and product identifiers.
- * @returns {Promise<{ verified: boolean, status: string, activated: boolean, planCode: string }>}
- * Verification outcome and local plan code.
+ * @returns {Promise<VerifySubscriptionResult>} Verification outcome and plan codes.
  */
 export async function verifySubscriptionPayment(
   userId: string,
   body: VerifySubscriptionBody
-): Promise<{
-  verified: boolean;
-  status: string;
-  activated: boolean;
-  planCode: string;
-}> {
+): Promise<VerifySubscriptionResult> {
   const client = await getDB();
   const { purchaseToken, productId, basePlanId, orderId } = body;
 
@@ -212,20 +219,78 @@ export async function verifySubscriptionPayment(
 
   const play = await fetchPlaySubscription(purchaseToken);
   const line = extractLineItem(play);
+  const deferredReplacement = extractDeferredReplacement(play);
+
   const resolvedProductId = line.productId || productId;
   const resolvedBasePlanId = line.basePlanId || basePlanId || null;
 
-  if (line.productId && line.productId !== productId) {
+  if (line.productId && line.productId !== productId && !deferredReplacement) {
     logger.warn("Verify productId mismatch with Play line item", {
       bodyProductId: productId,
       playProductId: line.productId,
     });
   }
 
-  const plan = await getPlanByGoogleIds(resolvedProductId, resolvedBasePlanId);
-  if (!plan) {
+  const activeLinePlan = await getPlanByGoogleIds(resolvedProductId, resolvedBasePlanId);
+  if (!activeLinePlan) {
     throw new Error(
       `No local plan mapped for productId=${resolvedProductId} basePlanId=${resolvedBasePlanId}`
+    );
+  }
+
+  let pendingTargetPlan: SubscriptionPlan | null = null;
+  if (deferredReplacement) {
+    pendingTargetPlan = await getPlanByGoogleIds(
+      deferredReplacement.productId,
+      deferredReplacement.basePlanId
+    );
+    if (!pendingTargetPlan) {
+      throw new Error(
+        `No local plan mapped for deferred productId=${deferredReplacement.productId}`
+      );
+    }
+  } else {
+    const bodyPlan = await getPlanByGoogleIds(productId, basePlanId ?? null);
+    if (bodyPlan && bodyPlan.id !== activeLinePlan.id) {
+      pendingTargetPlan = bodyPlan;
+    }
+  }
+
+  const { subscription: currentSub, plan: currentPlan } =
+    await getActiveSubscriptionWithPlan(userId);
+  const hasPaidCurrent =
+    !!currentSub && currentPlan.code !== "free" && currentPlan.tier !== "free";
+
+  const candidateForCompare = pendingTargetPlan ?? activeLinePlan;
+  const changeKind = hasPaidCurrent
+    ? comparePlanChange(currentPlan, candidateForCompare)
+    : "upgrade";
+
+  // Play already replaced onto the lower product (Android used immediate mode).
+  const playAlreadyOnLower =
+    hasPaidCurrent &&
+    changeKind === "downgrade" &&
+    !deferredReplacement &&
+    activeLinePlan.id !== currentPlan.id &&
+    activeLinePlan.id === candidateForCompare.id;
+
+  const deferredPlan =
+    pendingTargetPlan ??
+    (changeKind === "downgrade" && hasPaidCurrent
+      ? await getPlanByGoogleIds(productId, basePlanId ?? null)
+      : null);
+
+  const deferNow =
+    !!deferredReplacement ||
+    (changeKind === "downgrade" &&
+      hasPaidCurrent &&
+      !playAlreadyOnLower &&
+      !!deferredPlan);
+
+  if (playAlreadyOnLower) {
+    logger.warn(
+      "Downgrade arrived as immediate Play replacement; activating lower plan now. Android should use ReplacementMode.DEFERRED.",
+      { userId, from: currentPlan.code, to: activeLinePlan.code }
     );
   }
 
@@ -233,9 +298,10 @@ export async function verifySubscriptionPayment(
   const activatable = status === "active" || status === "in_grace";
 
   let acknowledged = play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-  if (!acknowledged && activatable) {
+  const ackProductId = deferredReplacement?.productId || resolvedProductId;
+  if (!acknowledged && (activatable || deferNow)) {
     try {
-      await acknowledgePlaySubscription(resolvedProductId, purchaseToken);
+      await acknowledgePlaySubscription(ackProductId, purchaseToken);
       acknowledged = true;
     } catch (err) {
       logger.warn("Acknowledge failed during verify", {
@@ -247,6 +313,13 @@ export async function verifySubscriptionPayment(
   const periodStart = play.startTime ? new Date(play.startTime) : new Date();
   const periodEnd = line.expiryTime;
 
+  const auditProductId = deferNow
+    ? (deferredPlan?.google_product_id ?? productId)
+    : resolvedProductId;
+  const auditBasePlanId = deferNow
+    ? (deferredPlan?.google_base_plan_id ?? basePlanId ?? null)
+    : resolvedBasePlanId;
+
   await client.query(
     `INSERT INTO google_play_purchases
        (user_id, product_id, base_plan_id, purchase_token, order_id, acknowledged, raw_response)
@@ -257,8 +330,8 @@ export async function verifySubscriptionPayment(
        updated_at = now()`,
     [
       userId,
-      resolvedProductId,
-      resolvedBasePlanId,
+      auditProductId,
+      auditBasePlanId,
       purchaseToken,
       orderId ?? play.latestOrderId ?? null,
       acknowledged,
@@ -266,6 +339,38 @@ export async function verifySubscriptionPayment(
     ]
   );
 
+  if (deferNow && currentSub && deferredPlan) {
+    await client.query(
+      `UPDATE user_subscriptions
+         SET pending_plan_id = $2,
+             raw_play_payload = $3,
+             acknowledged = $4,
+             updated_at = now()
+       WHERE user_id = $1
+         AND status IN ('active', 'in_grace')`,
+      [userId, deferredPlan.id, play, acknowledged]
+    );
+
+    await client.query(
+      `UPDATE google_play_purchases g
+         SET user_subscription_id = us.id, updated_at = now()
+       FROM user_subscriptions us
+       WHERE g.purchase_token = $1 AND us.user_id = $2`,
+      [purchaseToken, userId]
+    );
+
+    return {
+      verified: true,
+      status: currentSub.status,
+      activated: false,
+      deferred: true,
+      planCode: currentPlan.code,
+      pendingPlanCode: deferredPlan.code,
+      pendingEffectiveAt: currentSub.current_period_end,
+    };
+  }
+
+  const activatePlan = activeLinePlan;
   await client.query(
     `INSERT INTO user_subscriptions (
        user_id, plan_id, status, purchase_token, order_id,
@@ -291,7 +396,7 @@ export async function verifySubscriptionPayment(
        updated_at = now()`,
     [
       userId,
-      plan.id,
+      activatePlan.id,
       status,
       purchaseToken,
       orderId ?? play.latestOrderId ?? null,
@@ -305,7 +410,6 @@ export async function verifySubscriptionPayment(
     ]
   );
 
-  // Link purchase audit row to subscription
   await client.query(
     `UPDATE google_play_purchases g
        SET user_subscription_id = us.id, updated_at = now()
@@ -322,7 +426,10 @@ export async function verifySubscriptionPayment(
     verified: true,
     status,
     activated: activatable,
-    planCode: plan.code,
+    deferred: false,
+    planCode: activatePlan.code,
+    pendingPlanCode: null,
+    pendingEffectiveAt: null,
   };
 }
 

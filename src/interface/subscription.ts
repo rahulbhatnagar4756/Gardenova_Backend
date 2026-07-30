@@ -36,6 +36,39 @@ export interface SubscriptionPlan {
   is_active: boolean;
 }
 
+export type PlanChangeKind = "upgrade" | "downgrade" | "same";
+
+/** Tier rank used for upgrade / downgrade decisions (matches plan list ordering). */
+export const TIER_RANK: Record<SubscriptionPlan["tier"], number> = {
+  free: 0,
+  starter: 1,
+  plus: 2,
+  pro: 3,
+};
+
+/**
+ * Compares two plans: higher tier wins; same tier uses price_inr.
+ *
+ * @param {Pick<SubscriptionPlan, "tier" | "price_inr">} current - Current entitlement plan.
+ * @param {Pick<SubscriptionPlan, "tier" | "price_inr">} next - Newly purchased plan.
+ * @returns {PlanChangeKind} upgrade | downgrade | same.
+ */
+export function comparePlanChange(
+  current: Pick<SubscriptionPlan, "tier" | "price_inr">,
+  next: Pick<SubscriptionPlan, "tier" | "price_inr">
+): PlanChangeKind {
+  const currentRank = TIER_RANK[current.tier] ?? 0;
+  const nextRank = TIER_RANK[next.tier] ?? 0;
+  if (nextRank > currentRank) return "upgrade";
+  if (nextRank < currentRank) return "downgrade";
+
+  const currentPrice = Number(current.price_inr) || 0;
+  const nextPrice = Number(next.price_inr) || 0;
+  if (nextPrice > currentPrice) return "upgrade";
+  if (nextPrice < currentPrice) return "downgrade";
+  return "same";
+}
+
 export interface UserSubscription {
   id: string;
   user_id: string;

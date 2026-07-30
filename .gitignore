@@ -7,3 +7,4 @@ src/core/config/*.json
 src/core/utils/serviceAccount.json
 src/core/config/googlePlayServiceAccount.json
 googlePlayServiceAccount.json
+/scripts/*.js

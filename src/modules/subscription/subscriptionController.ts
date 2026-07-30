@@ -100,9 +100,11 @@ export const verifySubscription = async (
       orderId,
     });
 
-    const message = result.activated
-      ? "Subscription verified and activated successfully"
-      : "Purchase verified — subscription is not active yet";
+    const message = result.deferred
+      ? `Downgrade scheduled — switches to ${result.pendingPlanCode} at period end`
+      : result.activated
+        ? "Subscription verified and activated successfully"
+        : "Purchase verified — subscription is not active yet";
 
     res.status(HTTP_STATUS.OK).json(successResponse(result, message));
   } catch (err) {

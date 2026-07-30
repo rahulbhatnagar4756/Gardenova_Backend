@@ -124,9 +124,13 @@ export const getCurrentUserProfile = async (
         us.status,
         us.current_period_start,
         us.current_period_end,
-        us.cancel_at_period_end
+        us.cancel_at_period_end,
+        us.pending_plan_id,
+        psp.tier AS pending_plan_tier,
+        psp.billing_cycle AS pending_plan_billing_cycle
       FROM user_subscriptions us
       JOIN subscription_plans sp ON sp.id = us.plan_id
+      LEFT JOIN subscription_plans psp ON psp.id = us.pending_plan_id
       WHERE us.user_id = $1
         AND us.status = 'active'
       ORDER BY us.created_at DESC
@@ -179,6 +183,16 @@ export const getCurrentUserProfile = async (
             : null,
           expiresAt: subscription.current_period_end
             ? new Date(subscription.current_period_end).toISOString()
+            : null,
+          pendingPlan: subscription.pending_plan_id
+            ? {
+              planId: subscription.pending_plan_id,
+              planName: subscription.pending_plan_tier,
+              billingCycle: subscription.pending_plan_billing_cycle,
+              effectiveAt: subscription.current_period_end
+                ? new Date(subscription.current_period_end).toISOString()
+                : null,
+            }
             : null,
         }
         : null,

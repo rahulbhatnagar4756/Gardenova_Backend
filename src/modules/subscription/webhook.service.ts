@@ -2,6 +2,7 @@ import { getDB } from "../../core/config/db";
 import logger from "../../core/config/logger";
 import {
   acknowledgePlaySubscription,
+  extractDeferredReplacement,
   extractLineItem,
   fetchPlaySubscription,
   mapPlayStateToLocal,
@@ -81,8 +82,38 @@ export async function markBillingWebhookProcessed(eventId: string): Promise<void
 }
 
 /**
+ * Resolves a subscription_plans.id from Play product / base plan ids.
+ *
+ * @param {string | null} productId - Google product id.
+ * @param {string | null} basePlanId - Optional base plan id.
+ * @returns {Promise<string | null>} Local plan id, or null.
+ */
+async function resolvePlanId(
+  productId: string | null,
+  basePlanId: string | null
+): Promise<string | null> {
+  if (!productId) return null;
+  const db = await getDB();
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT id FROM subscription_plans
+     WHERE google_product_id = $1
+       AND ($2::text IS NULL OR google_base_plan_id = $2)
+       AND is_active = true
+     ORDER BY
+       CASE WHEN google_base_plan_id = $2 THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [productId, basePlanId]
+  );
+  return rows[0]?.id ?? null;
+}
+
+/**
  * Applies a Play SubscriptionPurchaseV2 payload onto the matching local row
  * (by purchase_token or linked_purchase_token).
+ *
+ * Deferred replacements keep the current plan active and only set pending_plan_id.
+ * When the deferred change takes effect (no deferredItemReplacement, active state),
+ * pending_plan_id is cleared and the new line-item plan is activated.
  *
  * @param {string} purchaseToken - Google Play purchase token.
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload from Play.
@@ -94,34 +125,38 @@ export async function syncSubscriptionFromPlay(
 ): Promise<void> {
   const db = await getDB();
   const { productId, basePlanId, expiryTime, autoRenewing } = extractLineItem(play);
+  const deferred = extractDeferredReplacement(play);
   const status = mapPlayStateToLocal(play.subscriptionState);
   const startMs = play.startTime ? new Date(play.startTime) : null;
   const cancelAtPeriodEnd = autoRenewing === false && status === "active";
 
-  let planId: string | null = null;
-  if (productId) {
-    const { rows } = await db.query<{ id: string }>(
-      `SELECT id FROM subscription_plans
-       WHERE google_product_id = $1
-         AND ($2::text IS NULL OR google_base_plan_id = $2)
-         AND is_active = true
-       ORDER BY
-         CASE WHEN google_base_plan_id = $2 THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [productId, basePlanId]
-    );
-    planId = rows[0]?.id ?? null;
-  }
+  const planId = await resolvePlanId(productId, basePlanId);
+  const pendingPlanId = deferred
+    ? await resolvePlanId(deferred.productId, deferred.basePlanId)
+    : null;
 
   const linked =
     play.linkedPurchaseToken && play.linkedPurchaseToken.length > 0
       ? play.linkedPurchaseToken
       : null;
 
+  // Active/in-grace/pending may migrate a row from an old (linked) token to the
+  // replacement token. Terminal RTDNs (expired/canceled/…) must only touch the
+  // exact purchase_token — otherwise an old replaced sub overwrites the new one.
+  const isEntitlementGranting =
+    status === "active" || status === "in_grace" || status === "pending";
+
+  // While a deferred replacement is pending, keep current plan_id; only set pending.
+  // Once deferred clears and entitlement is active, activate line-item plan and clear pending.
+  const hasDeferredPending = !!deferred && !!pendingPlanId;
+
   const { rowCount } = await db.query(
     `UPDATE user_subscriptions
        SET status = $2,
-           plan_id = COALESCE($3, plan_id),
+           plan_id = CASE
+             WHEN $12::boolean THEN plan_id
+             ELSE COALESCE($3, plan_id)
+           END,
            purchase_token = $1,
            order_id = COALESCE($4, order_id),
            linked_purchase_token = COALESCE($5, linked_purchase_token),
@@ -130,10 +165,20 @@ export async function syncSubscriptionFromPlay(
            current_period_end = COALESCE($8, current_period_end),
            cancel_at_period_end = $9,
            raw_play_payload = $10,
+           pending_plan_id = CASE
+             WHEN $12::boolean THEN $13::uuid
+             WHEN $2 IN ('active', 'in_grace') THEN NULL
+             ELSE pending_plan_id
+           END,
            updated_at = now()
      WHERE purchase_token = $1
-        OR linked_purchase_token = $1
-        OR ($5::text IS NOT NULL AND purchase_token = $5)`,
+        OR (
+          $11::boolean = true
+          AND (
+            linked_purchase_token = $1
+            OR ($5::text IS NOT NULL AND purchase_token = $5)
+          )
+        )`,
     [
       purchaseToken,
       status,
@@ -145,6 +190,9 @@ export async function syncSubscriptionFromPlay(
       expiryTime,
       cancelAtPeriodEnd,
       play,
+      isEntitlementGranting,
+      hasDeferredPending,
+      pendingPlanId,
     ]
   );
 
@@ -152,7 +200,7 @@ export async function syncSubscriptionFromPlay(
     logger.warn(`syncSubscriptionFromPlay: no row for token=${purchaseToken.slice(0, 12)}...`);
   }
 
-  if (status === "active" && startMs) {
+  if (status === "active" && startMs && !hasDeferredPending) {
     await resetUsageCycleForToken(purchaseToken, startMs);
   }
 }

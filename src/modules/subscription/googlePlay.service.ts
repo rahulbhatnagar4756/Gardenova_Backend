@@ -158,6 +158,24 @@ export function extractLineItem(play: PlaySubscriptionV2): {
   return { productId, basePlanId, expiryTime, autoRenewing };
 }
 
+/**
+ * Extracts a deferred (period-end) replacement from the primary line item, if any.
+ * Present when Android used ReplacementMode.DEFERRED.
+ *
+ * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
+ * @returns {{ productId: string, basePlanId: string | null } | null} Pending product ids, or null.
+ */
+export function extractDeferredReplacement(
+  play: PlaySubscriptionV2
+): { productId: string; basePlanId: string | null } | null {
+  const deferred = play.lineItems?.[0]?.deferredItemReplacement;
+  const productId = deferred?.productId;
+  if (!productId) return null;
+  const basePlanId =
+    (deferred as { basePlanId?: string | null })?.basePlanId ?? null;
+  return { productId, basePlanId };
+}
+
 /** RTDN subscriptionNotification.notificationType codes */
 export const PLAY_NOTIFICATION_TYPES: Record<number, string> = {
   1: "SUBSCRIPTION_RECOVERED",

@@ -31,11 +31,21 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  * @swagger
  * /api/v1/plans/subscriptions/verify:
  *   post:
- *     summary: Verify a Google Play Billing purchase and activate subscription
+ *     summary: Verify a Google Play Billing purchase and activate or defer subscription
  *     description: >
  *       Called by the Android app after BillingClient returns a purchase.
  *       Verifies the purchaseToken with Google Play, acknowledges it, and
- *       activates the local user_subscriptions row.
+ *       updates the local user_subscriptions row.
+ *
+ *       Android replacement mode (required when user already has an active sub
+ *       in the same subscription group):
+ *       - Upgrade (higher tier / higher price): ReplacementMode.CHARGE_FULL_PRICE
+ *         → backend activates the new plan immediately and clears pending_plan.
+ *       - Downgrade (lower tier / lower price): ReplacementMode.DEFERRED
+ *         → backend keeps the current plan active, sets pending_plan_id, and
+ *         switches at current_period_end when Play RTDN confirms.
+ *       Always call this endpoint with the returned purchaseToken after purchase.
+ *       Use GET /subscriptions/me for current plan + pending_plan + pending_effective_at.
  *     tags:
  *       - Subscription Plans
  *     security:
@@ -62,7 +72,9 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  *                 type: string
  *     responses:
  *       200:
- *         description: Purchase verified
+ *         description: >
+ *           Purchase verified. Body includes activated, deferred, planCode,
+ *           pendingPlanCode, and pendingEffectiveAt when a downgrade is scheduled.
  *       400:
  *         description: Invalid purchase or missing fields
  *       401:
