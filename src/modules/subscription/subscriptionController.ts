@@ -87,6 +87,13 @@ export const verifySubscription = async (
     }
 
     const { purchaseToken, productId, basePlanId, orderId } = req.body;
+    logger.info("Verifying subscription", {
+      userId: userPayload.userId,
+      purchaseToken,
+      productId,
+      basePlanId,
+      orderId,
+    });
 
     if (!purchaseToken || !productId) {
       res.status(400).json({ error: "Missing purchaseToken or productId" });
