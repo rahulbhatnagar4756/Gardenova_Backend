@@ -10,7 +10,7 @@ import {
   verifySubscriptionPayment,
 } from "./subscriptionRepository";
 import { AuthUserPayload } from "../../interface/user";
-import { Response, NextFunction } from "express";
+import { Response } from "express";
 import logger from "../../core/config/logger";
 import { handleGooglePlayRtdn, recordBillingWebhookEvent, markBillingWebhookProcessed } from "./webhook.service";
 import { CustomError } from "../../interface/Error";
@@ -70,13 +70,11 @@ export const getAllPlanswithDetails = async (req: AuthRequest, res: Response): P
  *
  * @param {AuthRequest} req - Authenticated request with purchase fields in the body.
  * @param {Response} res - Express response object.
- * @param {NextFunction} next - Express next middleware function.
  * @returns {Promise<void>} Resolves when verification completes.
  */
 export const verifySubscription = async (
   req: AuthRequest,
-  res: Response,
-  next: NextFunction
+  res: Response
 ): Promise<void> => {
   try {
     const userPayload = req.user as AuthUserPayload | undefined;
@@ -126,7 +124,6 @@ export const verifySubscription = async (
         errorResponse(err instanceof Error ? err.message : "An error occurred while verifying subscription")
       );
   }
-  next();
 };
 
 /**
@@ -134,13 +131,11 @@ export const verifySubscription = async (
  *
  * @param {AuthRequest} req - Authenticated Express request.
  * @param {Response} res - Express response object.
- * @param {NextFunction} next - Express next middleware function.
  * @returns {Promise<void>} Resolves when the subscription response is sent.
  */
 export const getMySubscription = async (
   req: AuthRequest,
-  res: Response,
-  next: NextFunction
+  res: Response
 ): Promise<void> => {
   try {
     const userPayload = req.user as AuthUserPayload | undefined;
@@ -162,7 +157,6 @@ export const getMySubscription = async (
       .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
       .json(errorResponse("An error occurred while fetching user subscription"));
   }
-  next();
 };
 
 /**
@@ -170,13 +164,11 @@ export const getMySubscription = async (
  *
  * @param {AuthRequest} req - Authenticated Express request.
  * @param {Response} res - Express response object.
- * @param {NextFunction} next - Express next middleware function.
  * @returns {Promise<void>} Resolves when cancellation is recorded.
  */
 export const cancelSubscription = async (
   req: AuthRequest,
-  res: Response,
-  next: NextFunction
+  res: Response
 ): Promise<void> => {
   try {
     const userPayload = req.user as AuthUserPayload | undefined;
@@ -212,7 +204,6 @@ export const cancelSubscription = async (
     });
     res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(errorObj.message));
   }
-  next();
 };
 
 /**
