@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { google, androidpublisher_v3 } from "googleapis";
 import config from "../../core/config/env";
 import logger from "../../core/config/logger";
@@ -20,18 +22,31 @@ function getPackageName(): string {
 
 /**
  * Parses Google Play service-account credentials from env.
+ * Accepts either inline JSON or a path to a JSON key file.
  *
  * @returns {object} Service account JSON object.
  */
 function getServiceAccountCredentials(): object {
-  const raw = config.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
+  const raw = config.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON?.trim();
   if (!raw) {
     throw new Error("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is not configured");
   }
+
   try {
-    return JSON.parse(raw) as object;
-  } catch {
-    throw new Error("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is not valid JSON");
+    if (raw.startsWith("{")) {
+      return JSON.parse(raw) as object;
+    }
+
+    const resolved = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+    const fileContents = fs.readFileSync(resolved, "utf8");
+    return JSON.parse(fileContents) as object;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("GOOGLE_PLAY")) {
+      throw err;
+    }
+    throw new Error(
+      "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is not valid JSON or readable key file path"
+    );
   }
 }
 

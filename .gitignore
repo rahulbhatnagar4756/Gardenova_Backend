@@ -1,7 +1,9 @@
-node_modules
+﻿node_modules
 uploads
 /dist
 .env
-# Firebase keys
-src/core/config/*.json    
+# Firebase / Google keys — never commit
+src/core/config/*.json
 src/core/utils/serviceAccount.json
+src/core/config/googlePlayServiceAccount.json
+googlePlayServiceAccount.json
