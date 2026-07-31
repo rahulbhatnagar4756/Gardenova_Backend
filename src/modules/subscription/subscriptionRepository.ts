@@ -236,9 +236,10 @@ export async function normalizeVerifyPlanIds(
 }
 
 /**
- * Ensures purchase_token can be assigned to this user without unique conflicts.
- * Clears the token from expired/canceled rows owned by other users; rejects if
- * another account still has an active entitlement on this token.
+ * Ensures purchase_token can be assigned to this verifying user.
+ * Authenticated verify is the source of truth for account linking, so any other
+ * row holding this token (including ones wrongly updated by an early RTDN) is
+ * cleared before upsert.
  *
  * @param {string} userId - Claiming user UUID.
  * @param {string} purchaseToken - Google Play purchase token.
@@ -257,25 +258,24 @@ async function claimPurchaseTokenForUser(
   if (!existing) return;
   if (existing.user_id === userId) return;
 
-  if (existing.status === "expired" || existing.status === "canceled") {
-    logger.warn("Reclaiming purchase_token from expired/canceled row", {
-      fromUserId: existing.user_id,
-      toUserId: userId,
-      status: existing.status,
-    });
-    await client.query(
-      `UPDATE user_subscriptions
-         SET purchase_token = NULL,
-             linked_purchase_token = NULL,
-             updated_at = now()
-       WHERE id = $1`,
-      [existing.id]
-    );
-    return;
-  }
+  logger.warn("Moving purchase_token to verifying user", {
+    fromUserId: existing.user_id,
+    toUserId: userId,
+    previousStatus: existing.status,
+  });
 
-  throw new Error(
-    "This Google Play purchase is already linked to another account"
+  await client.query(
+    `UPDATE user_subscriptions
+       SET purchase_token = NULL,
+           linked_purchase_token = NULL,
+           status = CASE
+             WHEN status IN ('active', 'in_grace', 'pending') THEN 'expired'
+             ELSE status
+           END,
+           pending_plan_id = NULL,
+           updated_at = now()
+     WHERE id = $1`,
+    [existing.id]
   );
 }
 

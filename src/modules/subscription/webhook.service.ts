@@ -108,8 +108,9 @@ async function resolvePlanId(
 }
 
 /**
- * Applies a Play SubscriptionPurchaseV2 payload onto the matching local row
- * (by purchase_token or linked_purchase_token).
+ * Applies a Play SubscriptionPurchaseV2 payload onto the local row that already
+ * owns this exact purchase_token (set by verify). RTDN never migrates tokens via
+ * linkedPurchaseToken — that caused wrong-user binding when webhook beat verify.
  *
  * Deferred replacements keep the current plan active and only set pending_plan_id.
  * When the deferred change takes effect (no deferredItemReplacement, active state),
@@ -140,21 +141,17 @@ export async function syncSubscriptionFromPlay(
       ? play.linkedPurchaseToken
       : null;
 
-  // Active/in-grace/pending may migrate a row from an old (linked) token to the
-  // replacement token. Terminal RTDNs (expired/canceled/…) must only touch the
-  // exact purchase_token — otherwise an old replaced sub overwrites the new one.
-  const isEntitlementGranting =
-    status === "active" || status === "in_grace" || status === "pending";
-
+  // Only update by exact purchase_token. Do NOT migrate via linkedPurchaseToken
+  // here — that races ahead of verify and can bind a new purchase to the wrong
+  // app user. Token ownership is established by authenticated verify.
   // While a deferred replacement is pending, keep current plan_id; only set pending.
-  // Once deferred clears and entitlement is active, activate line-item plan and clear pending.
   const hasDeferredPending = !!deferred && !!pendingPlanId;
 
   const { rowCount } = await db.query(
     `UPDATE user_subscriptions
        SET status = $2,
            plan_id = CASE
-             WHEN $12::boolean THEN plan_id
+             WHEN $11::boolean THEN plan_id
              ELSE COALESCE($3, plan_id)
            END,
            purchase_token = $1,
@@ -166,19 +163,12 @@ export async function syncSubscriptionFromPlay(
            cancel_at_period_end = $9,
            raw_play_payload = $10,
            pending_plan_id = CASE
-             WHEN $12::boolean THEN $13::uuid
+             WHEN $11::boolean THEN $12::uuid
              WHEN $2 IN ('active', 'in_grace') THEN NULL
              ELSE pending_plan_id
            END,
            updated_at = now()
-     WHERE purchase_token = $1
-        OR (
-          $11::boolean = true
-          AND (
-            linked_purchase_token = $1
-            OR ($5::text IS NOT NULL AND purchase_token = $5)
-          )
-        )`,
+     WHERE purchase_token = $1`,
     [
       purchaseToken,
       status,
@@ -190,7 +180,6 @@ export async function syncSubscriptionFromPlay(
       expiryTime,
       cancelAtPeriodEnd,
       play,
-      isEntitlementGranting,
       hasDeferredPending,
       pendingPlanId,
     ]
