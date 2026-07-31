@@ -174,8 +174,28 @@ export function mapPlayStateToLocal(
   }
 }
 
+type PlayLineItem = NonNullable<PlaySubscriptionV2["lineItems"]>[number];
+
 /**
- * Extracts the primary line item product / base plan / expiry from v2 payload.
+ * Picks the line item that represents the user's CURRENT entitlement.
+ *
+ * On DEFERRED downgrade Play often returns two line items:
+ * - [0] incoming lower plan (no expiry yet)
+ * - [1] current higher plan with `deferredItemReplacement` + expiry
+ * Reading only [0] incorrectly activates the lower plan immediately.
+ *
+ * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
+ * @returns {PlayLineItem | undefined} Current-entitlement line item.
+ */
+function pickCurrentLineItem(play: PlaySubscriptionV2): PlayLineItem | undefined {
+  const items = play.lineItems ?? [];
+  const withDeferred = items.find((item) => !!item?.deferredItemReplacement?.productId);
+  if (withDeferred) return withDeferred;
+  return items[0];
+}
+
+/**
+ * Extracts the current-entitlement line item product / base plan / expiry.
  *
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
  * @returns {{ productId: string | null, basePlanId: string | null, expiryTime: Date | null, autoRenewing: boolean | null }}
@@ -187,7 +207,7 @@ export function extractLineItem(play: PlaySubscriptionV2): {
   expiryTime: Date | null;
   autoRenewing: boolean | null;
 } {
-  const item = play.lineItems?.[0];
+  const item = pickCurrentLineItem(play);
   const productId = item?.productId ?? null;
   const basePlanId = item?.offerDetails?.basePlanId ?? null;
   const expiryTime = item?.expiryTime ? new Date(item.expiryTime) : null;
@@ -199,7 +219,7 @@ export function extractLineItem(play: PlaySubscriptionV2): {
 }
 
 /**
- * Extracts a deferred (period-end) replacement from the primary line item, if any.
+ * Extracts a deferred (period-end) replacement from any line item.
  * Present when Android used ReplacementMode.DEFERRED.
  *
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
@@ -208,12 +228,24 @@ export function extractLineItem(play: PlaySubscriptionV2): {
 export function extractDeferredReplacement(
   play: PlaySubscriptionV2
 ): { productId: string; basePlanId: string | null } | null {
-  const deferred = play.lineItems?.[0]?.deferredItemReplacement;
-  const productId = deferred?.productId;
-  if (!productId) return null;
-  const basePlanId =
-    (deferred as { basePlanId?: string | null })?.basePlanId ?? null;
-  return { productId, basePlanId };
+  const items = play.lineItems ?? [];
+  for (const item of items) {
+    const deferred = item?.deferredItemReplacement;
+    const productId = deferred?.productId;
+    if (!productId) continue;
+
+    const fromDeferred =
+      (deferred as { basePlanId?: string | null })?.basePlanId ?? null;
+    const fromTargetLine =
+      items.find((line) => line?.productId === productId)?.offerDetails?.basePlanId ??
+      null;
+
+    return {
+      productId,
+      basePlanId: fromDeferred ?? fromTargetLine ?? null,
+    };
+  }
+  return null;
 }
 
 /** RTDN subscriptionNotification.notificationType codes */

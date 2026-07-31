@@ -424,19 +424,20 @@ export async function verifySubscriptionPayment(
   const activatable = status === "active" || status === "in_grace";
 
   let acknowledged = play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-  // Always ack with the product on this purchaseToken (current line item).
-  // Using the deferred/pending product id hangs or fails Play's acknowledge API.
+  // Always ack with the CURRENT entitlement product (not the deferred/pending SKU).
+  // Do not await — a hung Play acknowledge must never block the verify HTTP response.
   const ackProductId = resolvedProductId;
   if (!acknowledged && (activatable || deferNow)) {
-    try {
-      await acknowledgePlaySubscription(ackProductId, purchaseToken);
-      acknowledged = true;
-    } catch (err) {
-      logger.warn("Acknowledge failed during verify (continuing)", {
-        ackProductId,
-        error: err instanceof Error ? err.message : String(err),
+    void acknowledgePlaySubscription(ackProductId, purchaseToken)
+      .then(() => {
+        acknowledged = true;
+      })
+      .catch((err: unknown) => {
+        logger.warn("Acknowledge failed during verify (continuing)", {
+          ackProductId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    }
   }
 
   const periodStart = play.startTime ? new Date(play.startTime) : new Date();
