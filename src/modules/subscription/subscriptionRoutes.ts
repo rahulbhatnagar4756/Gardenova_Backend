@@ -44,7 +44,9 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  *       - Downgrade (lower tier / lower price): ReplacementMode.DEFERRED
  *         → backend keeps the current plan active (does NOT switch to free),
  *         sets pending_plan_id, and switches at current_period_end when Play RTDN confirms.
- *         Response: activated=true, deferred=true, planCode=current, pendingPlanCode=next.
+ *       Verify always returns the same JSON shape for upgrade and downgrade:
+ *       { verified, status, activated, deferred, planCode, pendingPlanCode, pendingEffectiveAt }
+ *       (pending_* are null when not deferred). Success message is the same when activated.
  *       Always call this endpoint with the returned purchaseToken after purchase.
  *       Use GET /subscriptions/me for current plan + pending_plan + pending_effective_at.
  *     tags:
@@ -74,8 +76,8 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  *     responses:
  *       200:
  *         description: >
- *           Purchase verified. Body includes activated, deferred, planCode,
- *           pendingPlanCode, and pendingEffectiveAt when a downgrade is scheduled.
+ *           Purchase verified. Same success envelope and data keys for upgrade and
+ *           downgrade (pendingPlanCode / pendingEffectiveAt are null unless deferred).
  *       400:
  *         description: Invalid purchase or missing fields
  *       401:

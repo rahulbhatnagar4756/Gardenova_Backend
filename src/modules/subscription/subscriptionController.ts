@@ -117,13 +117,24 @@ export const verifySubscription = async (
       orderId,
     });
 
-    const message = result.deferred
-      ? `Downgrade scheduled — stays on ${result.planCode} until period end, then ${result.pendingPlanCode}`
-      : result.activated
-        ? "Subscription verified and activated successfully"
-        : "Purchase verified — subscription is not active yet";
+    // Same response shape for upgrade and downgrade (pending_* null when not deferred).
+    const data = {
+      verified: result.verified,
+      status: result.status,
+      activated: result.activated,
+      deferred: result.deferred,
+      planCode: result.planCode,
+      pendingPlanCode: result.pendingPlanCode ?? null,
+      pendingEffectiveAt: result.pendingEffectiveAt
+        ? new Date(result.pendingEffectiveAt).toISOString()
+        : null,
+    };
 
-    res.status(HTTP_STATUS.OK).json(successResponse(result, message));
+    const message = result.activated
+      ? "Subscription verified and activated successfully"
+      : "Purchase verified — subscription is not active yet";
+
+    res.status(HTTP_STATUS.OK).json(successResponse(data, message));
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     logger.error("Verify subscription failed", {
