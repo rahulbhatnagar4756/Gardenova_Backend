@@ -7,6 +7,36 @@ import { SubscriptionStatus } from "../../interface/subscription";
 
 export type PlaySubscriptionV2 = androidpublisher_v3.Schema$SubscriptionPurchaseV2;
 
+const PLAY_API_TIMEOUT_MS = 15_000;
+
+/**
+ * Rejects if `promise` does not settle within `ms` (prevents hung verify requests).
+ *
+ * @param {Promise<T>} promise - Underlying Play API call.
+ * @param {number} ms - Timeout in milliseconds.
+ * @param {string} label - Error label for logs / messages.
+ * @returns {Promise<T>} Resolved value of the original promise.
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${ms}ms`));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Returns the configured Google Play package name.
  *
@@ -73,10 +103,14 @@ export async function fetchPlaySubscription(
   purchaseToken: string
 ): Promise<PlaySubscriptionV2> {
   const androidpublisher = getAndroidPublisher();
-  const res = await androidpublisher.purchases.subscriptionsv2.get({
-    packageName: getPackageName(),
-    token: purchaseToken,
-  });
+  const res = await withTimeout(
+    androidpublisher.purchases.subscriptionsv2.get({
+      packageName: getPackageName(),
+      token: purchaseToken,
+    }),
+    PLAY_API_TIMEOUT_MS,
+    "Play subscriptionsv2.get"
+  );
   if (!res.data) {
     throw new Error("Empty response from Google Play subscriptionsv2.get");
   }
@@ -86,8 +120,10 @@ export async function fetchPlaySubscription(
 /**
  * Acknowledges a subscription purchase (required within 3 days).
  * Uses productId as subscriptionId for the legacy acknowledge endpoint.
+ * `productId` must be the product owned by this purchaseToken (current line item),
+ * not a deferred/pending replacement product.
  *
- * @param {string} productId - Play subscription product / SKU id.
+ * @param {string} productId - Play subscription product / SKU id for this token.
  * @param {string} purchaseToken - Google Play purchase token.
  * @returns {Promise<void>} Resolves when acknowledge succeeds.
  */
@@ -96,12 +132,16 @@ export async function acknowledgePlaySubscription(
   purchaseToken: string
 ): Promise<void> {
   const androidpublisher = getAndroidPublisher();
-  await androidpublisher.purchases.subscriptions.acknowledge({
-    packageName: getPackageName(),
-    subscriptionId: productId,
-    token: purchaseToken,
-    requestBody: {},
-  });
+  await withTimeout(
+    androidpublisher.purchases.subscriptions.acknowledge({
+      packageName: getPackageName(),
+      subscriptionId: productId,
+      token: purchaseToken,
+      requestBody: {},
+    }),
+    PLAY_API_TIMEOUT_MS,
+    "Play subscriptions.acknowledge"
+  );
 }
 
 /**

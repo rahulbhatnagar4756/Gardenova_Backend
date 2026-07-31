@@ -42,8 +42,9 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  *       - Upgrade (higher tier / higher price): ReplacementMode.CHARGE_FULL_PRICE
  *         → backend activates the new plan immediately and clears pending_plan.
  *       - Downgrade (lower tier / lower price): ReplacementMode.DEFERRED
- *         → backend keeps the current plan active, sets pending_plan_id, and
- *         switches at current_period_end when Play RTDN confirms.
+ *         → backend keeps the current plan active (does NOT switch to free),
+ *         sets pending_plan_id, and switches at current_period_end when Play RTDN confirms.
+ *         Response: activated=true, deferred=true, planCode=current, pendingPlanCode=next.
  *       Always call this endpoint with the returned purchaseToken after purchase.
  *       Use GET /subscriptions/me for current plan + pending_plan + pending_effective_at.
  *     tags:

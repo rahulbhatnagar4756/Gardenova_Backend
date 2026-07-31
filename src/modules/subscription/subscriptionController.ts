@@ -118,23 +118,32 @@ export const verifySubscription = async (
     });
 
     const message = result.deferred
-      ? `Downgrade scheduled — switches to ${result.pendingPlanCode} at period end`
+      ? `Downgrade scheduled — stays on ${result.planCode} until period end, then ${result.pendingPlanCode}`
       : result.activated
         ? "Subscription verified and activated successfully"
         : "Purchase verified — subscription is not active yet";
 
     res.status(HTTP_STATUS.OK).json(successResponse(result, message));
   } catch (err) {
-    await error("Error verifying subscription", {
-      action: "verifySubscription",
-      req,
-      error: err instanceof Error ? err.message : String(err),
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error("Verify subscription failed", {
+      error: errMsg,
+      userId: (req.user as AuthUserPayload | undefined)?.userId,
     });
-    res
-      .status(HTTP_STATUS.BAD_REQUEST)
-      .json(
-        errorResponse(err instanceof Error ? err.message : "An error occurred while verifying subscription")
-      );
+    try {
+      await error("Error verifying subscription", {
+        action: "verifySubscription",
+        req,
+        error: errMsg,
+      });
+    } catch {
+      /* never block the HTTP response on logging */
+    }
+    if (!res.headersSent) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse(errMsg || "An error occurred while verifying subscription"));
+    }
   }
 };
 

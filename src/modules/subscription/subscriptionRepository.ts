@@ -326,6 +326,7 @@ export type VerifySubscriptionResult = {
 /**
  * Verifies a Google Play purchase, acknowledges it, and either activates immediately
  * (upgrade / first purchase) or schedules a pending plan (downgrade / Play deferred).
+ * Deferred downgrades keep the current paid plan active until period end — never free.
  *
  * @param {string} userId - Purchasing user UUID.
  * @param {VerifySubscriptionBody} body - Purchase token and product identifiers.
@@ -423,13 +424,16 @@ export async function verifySubscriptionPayment(
   const activatable = status === "active" || status === "in_grace";
 
   let acknowledged = play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-  const ackProductId = deferredReplacement?.productId || resolvedProductId;
+  // Always ack with the product on this purchaseToken (current line item).
+  // Using the deferred/pending product id hangs or fails Play's acknowledge API.
+  const ackProductId = resolvedProductId;
   if (!acknowledged && (activatable || deferNow)) {
     try {
       await acknowledgePlaySubscription(ackProductId, purchaseToken);
       acknowledged = true;
     } catch (err) {
-      logger.warn("Acknowledge failed during verify", {
+      logger.warn("Acknowledge failed during verify (continuing)", {
+        ackProductId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -468,16 +472,58 @@ export async function verifySubscriptionPayment(
     ]
   );
 
-  if (deferNow && currentSub && deferredPlan) {
+  // Deferred downgrade: keep CURRENT paid plan active until period end.
+  // Never fall through to the activate path (that can clear pending / mark expired → free).
+  if (deferNow && deferredPlan) {
+    const keepPlan = activeLinePlan;
+    // Play may report canceled while the paid window is still open; never drop to free.
+    const keepStatus: string =
+      status === "active" || status === "in_grace" ? status : "active";
+
     await client.query(
-      `UPDATE user_subscriptions
-         SET pending_plan_id = $2,
-             raw_play_payload = $3,
-             acknowledged = $4,
-             updated_at = now()
-       WHERE user_id = $1
-         AND status IN ('active', 'in_grace')`,
-      [userId, deferredPlan.id, play, acknowledged]
+      `INSERT INTO user_subscriptions (
+         user_id, plan_id, status, purchase_token, order_id,
+         linked_purchase_token, auto_renewing, acknowledged,
+         current_period_start, current_period_end, cancel_at_period_end,
+         pending_plan_id, raw_play_payload, updated_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()
+       )
+       ON CONFLICT (user_id) DO UPDATE SET
+         plan_id = $2,
+         status = $3,
+         purchase_token = COALESCE($4, user_subscriptions.purchase_token),
+         order_id = COALESCE($5, user_subscriptions.order_id),
+         linked_purchase_token = COALESCE(
+           $6,
+           user_subscriptions.linked_purchase_token
+         ),
+         auto_renewing = COALESCE($7, user_subscriptions.auto_renewing),
+         acknowledged = $8,
+         current_period_start = COALESCE(
+           $9,
+           user_subscriptions.current_period_start
+         ),
+         current_period_end = COALESCE($10, user_subscriptions.current_period_end),
+         cancel_at_period_end = $11,
+         pending_plan_id = $12,
+         raw_play_payload = $13,
+         updated_at = now()`,
+      [
+        userId,
+        keepPlan.id,
+        keepStatus,
+        purchaseToken,
+        orderId ?? play.latestOrderId ?? null,
+        play.linkedPurchaseToken ?? null,
+        line.autoRenewing,
+        acknowledged,
+        periodStart,
+        periodEnd ?? currentSub?.current_period_end ?? null,
+        line.autoRenewing === false,
+        deferredPlan.id,
+        play,
+      ]
     );
 
     await client.query(
@@ -490,12 +536,14 @@ export async function verifySubscriptionPayment(
 
     return {
       verified: true,
-      status: currentSub.status,
-      activated: false,
+      status: keepStatus,
+      // Current paid plan remains active — clients must not treat this as free.
+      activated: true,
       deferred: true,
-      planCode: currentPlan.code,
+      planCode: keepPlan.code,
       pendingPlanCode: deferredPlan.code,
-      pendingEffectiveAt: currentSub.current_period_end,
+      pendingEffectiveAt:
+        periodEnd ?? currentSub?.current_period_end ?? null,
     };
   }
 

@@ -126,9 +126,9 @@ export async function syncSubscriptionFromPlay(
   const db = await getDB();
   const { productId, basePlanId, expiryTime, autoRenewing } = extractLineItem(play);
   const deferred = extractDeferredReplacement(play);
-  const status = mapPlayStateToLocal(play.subscriptionState);
+  let status = mapPlayStateToLocal(play.subscriptionState);
   const startMs = play.startTime ? new Date(play.startTime) : null;
-  const cancelAtPeriodEnd = autoRenewing === false && status === "active";
+  const periodStillOpen = !!expiryTime && expiryTime.getTime() > Date.now();
 
   // Plan replace: Play expires the old token. Do not mark the user free — the new
   // purchase token (PURCHASED / verify) carries entitlement.
@@ -139,6 +139,14 @@ export async function syncSubscriptionFromPlay(
       `Skipping EXPIRED sync for replacementCancellation token=${purchaseToken.slice(0, 12)}...`
     );
     return;
+  }
+
+  // Canceled but still inside the paid window → keep active (cancel-at-period-end /
+  // deferred downgrade). Otherwise /me falls back to free.
+  let cancelAtPeriodEnd = autoRenewing === false && status === "active";
+  if (status === "canceled" && periodStillOpen) {
+    status = "active";
+    cancelAtPeriodEnd = true;
   }
 
   const planId = await resolvePlanId(productId, basePlanId);
@@ -156,6 +164,42 @@ export async function syncSubscriptionFromPlay(
 
   // While a deferred replacement is pending, keep current plan_id; only set pending.
   const hasDeferredPending = !!deferred && !!pendingPlanId;
+
+  // Do not expire a row that still has a deferred downgrade inside the current period.
+  if (
+    (status === "expired" || status === "canceled") &&
+    !hasDeferredPending
+  ) {
+    const { rows: protectRows } = await db.query<{
+      id: string;
+      pending_plan_id: string | null;
+      current_period_end: Date | null;
+    }>(
+      `SELECT id, pending_plan_id, current_period_end
+       FROM user_subscriptions
+       WHERE purchase_token = $1
+          OR ($2::text IS NOT NULL AND purchase_token = $2)
+       LIMIT 1`,
+      [purchaseToken, linked]
+    );
+    const protect = protectRows[0];
+    const protectPeriodOpen =
+      !!protect?.current_period_end &&
+      new Date(protect.current_period_end).getTime() > Date.now();
+    if (protect?.pending_plan_id && protectPeriodOpen) {
+      logger.info(
+        "Skipping terminal sync; deferred downgrade still in current period",
+        { purchaseTokenPrefix: purchaseToken.slice(0, 12) }
+      );
+      await db.query(
+        `UPDATE user_subscriptions
+           SET raw_play_payload = $2, updated_at = now()
+         WHERE id = $1`,
+        [protect.id, play]
+      );
+      return;
+    }
+  }
 
   // Allow linked-token migration only when the new token is not already claimed
   // by a different app user in google_play_purchases.
