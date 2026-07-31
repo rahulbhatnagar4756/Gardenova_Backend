@@ -7,7 +7,13 @@ import jsdoc from "eslint-plugin-jsdoc"; // ✅ add plugin
 export default [
   // Global ignores
   {
-    ignores: ["node_modules/**", "dist/**", "**/*.test.ts", "**/*.spec.ts"],
+    ignores: [
+      "node_modules/**",
+      "dist/**",
+      "scripts/**",
+      "**/*.test.ts",
+      "**/*.spec.ts",
+    ],
   },
 
   // JavaScript files configuration

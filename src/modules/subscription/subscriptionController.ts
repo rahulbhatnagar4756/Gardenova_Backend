@@ -7,6 +7,7 @@ import {
   cancelSubscriptionService,
   getAllPlansWithDetailService,
   getMySubscriptionService,
+  normalizeVerifyPlanIds,
   verifySubscriptionPayment,
 } from "./subscriptionRepository";
 import { AuthUserPayload } from "../../interface/user";
@@ -85,23 +86,34 @@ export const verifySubscription = async (
     }
 
     const { purchaseToken, productId, basePlanId, orderId } = req.body;
-    logger.info("Verifying subscription", {
-      userId: userPayload.userId,
-      purchaseToken,
-      productId,
-      basePlanId,
-      orderId,
-    });
 
     if (!purchaseToken || !productId) {
       res.status(400).json({ error: "Missing purchaseToken or productId" });
       return;
     }
+    logger.info("Received subscription verification request", {
+      userId: userPayload.userId,
+      purchaseToken,
+      productId,
+      basePlanId: basePlanId ?? null,
+      orderId: orderId ?? null,
+    });
+    const normalized = await normalizeVerifyPlanIds(productId, basePlanId);
+    logger.info("Verifying subscription", {
+      userId: userPayload.userId,
+      purchaseToken,
+      productId: normalized.productId,
+      basePlanId: normalized.basePlanId,
+      planCode: normalized.planCode,
+      rawProductId: productId,
+      rawBasePlanId: basePlanId ?? null,
+      orderId,
+    });
 
     const result = await verifySubscriptionPayment(userPayload.userId, {
       purchaseToken,
-      productId,
-      basePlanId,
+      productId: normalized.productId,
+      ...(normalized.basePlanId ? { basePlanId: normalized.basePlanId } : {}),
       orderId,
     });
 

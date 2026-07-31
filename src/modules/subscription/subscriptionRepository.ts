@@ -155,6 +155,87 @@ export async function getPlanByGoogleIds(
 }
 
 /**
+ * Maps client/Play product + basePlan ids onto subscription_plans google_* values.
+ * Handles shorthand like basePlanId "monthly" and composite productIds like "starter_monthly".
+ *
+ * @param {string} productId - Raw product id from the client.
+ * @param {string | null | undefined} [basePlanId] - Raw base plan id from the client.
+ * @returns {Promise<{ productId: string, basePlanId: string | null, planCode: string | null }>}
+ * Canonical google product/base plan ids (and matched plan code when found).
+ */
+export async function normalizeVerifyPlanIds(
+  productId: string,
+  basePlanId?: string | null
+): Promise<{
+  productId: string;
+  basePlanId: string | null;
+  planCode: string | null;
+}> {
+  const client = await getDB();
+  const rawProduct = productId.trim();
+  const rawBase = basePlanId?.trim() || null;
+  const composedBase =
+    rawBase && rawProduct && !rawBase.includes("-")
+      ? `${rawProduct.replace(/_/g, "-")}-${rawBase}`
+      : null;
+  // e.g. productId "starter" + "monthly" → plan code "starter_monthly"
+  const composedCode =
+    rawBase && (rawBase === "monthly" || rawBase === "yearly")
+      ? `${rawProduct}_${rawBase}`
+      : null;
+
+  const { rows } = await client.query<{
+    code: string;
+    google_product_id: string;
+    google_base_plan_id: string | null;
+  }>(
+    `SELECT code, google_product_id, google_base_plan_id
+     FROM subscription_plans
+     WHERE is_active = true
+       AND google_product_id IS NOT NULL
+       AND (
+         (google_product_id = $1 AND ($2::text IS NULL OR google_base_plan_id = $2))
+         OR code = $1
+         OR ($4::text IS NOT NULL AND code = $4)
+         OR (google_product_id = $1 AND billing_cycle::text = $2)
+         OR (google_product_id = $1 AND google_base_plan_id = $3)
+         OR ($3::text IS NOT NULL AND google_base_plan_id = $3)
+         OR (google_product_id = $1 AND $2::text IS NOT NULL AND google_base_plan_id LIKE ('%' || $2))
+         OR google_product_id = $1
+       )
+     ORDER BY
+       CASE
+         WHEN google_product_id = $1 AND google_base_plan_id = $2 THEN 0
+         WHEN code = $1 THEN 1
+         WHEN $4::text IS NOT NULL AND code = $4 THEN 2
+         WHEN google_product_id = $1 AND billing_cycle::text = $2 THEN 3
+         WHEN google_product_id = $1 AND google_base_plan_id = $3 THEN 4
+         WHEN $3::text IS NOT NULL AND google_base_plan_id = $3 THEN 5
+         WHEN google_product_id = $1 AND $2::text IS NOT NULL AND google_base_plan_id LIKE ('%' || $2) THEN 6
+         WHEN google_product_id = $1 THEN 7
+         ELSE 8
+       END
+     LIMIT 1`,
+    [rawProduct, rawBase, composedBase, composedCode]
+  );
+
+  const plan = rows[0];
+  if (!plan) {
+    return {
+      productId: rawProduct,
+      basePlanId: rawBase,
+      planCode: null,
+    };
+  }
+
+  return {
+    productId: plan.google_product_id,
+    basePlanId: plan.google_base_plan_id,
+    planCode: plan.code,
+  };
+}
+
+/**
  * Ensures purchase_token can be assigned to this user without unique conflicts.
  * Clears the token from expired/canceled rows owned by other users; rejects if
  * another account still has an active entitlement on this token.
