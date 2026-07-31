@@ -155,6 +155,50 @@ export async function getPlanByGoogleIds(
 }
 
 /**
+ * Ensures purchase_token can be assigned to this user without unique conflicts.
+ * Clears the token from expired/canceled rows owned by other users; rejects if
+ * another account still has an active entitlement on this token.
+ *
+ * @param {string} userId - Claiming user UUID.
+ * @param {string} purchaseToken - Google Play purchase token.
+ * @returns {Promise<void>} Resolves when the token is free for this user.
+ */
+async function claimPurchaseTokenForUser(
+  userId: string,
+  purchaseToken: string
+): Promise<void> {
+  const client = await getDB();
+  const { rows } = await client.query<{ id: string; user_id: string; status: string }>(
+    `SELECT id, user_id, status FROM user_subscriptions WHERE purchase_token = $1`,
+    [purchaseToken]
+  );
+  const existing = rows[0];
+  if (!existing) return;
+  if (existing.user_id === userId) return;
+
+  if (existing.status === "expired" || existing.status === "canceled") {
+    logger.warn("Reclaiming purchase_token from expired/canceled row", {
+      fromUserId: existing.user_id,
+      toUserId: userId,
+      status: existing.status,
+    });
+    await client.query(
+      `UPDATE user_subscriptions
+         SET purchase_token = NULL,
+             linked_purchase_token = NULL,
+             updated_at = now()
+       WHERE id = $1`,
+      [existing.id]
+    );
+    return;
+  }
+
+  throw new Error(
+    "This Google Play purchase is already linked to another account"
+  );
+}
+
+/**
  * Returns the user's active/in-grace subscription with plan, or free plan fallback.
  *
  * @param {string} userId - User UUID.
@@ -325,6 +369,10 @@ export async function verifySubscriptionPayment(
        (user_id, product_id, base_plan_id, purchase_token, order_id, acknowledged, raw_response)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (purchase_token) DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       product_id = EXCLUDED.product_id,
+       base_plan_id = EXCLUDED.base_plan_id,
+       order_id = COALESCE(EXCLUDED.order_id, google_play_purchases.order_id),
        acknowledged = EXCLUDED.acknowledged,
        raw_response = EXCLUDED.raw_response,
        updated_at = now()`,
@@ -371,6 +419,11 @@ export async function verifySubscriptionPayment(
   }
 
   const activatePlan = activeLinePlan;
+
+  // Avoid unique violations when this token already sits on another row
+  // (common after DB cleanup / account switches in test).
+  await claimPurchaseTokenForUser(userId, purchaseToken);
+
   await client.query(
     `INSERT INTO user_subscriptions (
        user_id, plan_id, status, purchase_token, order_id,
