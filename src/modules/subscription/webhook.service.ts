@@ -108,13 +108,12 @@ async function resolvePlanId(
 }
 
 /**
- * Applies a Play SubscriptionPurchaseV2 payload onto the local row that already
- * owns this exact purchase_token (set by verify). RTDN never migrates tokens via
- * linkedPurchaseToken — that caused wrong-user binding when webhook beat verify.
+ * Applies a Play SubscriptionPurchaseV2 payload onto the matching local row.
  *
- * Deferred replacements keep the current plan active and only set pending_plan_id.
- * When the deferred change takes effect (no deferredItemReplacement, active state),
- * pending_plan_id is cleared and the new line-item plan is activated.
+ * - Exact purchase_token match always applies.
+ * - Active replacements may migrate the row from linkedPurchaseToken → new token
+ *   so upgrade/downgrade does not briefly fall to free when EXPIRED beats verify.
+ * - EXPIRED caused by replacementCancellation is ignored (new purchase owns entitlement).
  *
  * @param {string} purchaseToken - Google Play purchase token.
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload from Play.
@@ -131,6 +130,17 @@ export async function syncSubscriptionFromPlay(
   const startMs = play.startTime ? new Date(play.startTime) : null;
   const cancelAtPeriodEnd = autoRenewing === false && status === "active";
 
+  // Plan replace: Play expires the old token. Do not mark the user free — the new
+  // purchase token (PURCHASED / verify) carries entitlement.
+  const isReplacementExpire =
+    status === "expired" && !!play.canceledStateContext?.replacementCancellation;
+  if (isReplacementExpire) {
+    logger.info(
+      `Skipping EXPIRED sync for replacementCancellation token=${purchaseToken.slice(0, 12)}...`
+    );
+    return;
+  }
+
   const planId = await resolvePlanId(productId, basePlanId);
   const pendingPlanId = deferred
     ? await resolvePlanId(deferred.productId, deferred.basePlanId)
@@ -141,17 +151,48 @@ export async function syncSubscriptionFromPlay(
       ? play.linkedPurchaseToken
       : null;
 
-  // Only update by exact purchase_token. Do NOT migrate via linkedPurchaseToken
-  // here — that races ahead of verify and can bind a new purchase to the wrong
-  // app user. Token ownership is established by authenticated verify.
+  const isEntitlementGranting =
+    status === "active" || status === "in_grace" || status === "pending";
+
   // While a deferred replacement is pending, keep current plan_id; only set pending.
   const hasDeferredPending = !!deferred && !!pendingPlanId;
+
+  // Allow linked-token migration only when the new token is not already claimed
+  // by a different app user in google_play_purchases.
+  let allowLinkedMigration = false;
+  if (isEntitlementGranting && linked) {
+    const { rows: claimRows } = await db.query<{ user_id: string }>(
+      `SELECT user_id FROM google_play_purchases WHERE purchase_token = $1 LIMIT 1`,
+      [purchaseToken]
+    );
+    const { rows: oldOwnerRows } = await db.query<{ user_id: string }>(
+      `SELECT user_id FROM user_subscriptions WHERE purchase_token = $1 LIMIT 1`,
+      [linked]
+    );
+    const claimUserId = claimRows[0]?.user_id;
+    const oldOwnerId = oldOwnerRows[0]?.user_id;
+    if (!claimUserId) {
+      // Verify not yet run — migrate old-token owner forward (same-user plan change).
+      allowLinkedMigration = !!oldOwnerId;
+    } else if (oldOwnerId && claimUserId === oldOwnerId) {
+      allowLinkedMigration = true;
+    } else {
+      logger.warn(
+        "Skipping linked-token migration; purchase claimed by a different user",
+        {
+          purchaseTokenPrefix: purchaseToken.slice(0, 12),
+          claimUserId,
+          oldOwnerId,
+        }
+      );
+    }
+  }
 
   const { rowCount } = await db.query(
     `UPDATE user_subscriptions
        SET status = $2,
            plan_id = CASE
-             WHEN $11::boolean THEN plan_id
+             WHEN $12::boolean THEN plan_id
              ELSE COALESCE($3, plan_id)
            END,
            purchase_token = $1,
@@ -163,12 +204,17 @@ export async function syncSubscriptionFromPlay(
            cancel_at_period_end = $9,
            raw_play_payload = $10,
            pending_plan_id = CASE
-             WHEN $11::boolean THEN $12::uuid
+             WHEN $12::boolean THEN $13::uuid
              WHEN $2 IN ('active', 'in_grace') THEN NULL
              ELSE pending_plan_id
            END,
            updated_at = now()
-     WHERE purchase_token = $1`,
+     WHERE purchase_token = $1
+        OR (
+          $11::boolean = true
+          AND $5::text IS NOT NULL
+          AND purchase_token = $5
+        )`,
     [
       purchaseToken,
       status,
@@ -180,6 +226,7 @@ export async function syncSubscriptionFromPlay(
       expiryTime,
       cancelAtPeriodEnd,
       play,
+      allowLinkedMigration,
       hasDeferredPending,
       pendingPlanId,
     ]
