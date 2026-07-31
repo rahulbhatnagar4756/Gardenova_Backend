@@ -96,11 +96,18 @@ async function resolvePlanId(
   const db = await getDB();
   const { rows } = await db.query<{ id: string }>(
     `SELECT id FROM subscription_plans
-     WHERE google_product_id = $1
-       AND ($2::text IS NULL OR google_base_plan_id = $2)
-       AND is_active = true
+     WHERE is_active = true
+       AND (
+         (google_product_id = $1 AND ($2::text IS NULL OR google_base_plan_id = $2))
+         OR code = $1
+         OR google_product_id = $1
+       )
      ORDER BY
-       CASE WHEN google_base_plan_id = $2 THEN 0 ELSE 1 END
+       CASE
+         WHEN google_product_id = $1 AND google_base_plan_id = $2 THEN 0
+         WHEN code = $1 THEN 1
+         ELSE 2
+       END
      LIMIT 1`,
     [productId, basePlanId]
   );
@@ -375,22 +382,24 @@ export async function handleGooglePlayRtdn(body: PubSubPushBody): Promise<void> 
     const play = await fetchPlaySubscription(subNotif.purchaseToken);
     await syncSubscriptionFromPlay(subNotif.purchaseToken, play);
 
-    // Acknowledge if still unacknowledged and active-ish
-    const productId = subNotif.subscriptionId || extractLineItem(play).productId;
+    // Ack with CURRENT entitlement product (extractLineItem), never RTDN subscriptionId
+    // alone — on deferred downgrade RTDN sid can be the incoming SKU and hangs Play ack.
+    const ackProductId =
+      extractLineItem(play).productId ?? subNotif.subscriptionId ?? null;
     if (
-      productId &&
       play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_PENDING" &&
       ["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"].includes(
         play.subscriptionState ?? ""
       )
     ) {
-      try {
-        await acknowledgePlaySubscription(productId, subNotif.purchaseToken);
-      } catch (ackErr) {
-        logger.warn("RTDN acknowledge soft-failed", {
-          error: ackErr instanceof Error ? ackErr.message : String(ackErr),
-        });
-      }
+      void acknowledgePlaySubscription(ackProductId, subNotif.purchaseToken).catch(
+        (ackErr: unknown) => {
+          logger.warn("RTDN acknowledge soft-failed", {
+            ackProductId,
+            error: ackErr instanceof Error ? ackErr.message : String(ackErr),
+          });
+        }
+      );
     }
 
     await markBillingWebhookProcessed(eventId);

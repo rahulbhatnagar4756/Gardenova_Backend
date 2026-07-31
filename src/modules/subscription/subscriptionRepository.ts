@@ -1,6 +1,5 @@
 import { getDB } from "../../core/config/db";
 import {
-  comparePlanChange,
   GetAllPlansWithDetailResponse,
   SubscriptionPlan,
   UserSubscription,
@@ -8,13 +7,12 @@ import {
 } from "../../interface/subscription";
 import logger from "../../core/config/logger";
 import {
-  acknowledgePlaySubscription,
   extractDeferredReplacement,
   extractLineItem,
   fetchPlaySubscription,
   mapPlayStateToLocal,
 } from "./googlePlay.service";
-import { syncSubscriptionFromPlay } from "./webhook.service";
+import { decideVerifyChange } from "./verifyDecision";
 
 /**
  * Fetch all active subscription plans with feature display labels.
@@ -144,10 +142,19 @@ export async function getPlanByGoogleIds(
   const client = await getDB();
   const { rows } = await client.query(
     `SELECT * FROM subscription_plans
-     WHERE google_product_id = $1
-       AND ($2::text IS NULL OR google_base_plan_id = $2)
-       AND is_active = true
-     ORDER BY CASE WHEN google_base_plan_id = $2 THEN 0 ELSE 1 END
+     WHERE is_active = true
+       AND (
+         (google_product_id = $1 AND ($2::text IS NULL OR google_base_plan_id = $2))
+         OR code = $1
+         OR google_product_id = $1
+       )
+     ORDER BY
+       CASE
+         WHEN google_product_id = $1 AND google_base_plan_id = $2 THEN 0
+         WHEN code = $1 THEN 1
+         WHEN google_product_id = $1 AND ($2::text IS NULL OR google_base_plan_id = $2) THEN 2
+         ELSE 3
+       END
      LIMIT 1`,
     [productId, basePlanId ?? null]
   );
@@ -321,12 +328,18 @@ export type VerifySubscriptionResult = {
   planCode: string;
   pendingPlanCode: string | null;
   pendingEffectiveAt: Date | null;
+  /** Post-response Play ack (never awaited inside verify). */
+  needsAcknowledge: boolean;
+  ackProductId: string | null;
+  purchaseToken: string;
 };
 
 /**
- * Verifies a Google Play purchase, acknowledges it, and either activates immediately
- * (upgrade / first purchase) or schedules a pending plan (downgrade / Play deferred).
- * Deferred downgrades keep the current paid plan active until period end — never free.
+ * Verifies a Google Play purchase and persists entitlement.
+ * Does NOT call Play acknowledge (controller does that after HTTP response).
+ *
+ * - Upgrade / first purchase → activate Play line plan now
+ * - Downgrade / Play deferred → keep current paid plan + pending_plan until period end
  *
  * @param {string} userId - Purchasing user UUID.
  * @param {VerifySubscriptionBody} body - Purchase token and product identifiers.
@@ -336,16 +349,35 @@ export async function verifySubscriptionPayment(
   userId: string,
   body: VerifySubscriptionBody
 ): Promise<VerifySubscriptionResult> {
-  const client = await getDB();
+  const client = getDB();
   const { purchaseToken, productId, basePlanId, orderId } = body;
 
   if (!purchaseToken || !productId) {
     throw new Error("purchaseToken and productId are required");
   }
 
+  const t0 = Date.now();
+  logger.info("Verify: fetching Play subscription", {
+    userId,
+    purchaseTokenPrefix: purchaseToken.slice(0, 16),
+  });
   const play = await fetchPlaySubscription(purchaseToken);
+  logger.info("Verify: Play fetch done", {
+    userId,
+    ms: Date.now() - t0,
+    state: play.subscriptionState,
+    ack: play.acknowledgementState,
+  });
+
   const line = extractLineItem(play);
   const deferredReplacement = extractDeferredReplacement(play);
+  logger.info("Verify: line items resolved", {
+    userId,
+    currentProductId: line.productId,
+    currentBasePlanId: line.basePlanId,
+    deferredProductId: deferredReplacement?.productId ?? null,
+    ms: Date.now() - t0,
+  });
 
   const resolvedProductId = line.productId || productId;
   const resolvedBasePlanId = line.basePlanId || basePlanId || null;
@@ -364,6 +396,8 @@ export async function verifySubscriptionPayment(
     );
   }
 
+  const bodyPlan = await getPlanByGoogleIds(productId, basePlanId ?? null);
+
   let pendingTargetPlan: SubscriptionPlan | null = null;
   if (deferredReplacement) {
     pendingTargetPlan = await getPlanByGoogleIds(
@@ -375,11 +409,8 @@ export async function verifySubscriptionPayment(
         `No local plan mapped for deferred productId=${deferredReplacement.productId}`
       );
     }
-  } else {
-    const bodyPlan = await getPlanByGoogleIds(productId, basePlanId ?? null);
-    if (bodyPlan && bodyPlan.id !== activeLinePlan.id) {
-      pendingTargetPlan = bodyPlan;
-    }
+  } else if (bodyPlan && bodyPlan.id !== activeLinePlan.id) {
+    pendingTargetPlan = bodyPlan;
   }
 
   const { subscription: currentSub, plan: currentPlan } =
@@ -387,67 +418,43 @@ export async function verifySubscriptionPayment(
   const hasPaidCurrent =
     !!currentSub && currentPlan.code !== "free" && currentPlan.tier !== "free";
 
-  const candidateForCompare = pendingTargetPlan ?? activeLinePlan;
-  const changeKind = hasPaidCurrent
-    ? comparePlanChange(currentPlan, candidateForCompare)
-    : "upgrade";
+  const decision = decideVerifyChange({
+    hasPaidCurrent,
+    currentPlan,
+    activeLinePlan,
+    pendingTargetPlan,
+    deferredFromPlay: !!deferredReplacement,
+    bodyMappedPlan: bodyPlan,
+  });
 
-  // Play already replaced onto the lower product (Android used immediate mode).
-  const playAlreadyOnLower =
-    hasPaidCurrent &&
-    changeKind === "downgrade" &&
-    !deferredReplacement &&
-    activeLinePlan.id !== currentPlan.id &&
-    activeLinePlan.id === candidateForCompare.id;
-
-  const deferredPlan =
-    pendingTargetPlan ??
-    (changeKind === "downgrade" && hasPaidCurrent
-      ? await getPlanByGoogleIds(productId, basePlanId ?? null)
-      : null);
-
-  const deferNow =
-    !!deferredReplacement ||
-    (changeKind === "downgrade" &&
-      hasPaidCurrent &&
-      !playAlreadyOnLower &&
-      !!deferredPlan);
-
-  if (playAlreadyOnLower) {
+  if (decision.playAlreadyOnLower) {
     logger.warn(
-      "Downgrade arrived as immediate Play replacement; activating lower plan now. Android should use ReplacementMode.DEFERRED.",
-      { userId, from: currentPlan.code, to: activeLinePlan.code }
+      "Downgrade arrived without Play deferredItemReplacement; keeping current plan and scheduling pending. Android should use ReplacementMode.DEFERRED.",
+      {
+        userId,
+        from: currentPlan.code,
+        pending: decision.pendingPlan?.code ?? null,
+      }
     );
   }
 
   const status = mapPlayStateToLocal(play.subscriptionState);
   const activatable = status === "active" || status === "in_grace";
-
-  let acknowledged = play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
-  // Always ack with the CURRENT entitlement product (not the deferred/pending SKU).
-  // Do not await — a hung Play acknowledge must never block the verify HTTP response.
-  const ackProductId = resolvedProductId;
-  if (!acknowledged && (activatable || deferNow)) {
-    void acknowledgePlaySubscription(ackProductId, purchaseToken)
-      .then(() => {
-        acknowledged = true;
-      })
-      .catch((err: unknown) => {
-        logger.warn("Acknowledge failed during verify (continuing)", {
-          ackProductId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-  }
+  const acknowledged =
+    play.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+  const needsAcknowledge = !acknowledged && (activatable || decision.mode === "defer");
 
   const periodStart = play.startTime ? new Date(play.startTime) : new Date();
-  const periodEnd = line.expiryTime;
+  const periodEnd = line.expiryTime ?? currentSub?.current_period_end ?? null;
 
+  const deferNow = decision.mode === "defer" && !!decision.pendingPlan;
   const auditProductId = deferNow
-    ? (deferredPlan?.google_product_id ?? productId)
+    ? (bodyPlan?.google_product_id ??
+        (decision.pendingPlan as SubscriptionPlan | null)?.google_product_id ??
+        productId)
     : resolvedProductId;
   const auditBasePlanId = deferNow
-    ? (deferredPlan?.google_base_plan_id ?? basePlanId ?? null)
+    ? (bodyPlan?.google_base_plan_id ?? basePlanId ?? null)
     : resolvedBasePlanId;
 
   await client.query(
@@ -473,11 +480,9 @@ export async function verifySubscriptionPayment(
     ]
   );
 
-  // Deferred downgrade: keep CURRENT paid plan active until period end.
-  // Never fall through to the activate path (that can clear pending / mark expired → free).
-  if (deferNow && deferredPlan) {
-    const keepPlan = activeLinePlan;
-    // Play may report canceled while the paid window is still open; never drop to free.
+  if (deferNow && decision.pendingPlan) {
+    const keepPlan = decision.keepOrActivatePlan as SubscriptionPlan;
+    const pendingPlan = decision.pendingPlan as SubscriptionPlan;
     const keepStatus: string =
       status === "active" || status === "in_grace" ? status : "active";
 
@@ -520,9 +525,9 @@ export async function verifySubscriptionPayment(
         line.autoRenewing,
         acknowledged,
         periodStart,
-        periodEnd ?? currentSub?.current_period_end ?? null,
+        periodEnd,
         line.autoRenewing === false,
-        deferredPlan.id,
+        pendingPlan.id,
         play,
       ]
     );
@@ -535,23 +540,29 @@ export async function verifySubscriptionPayment(
       [purchaseToken, userId]
     );
 
+    logger.info("Verify: deferred downgrade saved", {
+      userId,
+      planCode: keepPlan.code,
+      pendingPlanCode: pendingPlan.code,
+      ms: Date.now() - t0,
+    });
+
     return {
       verified: true,
       status: keepStatus,
-      // Current paid plan remains active — clients must not treat this as free.
       activated: true,
       deferred: true,
       planCode: keepPlan.code,
-      pendingPlanCode: deferredPlan.code,
-      pendingEffectiveAt:
-        periodEnd ?? currentSub?.current_period_end ?? null,
+      pendingPlanCode: pendingPlan.code,
+      pendingEffectiveAt: periodEnd,
+      needsAcknowledge,
+      ackProductId: resolvedProductId,
+      purchaseToken,
     };
   }
 
-  const activatePlan = activeLinePlan;
+  const activatePlan = decision.keepOrActivatePlan as SubscriptionPlan;
 
-  // Avoid unique violations when this token already sits on another row
-  // (common after DB cleanup / account switches in test).
   await claimPurchaseTokenForUser(userId, purchaseToken);
 
   await client.query(
@@ -601,9 +612,12 @@ export async function verifySubscriptionPayment(
     [purchaseToken, userId]
   );
 
-  if (activatable) {
-    await syncSubscriptionFromPlay(purchaseToken, play);
-  }
+  logger.info("Verify: activated plan saved", {
+    userId,
+    planCode: activatePlan.code,
+    status,
+    ms: Date.now() - t0,
+  });
 
   return {
     verified: true,
@@ -613,6 +627,9 @@ export async function verifySubscriptionPayment(
     planCode: activatePlan.code,
     pendingPlanCode: null,
     pendingEffectiveAt: null,
+    needsAcknowledge,
+    ackProductId: resolvedProductId,
+    purchaseToken,
   };
 }
 

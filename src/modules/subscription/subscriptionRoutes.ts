@@ -47,6 +47,8 @@ router.get("/getplans", auth, getAllPlanswithDetails);
  *       Verify always returns the same JSON shape for upgrade and downgrade:
  *       { verified, status, activated, deferred, planCode, pendingPlanCode, pendingEffectiveAt }
  *       (pending_* are null when not deferred). Success message is the same when activated.
+ *       Play acknowledge runs AFTER the HTTP response (never blocks the client).
+ *       Handler hard-timeout is 12s; Play HTTP calls use axios timeouts (8s).
  *       Always call this endpoint with the returned purchaseToken after purchase.
  *       Use GET /subscriptions/me for current plan + pending_plan + pending_effective_at.
  *     tags:

@@ -1,18 +1,34 @@
 import fs from "fs";
 import path from "path";
-import { google, androidpublisher_v3 } from "googleapis";
+import axios from "axios";
+import { GoogleAuth } from "google-auth-library";
+import { androidpublisher_v3 } from "googleapis";
 import config from "../../core/config/env";
 import logger from "../../core/config/logger";
 import { SubscriptionStatus } from "../../interface/subscription";
 
 export type PlaySubscriptionV2 = androidpublisher_v3.Schema$SubscriptionPurchaseV2;
 
-const PLAY_API_TIMEOUT_MS = 15_000;
+/** Hard HTTP timeout for all Play Developer API calls (verify must never hang). */
+const PLAY_API_TIMEOUT_MS = 8_000;
+const PLAY_AUTH_TIMEOUT_MS = 5_000;
+
+let cachedAuth: GoogleAuth | null = null;
 
 /**
- * Rejects if `promise` does not settle within `ms` (prevents hung verify requests).
+ * Treats HTTP 2xx responses as success for axios validateStatus.
  *
- * @param {Promise<T>} promise - Underlying Play API call.
+ * @param {number} status - HTTP status code from axios.
+ * @returns {boolean} True when status is in the 2xx range.
+ */
+function isHttpSuccess(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+/**
+ * Rejects if `promise` does not settle within `ms`.
+ *
+ * @param {Promise<T>} promise - Underlying async work.
  * @param {number} ms - Timeout in milliseconds.
  * @param {string} label - Error label for logs / messages.
  * @returns {Promise<T>} Resolved value of the original promise.
@@ -23,9 +39,13 @@ async function withTimeout<T>(
   label: string
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let finished = false;
   try {
     return await Promise.race([
-      promise,
+      promise.then((value) => {
+        finished = true;
+        return value;
+      }),
       new Promise<T>((_, reject) => {
         timer = setTimeout(() => {
           reject(new Error(`${label} timed out after ${ms}ms`));
@@ -34,6 +54,13 @@ async function withTimeout<T>(
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    void promise.catch((err: unknown) => {
+      if (!finished) {
+        logger.warn(`${label} failed after timeout`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   }
 }
 
@@ -52,7 +79,6 @@ function getPackageName(): string {
 
 /**
  * Parses Google Play service-account credentials from env.
- * Accepts either inline JSON or a path to a JSON key file.
  *
  * @returns {object} Service account JSON object.
  */
@@ -81,20 +107,49 @@ function getServiceAccountCredentials(): object {
 }
 
 /**
- * Builds an authenticated Android Publisher API client.
+ * Returns a cached GoogleAuth client for Play Developer API.
  *
- * @returns {androidpublisher_v3.Androidpublisher} Android Publisher v3 client.
+ * @returns {GoogleAuth} Auth client.
  */
-function getAndroidPublisher(): androidpublisher_v3.Androidpublisher {
-  const auth = new google.auth.GoogleAuth({
+function getGoogleAuth(): GoogleAuth {
+  if (cachedAuth) return cachedAuth;
+  cachedAuth = new GoogleAuth({
     credentials: getServiceAccountCredentials(),
     scopes: ["https://www.googleapis.com/auth/androidpublisher"],
   });
-  return google.androidpublisher({ version: "v3", auth });
+  return cachedAuth;
+}
+
+/**
+ * Fetches a short-lived access token for Play API calls.
+ *
+ * @returns {Promise<string>} Bearer access token.
+ */
+async function getAccessToken(): Promise<string> {
+  const auth = getGoogleAuth();
+  const client = await withTimeout(
+    auth.getClient(),
+    PLAY_AUTH_TIMEOUT_MS,
+    "Play auth.getClient"
+  );
+  const tokenResponse = await withTimeout(
+    client.getAccessToken(),
+    PLAY_AUTH_TIMEOUT_MS,
+    "Play getAccessToken"
+  );
+  const token =
+    typeof tokenResponse === "string"
+      ? tokenResponse
+      : tokenResponse?.token ?? null;
+  if (!token) {
+    throw new Error("Failed to obtain Google Play access token");
+  }
+  return token;
 }
 
 /**
  * Fetches a subscription purchase via Android Publisher Subscriptions v2 API.
+ * Uses axios timeouts so the call cannot hang the verify request indefinitely.
  *
  * @param {string} purchaseToken - Google Play purchase token.
  * @returns {Promise<PlaySubscriptionV2>} Subscription purchase payload from Play.
@@ -102,46 +157,101 @@ function getAndroidPublisher(): androidpublisher_v3.Androidpublisher {
 export async function fetchPlaySubscription(
   purchaseToken: string
 ): Promise<PlaySubscriptionV2> {
-  const androidpublisher = getAndroidPublisher();
-  const res = await withTimeout(
-    androidpublisher.purchases.subscriptionsv2.get({
-      packageName: getPackageName(),
-      token: purchaseToken,
-    }),
-    PLAY_API_TIMEOUT_MS,
-    "Play subscriptionsv2.get"
-  );
-  if (!res.data) {
-    throw new Error("Empty response from Google Play subscriptionsv2.get");
+  const accessToken = await getAccessToken();
+  const packageName = getPackageName();
+  const url =
+    `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/` +
+    `${encodeURIComponent(packageName)}/purchases/subscriptionsv2/tokens/` +
+    `${encodeURIComponent(purchaseToken)}`;
+
+  try {
+    const res = await axios.get<PlaySubscriptionV2>(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: PLAY_API_TIMEOUT_MS,
+      validateStatus: isHttpSuccess,
+    });
+    if (!res.data) {
+      throw new Error("Empty response from Google Play subscriptionsv2.get");
+    }
+    return res.data;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.code === "ECONNABORTED") {
+      throw new Error(`Play subscriptionsv2.get timed out after ${PLAY_API_TIMEOUT_MS}ms`);
+    }
+    if (axios.isAxiosError(err)) {
+      const status = err.response?.status;
+      const body = err.response?.data;
+      throw new Error(
+        `Play subscriptionsv2.get failed${status ? ` (${status})` : ""}: ${
+          typeof body === "string" ? body : JSON.stringify(body ?? err.message)
+        }`
+      );
+    }
+    throw err;
   }
-  return res.data;
 }
 
 /**
  * Acknowledges a subscription purchase (required within 3 days).
- * Uses productId as subscriptionId for the legacy acknowledge endpoint.
- * `productId` must be the product owned by this purchaseToken (current line item),
- * not a deferred/pending replacement product.
  *
- * @param {string} productId - Play subscription product / SKU id for this token.
+ * Google docs (May 2025+): subscriptionId is optional and not recommended.
+ * Passing the wrong subscriptionId on deferred replacements commonly hangs/fails.
+ * We try the token-only acknowledge URL first, then fall back to current product id.
+ *
+ * @param {string | null} productId - Current entitlement product id (fallback only).
  * @param {string} purchaseToken - Google Play purchase token.
  * @returns {Promise<void>} Resolves when acknowledge succeeds.
  */
 export async function acknowledgePlaySubscription(
-  productId: string,
+  productId: string | null,
   purchaseToken: string
 ): Promise<void> {
-  const androidpublisher = getAndroidPublisher();
-  await withTimeout(
-    androidpublisher.purchases.subscriptions.acknowledge({
-      packageName: getPackageName(),
-      subscriptionId: productId,
-      token: purchaseToken,
-      requestBody: {},
-    }),
-    PLAY_API_TIMEOUT_MS,
-    "Play subscriptions.acknowledge"
-  );
+  const accessToken = await getAccessToken();
+  const packageName = getPackageName();
+  const tokenPath = encodeURIComponent(purchaseToken);
+  const pkgPath = encodeURIComponent(packageName);
+
+  const urls: string[] = [
+    // Preferred: no subscriptionId (recommended since May 2025)
+    `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${pkgPath}/purchases/subscriptions/tokens/${tokenPath}:acknowledge`,
+  ];
+  if (productId) {
+    urls.push(
+      `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${pkgPath}/purchases/subscriptions/${encodeURIComponent(productId)}/tokens/${tokenPath}:acknowledge`
+    );
+  }
+
+  let lastError: unknown;
+  for (const url of urls) {
+    try {
+      await axios.post(
+        url,
+        {},
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: PLAY_API_TIMEOUT_MS,
+          validateStatus: isHttpSuccess,
+        }
+      );
+      return;
+    } catch (err) {
+      lastError = err;
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      // 404 → try fallback URL shape; other errors still try fallback once.
+      logger.warn("Play acknowledge attempt failed", {
+        status: status ?? null,
+        hasProductId: !!productId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (axios.isAxiosError(lastError) && lastError.code === "ECONNABORTED") {
+    throw new Error(`Play subscriptions.acknowledge timed out after ${PLAY_API_TIMEOUT_MS}ms`);
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Play acknowledge failed: ${String(lastError)}`);
 }
 
 /**
@@ -182,7 +292,6 @@ type PlayLineItem = NonNullable<PlaySubscriptionV2["lineItems"]>[number];
  * On DEFERRED downgrade Play often returns two line items:
  * - [0] incoming lower plan (no expiry yet)
  * - [1] current higher plan with `deferredItemReplacement` + expiry
- * Reading only [0] incorrectly activates the lower plan immediately.
  *
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
  * @returns {PlayLineItem | undefined} Current-entitlement line item.
@@ -220,7 +329,6 @@ export function extractLineItem(play: PlaySubscriptionV2): {
 
 /**
  * Extracts a deferred (period-end) replacement from any line item.
- * Present when Android used ReplacementMode.DEFERRED.
  *
  * @param {PlaySubscriptionV2} play - SubscriptionPurchaseV2 payload.
  * @returns {{ productId: string, basePlanId: string | null } | null} Pending product ids, or null.

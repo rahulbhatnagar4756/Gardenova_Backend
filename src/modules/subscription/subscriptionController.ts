@@ -10,11 +10,41 @@ import {
   normalizeVerifyPlanIds,
   verifySubscriptionPayment,
 } from "./subscriptionRepository";
+import { acknowledgePlaySubscription } from "./googlePlay.service";
 import { AuthUserPayload } from "../../interface/user";
 import { Response } from "express";
 import logger from "../../core/config/logger";
 import { handleGooglePlayRtdn, recordBillingWebhookEvent, markBillingWebhookProcessed } from "./webhook.service";
 import { CustomError } from "../../interface/Error";
+
+/** Entire verify handler must finish within this window (client never waits forever). */
+const VERIFY_HANDLER_TIMEOUT_MS = 12_000;
+
+/**
+ * Races a promise against a hard deadline.
+ *
+ * @param {Promise<T>} promise - Work to bound.
+ * @param {number} ms - Deadline in milliseconds.
+ * @param {string} label - Timeout error label.
+ * @returns {Promise<T>} Result or timeout rejection.
+ */
+async function withHandlerTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * Returns all active subscription plans with feature labels for the authenticated user.
@@ -110,11 +140,23 @@ export const verifySubscription = async (
       orderId,
     });
 
-    const result = await verifySubscriptionPayment(userPayload.userId, {
-      purchaseToken,
-      productId: normalized.productId,
-      ...(normalized.basePlanId ? { basePlanId: normalized.basePlanId } : {}),
-      orderId,
+    const verifyStarted = Date.now();
+    const result = await withHandlerTimeout(
+      verifySubscriptionPayment(userPayload.userId, {
+        purchaseToken,
+        productId: normalized.productId,
+        ...(normalized.basePlanId ? { basePlanId: normalized.basePlanId } : {}),
+        orderId,
+      }),
+      VERIFY_HANDLER_TIMEOUT_MS,
+      "Verify subscription"
+    );
+    logger.info("Verify: payment handler finished", {
+      userId: userPayload.userId,
+      ms: Date.now() - verifyStarted,
+      deferred: result.deferred,
+      planCode: result.planCode,
+      pendingPlanCode: result.pendingPlanCode,
     });
 
     // Same response shape for upgrade and downgrade (pending_* null when not deferred).
@@ -134,27 +176,46 @@ export const verifySubscription = async (
       ? "Subscription verified and activated successfully"
       : "Purchase verified — subscription is not active yet";
 
+    // Respond first — never wait on Play acknowledge.
     res.status(HTTP_STATUS.OK).json(successResponse(data, message));
+
+    if (result.needsAcknowledge) {
+      const ackProductId = result.ackProductId;
+      const ackToken = result.purchaseToken;
+      setImmediate(() => {
+        void acknowledgePlaySubscription(ackProductId, ackToken)
+          .then(() => {
+            logger.info("Verify: post-response Play acknowledge ok", {
+              userId: userPayload.userId,
+              ackProductId,
+            });
+          })
+          .catch((ackErr: unknown) => {
+            logger.warn("Verify: post-response Play acknowledge failed", {
+              userId: userPayload.userId,
+              ackProductId,
+              error: ackErr instanceof Error ? ackErr.message : String(ackErr),
+            });
+          });
+      });
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     logger.error("Verify subscription failed", {
       error: errMsg,
       userId: (req.user as AuthUserPayload | undefined)?.userId,
     });
-    try {
-      await error("Error verifying subscription", {
-        action: "verifySubscription",
-        req,
-        error: errMsg,
-      });
-    } catch {
-      /* never block the HTTP response on logging */
-    }
     if (!res.headersSent) {
       res
         .status(HTTP_STATUS.BAD_REQUEST)
         .json(errorResponse(errMsg || "An error occurred while verifying subscription"));
     }
+    // Log after response so DB logging cannot delay/break the client.
+    void error("Error verifying subscription", {
+      action: "verifySubscription",
+      req,
+      error: errMsg,
+    }).catch(() => undefined);
   }
 };
 
