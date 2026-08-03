@@ -787,7 +787,7 @@ export async function detectSpaceType(imageBuffer: Buffer): Promise<DetectedSpac
   const dataUri = `data:image/jpeg;base64,${base64Image}`;
 
   const completion = await groq.chat.completions.create({
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    model: 'qwen/qwen3.6-27b',
     max_tokens: 200,
     temperature: 0.1,
     messages: [
@@ -1001,7 +1001,7 @@ CONDITION: [one sentence — overall state and mood]
 Start immediately with FLOOR. No preamble. No suggestions.`;
 
   const completion = await groq.chat.completions.create({
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    model: 'qwen/qwen3.6-27b',
     max_tokens: 700,
     temperature: 0.3,
     messages: [
