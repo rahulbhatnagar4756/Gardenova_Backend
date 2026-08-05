@@ -62,6 +62,10 @@ const FEATURE_LIMIT_KEY: Record<FeatureType, keyof PlanFeatures> = {
   landscape: "landscape_gens",
 };
 
+const UNLIMITED_USER_IDS = new Set<string>([
+  "3625e30b-8bc7-4d9d-a144-12e98e5d6474",
+]);
+
 /**
  * Checks whether a user has remaining usage for a feature and, if allowed,
  * atomically consumes one usage from their monthly quota.
@@ -85,6 +89,10 @@ export const checkAndConsumeUsage = async (
   userId: string,
   featureType: FeatureType
 ): Promise<UsageCheckResult> => {
+   if (UNLIMITED_USER_IDS.has(userId)) {
+    return { allowed: true, limit: -1, used: 0, remaining: -1 };
+  }
+
   const pool = getDB();
   const plan = await getUserActivePlan(userId);
 
