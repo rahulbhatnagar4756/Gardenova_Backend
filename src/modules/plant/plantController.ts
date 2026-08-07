@@ -19,6 +19,7 @@ import { IUser } from "../../interface/user";
 import { identifyPlantService } from "./plantRepository";
 import { AuthRequest } from "../../interface/auth";
 import { checkAndConsumeUsage } from "../../core/utils/planLimits";
+import { logDiagnosisScan } from "./diagnosisScanLog";
 
 /**
  * AUTH + ROLE CHECK HELPER (ADMIN ONLY)
@@ -355,12 +356,20 @@ export const diagnosePlantController = async (
 
     const apiResponse = await identifyPlantService(req.body);
 
-    // if(apiResponse.status === 200){
+    const firstImage =
+      Array.isArray(req.body?.images) && typeof req.body.images[0] === "string"
+        ? (req.body.images[0] as string)
+        : undefined;
+    const logPayload: { userId: string; diagnosis: typeof apiResponse; image?: string } = {
+      userId: user.id!,
+      diagnosis: apiResponse,
+    };
+    if (firstImage) logPayload.image = firstImage;
+    void logDiagnosisScan(logPayload);
+
     res
       .status(HTTP_STATUS.OK)
-      .json(successResponse( apiResponse,"Plant diagnosed successfully"));
-    // }
-
+      .json(successResponse(apiResponse, "Plant diagnosed successfully"));
   } catch (error: unknown) {
     // console.log("Error in diagnosePlantController:", error);
     if (error instanceof ZodError) {

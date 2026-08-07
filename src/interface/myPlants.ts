@@ -6,89 +6,84 @@ export interface GenericOption {
   notification_enabled: boolean;
 }
 
-// ─── Plant Species (from /allplants) ─────────────────────────────────────────
+// ─── Plant Species (live plant_table_final) ──────────────────────────────────
 export interface Plant {
     // Identification
-    plant_id: number;                 // from p.id (integer)
-    scientific_name: string;          // scientific_name text
-    common_name: string;              // common_name text
-    other_name: string;               // other_name text
-    family: string;                   // family text
-    genus: string;                    // genus text
-    species_epithet: string;          // species_epithet text
-    author: string;                   // authority text
-    subspecies: string;               // subspecies text
-    cultivar: string;                 // cultivar text
-    variety: string;                  // variety text (mapped as "variety")
-    origin: string;                   // origin text
-    
+    plant_id: number;
+    scientific_name: string | null;
+    common_name: string | null;
+    other_name: string | null;
+    family: string | null;
+    genus: string | null;
+    species_epithet: string | null;
+    hybrid: string | null;
+    author: string | null; // maps from authority
+    subspecies: string | null;
+    cultivar: string | null;
+    variety: string | null;
+    origin: string | null;
+
     // Growth & Description
-    plant_type: string;               // type text (mapped as "type" twice? but plant_type is used)
-    type: string;                     // type text (also mapped separately)
-    growth_habit: string;             // (if exists in table, not shown – optional? keep as string)
-    description: string;              // description text
-    cycle: string;                    // cycle text
-    growth_rate: string;              // growth_rate text
-    dimension_type: string;           // dimension_type text
-    dimension_min_value: string;      // dimension_min_value text
-    dimension_max_value: string;      // dimension_max_value text
-    dimension_unit: string;           // dimension_unit text
-    
+    plant_type: string | null; // maps from type
+    type: string | null;
+    description: string | null;
+    cycle: string | null;
+    growth_rate: string | null;
+    dimension_type: string | null;
+    dimension_min_value: string | null;
+    dimension_max_value: string | null;
+    dimension_unit: string | null;
+
     // Care Requirements
-    watering: string;                 // watering text
-    watering_benchmark_value: string; // watering_benchmark_value text
-    watering_benchmark_unit: string;  // watering_benchmark_unit text
-    sunlight: string;                 // sunlight text
-    hardiness_min: string;            // hardiness_min text
-    hardiness_max: string;            // hardiness_max text
-    maintenance: string;              // maintenance text
-    care_level: string;               // care_level text
-    soil: string;                     // soil text
-    pruning_month: string;            // pruning_month text
-    propagation: string;              // propagation text
-    
+    watering: string | null;
+    watering_benchmark_value: string | null;
+    watering_benchmark_unit: string | null;
+    sunlight: string | null;
+    hardiness_min: string | null;
+    hardiness_max: string | null;
+    maintenance: string | null;
+    care_level: string | null;
+    soil: string | null;
+    pruning_month: string | null;
+    propagation: string | null;
+
     // Environmental & Traits
-    attracts: string;                 // attracts text
-    pest_susceptibility: string;      // pest_susceptibility text
-    plant_anatomy: string;            // plant_anatomy text
-    drought_tolerant: boolean;        // drought_tolerant boolean
-    salt_tolerant: boolean;           // salt_tolerant boolean
-    thorny: boolean;                  // thorny boolean
-    invasive: boolean;                // invasive boolean
-    tropical: boolean;                // tropical boolean
-    indoor: boolean;                  // indoor boolean
-    
+    attracts: string | null;
+    pest_susceptibility: string | null;
+    plant_anatomy: string | null;
+    drought_tolerant: boolean | null;
+    salt_tolerant: boolean | null;
+    thorny: boolean | null;
+    invasive: boolean | null;
+    tropical: boolean | null;
+    indoor: boolean | null;
+
     // Flowers & Fruits
-    flowers: boolean;                 // flowers boolean
-    flowering_season: string;         // flowering_season text
-    cones: boolean;                   // cones boolean
-    fruits: boolean;                  // fruits boolean
-    edible_fruit: boolean;            // edible_fruit boolean
-    harvest_season: string;           // harvest_season text
-    leaf: boolean;                    // leaf boolean
-    edible_leaf: boolean;             // edible_leaf boolean
-    seeds: boolean;                   // seeds boolean
-    
+    flowers: boolean | null;
+    flowering_season: string | null;
+    cones: boolean | null;
+    fruits: boolean | null;
+    edible_fruit: boolean | null;
+    harvest_season: string | null;
+    leaf: boolean | null;
+    edible_leaf: boolean | null;
+    seeds: boolean | null;
+
     // Usage & Safety
-    cuisine: boolean;                 // cuisine boolean
-    medicinal: boolean;               // medicinal boolean
-    poisonous_to_humans: boolean;     // poisonous_to_humans boolean
-    poisonous_to_pets: boolean;       // poisonous_to_pets boolean
-    
-    // Edibility (additional fields from your mapping)
-    edible: boolean;                  // (maybe from another column? Keep as boolean)
-    edible_part: string;              // (text column? if exists)
-    vegetable: boolean;               // (boolean column? if exists)
-    
+    cuisine: boolean | null;
+    medicinal: boolean | null;
+    poisonous_to_humans: boolean | null;
+    poisonous_to_pets: boolean | null;
+
     // Media & Resources
-    care_guides_url: string;          // care_guides_url text
-    image_original_url: string;       // image_original_url text
-    image_regular_url: string;        // image_regular_url text
-    image_medium_url: string;         // image_medium_url text
-    image_small_url: string;          // image_small_url text
-    image_thumbnail: string;          // image_thumbnail text
-    image_license: string;            // image_license text
-    image_url: string | null;  // local_image_path text (nullable)
+    care_guides_url: string | null;
+    image_original_url: string | null;
+    image_regular_url: string | null;
+    image_medium_url: string | null;
+    image_small_url: string | null;
+    image_thumbnail: string | null;
+    image_license: string | null;
+    image_url: string | null; // derived from local_image_path
 }
 
 export interface  AdminPlant extends Plant {

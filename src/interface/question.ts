@@ -11,6 +11,7 @@ export interface QuestionOption {
   id?: string;
   question_id: string;
   option_text: string;
+  order?: number | null;
   created_at?: Date;
   updated_at?: Date;
 }

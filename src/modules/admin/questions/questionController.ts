@@ -1,34 +1,72 @@
-import { Response, NextFunction } from "express";
+import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { HTTP_STATUS, MESSAGES } from "../../../core/utils/constants";
 import {
   errorResponse,
   successResponse,
 } from "../../../core/utils/responseFormatter";
-import {  findUserById } from "../../auth/authRepository";
+import { findUserById } from "../../auth/authRepository";
 import {
   createQuestion,
+  createQuestionOption,
+  deleteQuestionOption,
   findAllQuestions,
+  findQuestionById,
+  reorderQuestionOptions,
+  reorderQuestions,
   softDeleteQuestion,
   updateQuestion,
+  updateQuestionOption,
 } from "./questionModel";
-import NodeCache from "node-cache";
-import { QuestionWithOptions } from "../../../interface/question";
+import {
+  getCachedQuestions,
+  invalidateQuestionsCache,
+  setCachedQuestions,
+} from "./questionCache";
 import { AuthUserPayload } from "../../../interface/user";
 import { AuthRequest } from "../../../interface/auth";
 
-// Cache questions for 10 minutes (they rarely change)
-const questionsCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
-const QUESTIONS_CACHE_KEY = "all_questions";
+/**
+ * Ensures the caller is an authenticated Admin.
+ *
+ * @param {AuthRequest} req - Authenticated request.
+ * @param {Response} res - Express response.
+ * @returns {Promise<boolean>} True when Admin.
+ */
+async function assertAdmin(
+  req: AuthRequest,
+  res: Response
+): Promise<boolean> {
+  const userPayload = req.user as AuthUserPayload | undefined;
+
+  if (!userPayload?.userId) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+    return false;
+  }
+
+  const user = await findUserById(userPayload.userId);
+  if (!user) {
+    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
+    return false;
+  }
+
+  if (userPayload.role !== "Admin") {
+    res
+      .status(HTTP_STATUS.UNAUTHORIZED)
+      .json(errorResponse("Unauthorized Role"));
+    return false;
+  }
+
+  return true;
+}
 
 /**
- * Retrieves all questions from the database.
- * Validates the authenticated user and returns all questions.
+ * Retrieves all active survey questions (public / mobile). Cache invalidated on admin edits.
  *
- * @param req - Express request object
- * @param res - Express response object for sending the API response
- * @param next - Express next middleware function for error handling
- * @returns Promise<void>
+ * @param {Request} req - Express request.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends questions JSON.
  */
 export const getAllQuestions = async (
   req: Request,
@@ -36,9 +74,7 @@ export const getAllQuestions = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    // Check cache first
-    const cached =
-      questionsCache.get<QuestionWithOptions[]>(QUESTIONS_CACHE_KEY);
+    const cached = getCachedQuestions();
 
     if (cached) {
       const formattedQuestions = cached.map(({ id, ...rest }) => ({
@@ -57,13 +93,9 @@ export const getAllQuestions = async (
       return;
     }
 
-    // Retrieve from database (optimized query below)
     const questions = await findAllQuestions();
+    setCachedQuestions(questions);
 
-    // Cache the raw data
-    questionsCache.set(QUESTIONS_CACHE_KEY, questions);
-
-    // Format data
     const formattedQuestions = questions.map(({ id, ...rest }) => ({
       question_id: id,
       ...rest,
@@ -91,7 +123,7 @@ export const getAllQuestions = async (
  * Detects a category based on keywords inside a question's text.
  *
  * @param {string} questionText - The text of the question.
- * @returns {string | null} - The matched category key or null if no match.
+ * @returns {string | null} Matched category key or null.
  */
 function detectCategory(questionText: string): string | null {
   const text = questionText.toLowerCase();
@@ -112,13 +144,12 @@ function detectCategory(questionText: string): string | null {
 }
 
 /**
- * Retrieves grouped options for the first 4 questions
- * based on keyword-category mapping.
+ * Retrieves grouped options for survey keyword categories.
  *
- * @param {Request} req - Express request object.
- * @param {Response} res - Express response object.
- * @param {NextFunction} next - Express next middleware handler.
- * @returns {Promise<void>} - Returns no value, sends JSON response.
+ * @param {Request} req - Express request.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends grouped options JSON.
  */
 export const getQuestionOptionsGrouped = async (
   req: Request,
@@ -138,7 +169,6 @@ export const getQuestionOptionsGrouped = async (
     questions.forEach((q) => {
       const category = detectCategory(q.question_text);
       if (!category) return;
-
       grouped[category] = q.options.map((o) => o.option_text);
     });
 
@@ -152,57 +182,34 @@ export const getQuestionOptionsGrouped = async (
 };
 
 /**
- * Handles the creation of a new question.
- * Validates the authenticated user, checks for duplicate questions,
- * and saves the new question to the database if valid.
+ * Creates a new survey question with options (Admin).
  *
- * @param req - Express request object containing question data in the body
- * @param res - Express response object for sending the API response
- * @param next - Express next middleware function for error handling
- * @returns Promise<void>
+ * @param {AuthRequest} req - Admin request with question body.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends create result.
  */
 export const createQuestionController = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as AuthUserPayload | undefined;
-
-  if (!userPayload?.userEmail) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
-    return;
-  }
-
-  const user = await findUserById(userPayload.userId!);
-  if (!user) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
-    return;
-  }
-
-  if (userPayload.role !== "Admin") {
-    res
-      .status(HTTP_STATUS.UNAUTHORIZED)
-      .json(errorResponse("Unauthorized Role"));
-    return;
-  }
-
   try {
-    const { question_text, options, order } = req.body;
+    if (!(await assertAdmin(req, res))) return;
 
-    // create expects options as array of strings
-    await createQuestion({
+    const { question_text, options, order } = req.body;
+    const created = await createQuestion({
       question_text,
       order,
-      options, // array of strings
+      options,
       is_deleted: false,
     });
 
-    //  Invalidate cache
-    questionsCache.del(QUESTIONS_CACHE_KEY);
+    invalidateQuestionsCache();
 
     res
       .status(HTTP_STATUS.CREATED)
-      .json(successResponse(null, MESSAGES.QUESTION_CREATED));
+      .json(successResponse(created, MESSAGES.QUESTION_CREATED));
   } catch (err: unknown) {
     if (err instanceof ZodError) {
       res.status(HTTP_STATUS.BAD_REQUEST).json({ errors: err.issues });
@@ -214,39 +221,24 @@ export const createQuestionController = async (
 };
 
 /**
- * Updates an existing question by its ID.
- * Validates the provided data against the schema before applying changes,
- * and returns the updated question if found.
+ * Updates an existing question and its options (Admin).
  *
- * @param req - Express request object containing question ID in params and updated data in the body
- * @param res - Express response object for sending the API response
- * @param next - Express next middleware function for error handling
- * @returns Promise<void>
+ * @param {AuthRequest} req - Admin request with question id + body.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends update result.
  */
 export const updateQuestionController = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as AuthUserPayload | undefined;
-
-  if (!userPayload?.userEmail) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
-    return;
-  }
-
-  const user = await findUserById(userPayload.userId!);
-  if (!user) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("User not found"));
-    return;
-  }
-
   try {
+    if (!(await assertAdmin(req, res))) return;
+
     const questionId = req.params.id;
     const { question_text, options, order, is_deleted } = req.body;
 
-    // validate: options must be an array of objects { id?: string, option_text: string }
-    // We enforce Option C: payload must include ALL existing option ids (if they exist).
     const updated = await updateQuestion(questionId!, {
       question_text,
       order,
@@ -261,22 +253,13 @@ export const updateQuestionController = async (
       return;
     }
 
-    // Invalidate cache
-    questionsCache.del(QUESTIONS_CACHE_KEY);
+    invalidateQuestionsCache();
 
     res
       .status(HTTP_STATUS.OK)
-      .json(successResponse(null, MESSAGES.QUESTION_UPDATED));
+      .json(successResponse(updated, MESSAGES.QUESTION_UPDATED));
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
-
-    if (
-      error.name === "InvalidOptionError" ||
-      error.name === "MissingOptionsError"
-    ) {
-      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(error.message));
-      return;
-    }
 
     if (error instanceof ZodError) {
       res.status(HTTP_STATUS.BAD_REQUEST).json({ errors: error.issues });
@@ -289,13 +272,12 @@ export const updateQuestionController = async (
 };
 
 /**
- * Deletes an existing question by its ID.
- * If the question does not exist, responds with a not found error.
+ * Soft-deletes a question (Admin).
  *
- * @param req - Express request object containing the question ID in params
- * @param res - Express response object for sending the API response
- * @param next - Express next middleware function for error handling
- * @returns Promise<void>
+ * @param {AuthRequest} req - Admin request with question id.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends delete result.
  */
 export const deleteQuestionController = async (
   req: AuthRequest,
@@ -303,22 +285,9 @@ export const deleteQuestionController = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userPayload = req.user as { userEmail?: string,userId?:string } | undefined;
-    if (!userPayload?.userEmail) {
-      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
-      return;
-    }
-
-    const user = await findUserById(userPayload.userId!);
-    if (!user) {
-      res
-        .status(HTTP_STATUS.UNAUTHORIZED)
-        .json(errorResponse("User not found"));
-      return;
-    }
+    if (!(await assertAdmin(req, res))) return;
 
     const questionId = req.params.id;
-
     const deleted = await softDeleteQuestion(questionId!);
 
     if (!deleted) {
@@ -328,14 +297,233 @@ export const deleteQuestionController = async (
       return;
     }
 
-    //  Invalidate cache
-    questionsCache.del(QUESTIONS_CACHE_KEY);
+    invalidateQuestionsCache();
 
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(null, MESSAGES.QUESTION_DELETED));
   } catch (err) {
     console.error("Failed to delete question:", err);
+    next(err);
+  }
+};
+
+/**
+ * GET /api/v1/admin/question/:id — single question with options (Admin).
+ *
+ * @param {AuthRequest} req - Admin request.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends question detail.
+ */
+export const getQuestionByIdController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const question = await findQuestionById(String(req.params.id));
+    if (!question) {
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse("Question not found"));
+      return;
+    }
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(question, MESSAGES.QUESTIONS_RETRIEVED));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/v1/admin/question/reorder — bulk reorder questions.
+ *
+ * @param {AuthRequest} req - Body: { items: [{ id, order }] }.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends reorder result.
+ */
+export const reorderQuestionsController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const items = req.body.items as Array<{ id: string; order: number }>;
+    const updated = await reorderQuestions(items);
+    invalidateQuestionsCache();
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(
+        successResponse(
+          { updated },
+          "Questions reordered successfully"
+        )
+      );
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/v1/admin/question/:id/options — add one option.
+ *
+ * @param {AuthRequest} req - Option body.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends created option.
+ */
+export const createOptionController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const questionId = String(req.params.id);
+    const { option_text, order } = req.body as {
+      option_text: string;
+      order?: number;
+    };
+
+    const created =
+      typeof order === "number"
+        ? await createQuestionOption(questionId, option_text, order)
+        : await createQuestionOption(questionId, option_text);
+
+    if (!created) {
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse("Question not found"));
+      return;
+    }
+
+    invalidateQuestionsCache();
+    res
+      .status(HTTP_STATUS.CREATED)
+      .json(successResponse(created, "Option created successfully"));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/v1/admin/question/options/:optionId — edit one option.
+ *
+ * @param {AuthRequest} req - Option body.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends updated option.
+ */
+export const updateOptionController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const optionId = String(req.params.optionId);
+    const { option_text, order } = req.body as {
+      option_text?: string;
+      order?: number;
+    };
+
+    const patch: { option_text?: string; order?: number } = {};
+    if (typeof option_text === "string") patch.option_text = option_text;
+    if (typeof order === "number") patch.order = order;
+
+    const updated = await updateQuestionOption(optionId, patch);
+    if (!updated) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Option not found"));
+      return;
+    }
+
+    invalidateQuestionsCache();
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(updated, "Option updated successfully"));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * DELETE /api/v1/admin/question/options/:optionId — delete one option.
+ *
+ * @param {AuthRequest} req - Option id param.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends delete result.
+ */
+export const deleteOptionController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const deleted = await deleteQuestionOption(String(req.params.optionId));
+    if (!deleted) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Option not found"));
+      return;
+    }
+
+    invalidateQuestionsCache();
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(null, "Option deleted successfully"));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/v1/admin/question/:id/options/reorder — reorder options for a question.
+ *
+ * @param {AuthRequest} req - Body: { items: [{ id, order }] }.
+ * @param {Response} res - Express response.
+ * @param {NextFunction} next - Error middleware.
+ * @returns {Promise<void>} Sends reorder result.
+ */
+export const reorderOptionsController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!(await assertAdmin(req, res))) return;
+
+    const questionId = String(req.params.id);
+    const items = req.body.items as Array<{ id: string; order: number }>;
+
+    const question = await findQuestionById(questionId);
+    if (!question) {
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(errorResponse("Question not found"));
+      return;
+    }
+
+    const updated = await reorderQuestionOptions(questionId, items);
+    invalidateQuestionsCache();
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(
+        successResponse({ updated }, "Options reordered successfully")
+      );
+  } catch (err) {
     next(err);
   }
 };

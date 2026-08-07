@@ -15,6 +15,9 @@ import plantRoutes from "./modules/plant/plantRoutes";
 import stateCityRoutes from "./modules/stateCity/stateCityRoutes";
 import leadsRoutes from "./modules/admin/leads/leadsRoute";
 import dashboardRoutes from "./modules/admin/dashboard/dashboardRoutes";
+import adminUsersRoutes from "./modules/admin/users/usersRoutes";
+import diagnosisScansRoutes from "./modules/admin/diagnosisScans/diagnosisScansRoutes";
+import plantCatalogRoutes from "./modules/admin/plantCatalog/plantCatalogRoutes";
 import subscriptionRoutes from "./modules/subscription/subscriptionRoutes";
 import externalLinksRoutes from "./modules/admin/externalLinks/externalLinksRoutes";
 import myPlantRoutes from "./modules/myPlants/myPlantRoute";
@@ -50,6 +53,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/plant-images', express.static(path.join(process.cwd(), 'plant_images')));
 app.use('/disease_images', express.static(path.join(process.cwd(), 'disease_images')));
 app.use("/blog_image", express.static(path.join(process.cwd(), "blog_image")));
+app.use("/scan_images", express.static(path.join(process.cwd(), "scan_images")));
 
 
 
@@ -101,6 +105,12 @@ app.use("/api/v1/stateCityData", stateCityRoutes);
 app.use("/api/v1/admin", leadsRoutes);
 // Dashboard Routes
 app.use("/api/v1/admin", dashboardRoutes);
+// Admin Users (list + subscription history)
+app.use("/api/v1/admin", adminUsersRoutes);
+// Admin diagnosis scan logs
+app.use("/api/v1/admin", diagnosisScansRoutes);
+// Admin plant master catalog
+app.use("/api/v1/admin", plantCatalogRoutes);
 // Subscription Plans
 app.use("/api/v1/plans", subscriptionRoutes);
 //external Links Routes

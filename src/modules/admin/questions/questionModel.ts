@@ -4,15 +4,53 @@ import {
   QuestionWithOptions,
 } from "../../../interface/question";
 
+let optionOrderReady: Promise<void> | null = null;
+
 /**
- * Get all active (non-deleted) questions with their options
- * @returns {Promise<QuestionWithOptions[]>} A promise that resolves to a list of all active questions and their associated options.
+ * Ensures question_options."order" exists and backfills missing values.
+ * Safe to call repeatedly against live DB.
+ *
+ * @returns {Promise<void>} Resolves when the column is ready.
+ */
+export async function ensureOptionOrderColumn(): Promise<void> {
+  if (!optionOrderReady) {
+    optionOrderReady = (async (): Promise<void> => {
+      const db = getDB();
+      await db.query(`
+        ALTER TABLE question_options
+          ADD COLUMN IF NOT EXISTS "order" INTEGER;
+
+        UPDATE question_options qo
+        SET "order" = sub.rn
+        FROM (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY question_id
+                   ORDER BY created_at ASC NULLS LAST, id ASC
+                 ) AS rn
+          FROM question_options
+        ) sub
+        WHERE qo.id = sub.id
+          AND (qo."order" IS NULL OR qo."order" < 1);
+      `);
+    })().catch((err: unknown) => {
+      optionOrderReady = null;
+      throw err;
+    });
+  }
+  await optionOrderReady;
+}
+
+/**
+ * Get all active (non-deleted) questions with their options.
+ *
+ * @returns {Promise<QuestionWithOptions[]>} Active questions ordered for the survey.
  */
 export async function findAllQuestions(): Promise<QuestionWithOptions[]> {
+  await ensureOptionOrderColumn();
   const pool = getDB();
 
   try {
-    // OPTIMIZED: Use array_agg instead of json_agg for better performance
     const query = `
       SELECT 
         q.id,
@@ -22,8 +60,9 @@ export async function findAllQuestions(): Promise<QuestionWithOptions[]> {
           array_agg(
             json_build_object(
               'id', qo.id,
-              'option_text', qo.option_text
-            ) ORDER BY qo.id
+              'option_text', qo.option_text,
+              'order', qo."order"
+            ) ORDER BY qo."order" ASC NULLS LAST, qo.id ASC
           ) FILTER (WHERE qo.id IS NOT NULL),
           '{}'::json[]
         ) AS options
@@ -31,7 +70,7 @@ export async function findAllQuestions(): Promise<QuestionWithOptions[]> {
       LEFT JOIN question_options qo ON q.id = qo.question_id
       WHERE q.is_deleted = FALSE
       GROUP BY q.id, q.question_text, q."order"
-      ORDER BY q."order" ASC, q.id ASC;
+      ORDER BY q."order" ASC NULLS LAST, q.id ASC;
     `;
 
     const result = await pool.query(query);
@@ -48,13 +87,14 @@ export async function findAllQuestions(): Promise<QuestionWithOptions[]> {
 }
 
 /**
- * Create a new question with options
- * @param data - The input data to create the question and its options.
- * @param data.question_text
- * @param data.order
- * @param data.options
- * @param data.is_deleted
- * @returns {Promise<QuestionWithOptions>} A promise that resolves to the created question with its options.
+ * Create a new question with options.
+ *
+ * @param data - Question payload.
+ * @param data.question_text - Question text.
+ * @param data.order - Display order among questions.
+ * @param data.options - Options to create (array order becomes option order).
+ * @param data.is_deleted - Soft-delete flag.
+ * @returns {Promise<QuestionWithOptions>} Created question with options.
  */
 export async function createQuestion(data: {
   question_text: string;
@@ -62,7 +102,9 @@ export async function createQuestion(data: {
   options: { id?: string; option_text: string }[];
   is_deleted?: boolean;
 }): Promise<QuestionWithOptions> {
-  const client = await getDB();
+  await ensureOptionOrderColumn();
+  const pool = getDB();
+  const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
@@ -74,15 +116,15 @@ export async function createQuestion(data: {
     );
 
     const question = qRes.rows[0];
-
     const options: QuestionOption[] = [];
 
     if (data.options && data.options.length > 0) {
-      for (const opt of data.options) {
+      for (let i = 0; i < data.options.length; i++) {
+        const opt = data.options[i]!;
         const oRes = await client.query(
-          `INSERT INTO question_options (question_id, option_text)
-           VALUES ($1, $2) RETURNING *;`,
-          [question.id, opt.option_text] // <-- FIXED
+          `INSERT INTO question_options (question_id, option_text, "order")
+           VALUES ($1, $2, $3) RETURNING *;`,
+          [question.id, opt.option_text, i + 1]
         );
         options.push(oRes.rows[0]);
       }
@@ -96,19 +138,22 @@ export async function createQuestion(data: {
     };
   } catch (err) {
     await client.query("ROLLBACK");
-    throw new Error(`❌ Failed to create question: ${(err as Error).message}`);
+    throw new Error(`Failed to create question: ${(err as Error).message}`);
+  } finally {
+    client.release();
   }
 }
 
 /**
- * Update an existing question and its options by ID
- * @param {string} questionId - The ID of the question to update.
- * @param {unknown} data - The updated question data including options.
- * @param data.question_text
- * @param data.order
- * @param data.is_deleted
- * @param data.options
- * @returns {Promise<QuestionWithOptions | null>} A promise that resolves to the updated question with its options, or null if not found.
+ * Update an existing question and optionally sync its full options list.
+ *
+ * @param {string} questionId - Question UUID.
+ * @param {object} data - Fields to update.
+ * @param {string} [data.question_text] - New question text.
+ * @param {number} [data.order] - New question order.
+ * @param {boolean} [data.is_deleted] - Soft-delete flag.
+ * @param {Array<{ id?: string; option_text: string }>} [data.options] - Full options list.
+ * @returns {Promise<QuestionWithOptions | null>} Updated question or null.
  */
 export async function updateQuestion(
   questionId: string,
@@ -119,12 +164,13 @@ export async function updateQuestion(
     options?: Array<{ id?: string; option_text: string }>;
   }
 ): Promise<QuestionWithOptions | null> {
-  const client = await getDB();
+  await ensureOptionOrderColumn();
+  const pool = getDB();
+  const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    // #region Check if question exists
     const qRes = await client.query(`SELECT * FROM questions WHERE id=$1`, [
       questionId,
     ]);
@@ -133,9 +179,7 @@ export async function updateQuestion(
       await client.query("ROLLBACK");
       return null;
     }
-    // #endregion
 
-    // #region Update question fields
     await client.query(
       `UPDATE questions
        SET question_text = COALESCE($1, question_text),
@@ -150,111 +194,255 @@ export async function updateQuestion(
         questionId,
       ]
     );
-    // #endregion
 
-    // #region Handle options update logic
     if (data.options) {
-      // fetch existing option ids
       const existingRes = await client.query(
         `SELECT id FROM question_options WHERE question_id=$1`,
         [questionId]
       );
-      const existingIds = existingRes.rows.map((r) => r.id);
+      const existingIds = existingRes.rows.map((r) => r.id as string);
+      const incomingIds = data.options
+        .filter((o) => o.id)
+        .map((o) => o.id as string);
 
-      const incomingIds = data.options.filter((o) => o.id).map((o) => o.id);
-
-      // 1) DELETE OPTIONS NOT SENT IN PAYLOAD
       const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
 
       if (idsToDelete.length > 0) {
         await client.query(
           `DELETE FROM question_options
-           WHERE question_id=$1 AND id = ANY($2)`,
+           WHERE question_id=$1 AND id = ANY($2::uuid[])`,
           [questionId, idsToDelete]
         );
       }
 
-      // 2) PROCESS INCOMING OPTIONS
-      for (const opt of data.options) {
+      for (let i = 0; i < data.options.length; i++) {
+        const opt = data.options[i]!;
+        const optOrder = i + 1;
         if (!opt.id) {
-          // INSERT NEW OPTION
           await client.query(
-            `INSERT INTO question_options (question_id, option_text)
-             VALUES ($1, $2)`,
-            [questionId, opt.option_text]
+            `INSERT INTO question_options (question_id, option_text, "order")
+             VALUES ($1, $2, $3)`,
+            [questionId, opt.option_text, optOrder]
           );
         } else {
-          // UPDATE EXISTING OPTION
           await client.query(
             `UPDATE question_options
-             SET option_text=$1
-             WHERE id=$2 AND question_id=$3`,
-            [opt.option_text, opt.id, questionId]
+             SET option_text=$1, "order"=$2, updated_at=CURRENT_TIMESTAMP
+             WHERE id=$3 AND question_id=$4`,
+            [opt.option_text, optOrder, opt.id, questionId]
           );
         }
       }
     }
-    // #endregion
 
     await client.query("COMMIT");
 
-    // return updated question with options
-    const updatedQuestion = await client.query(
-      `SELECT * FROM questions WHERE id=$1`,
-      [questionId]
-    );
-    const options = await getOptionsByQuestionId(questionId);
-
-    return {
-      ...updatedQuestion.rows[0],
-      options,
-    };
+    return findQuestionById(questionId);
   } catch (err) {
     await client.query("ROLLBACK");
-    throw new Error(`❌ Failed to update question: ${(err as Error).message}`);
+    throw new Error(`Failed to update question: ${(err as Error).message}`);
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Bulk-reorder questions by id → order map.
+ *
+ * @param {Array<{ id: string; order: number }>} items - Desired question order.
+ * @returns {Promise<number>} Number of rows updated.
+ */
+export async function reorderQuestions(
+  items: Array<{ id: string; order: number }>
+): Promise<number> {
+  const pool = getDB();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let updated = 0;
+    for (const item of items) {
+      const res = await client.query(
+        `UPDATE questions
+         SET "order" = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND is_deleted = FALSE`,
+        [item.order, item.id]
+      );
+      updated += res.rowCount ?? 0;
+    }
+    await client.query("COMMIT");
+    return updated;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new Error(`Failed to reorder questions: ${(err as Error).message}`);
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Adds one option to a question.
+ *
+ * @param {string} questionId - Parent question UUID.
+ * @param {string} optionText - Option label.
+ * @param {number} [order] - Optional explicit order; defaults to max+1.
+ * @returns {Promise<QuestionOption | null>} Created option or null if question missing.
+ */
+export async function createQuestionOption(
+  questionId: string,
+  optionText: string,
+  order?: number
+): Promise<QuestionOption | null> {
+  await ensureOptionOrderColumn();
+  const db = getDB();
+
+  const q = await db.query(
+    `SELECT id FROM questions WHERE id=$1 AND is_deleted=FALSE`,
+    [questionId]
+  );
+  if (!q.rows[0]) return null;
+
+  let nextOrder = order;
+  if (nextOrder === undefined) {
+    const maxRes = await db.query<{ max: number | null }>(
+      `SELECT MAX("order")::int AS max FROM question_options WHERE question_id=$1`,
+      [questionId]
+    );
+    nextOrder = (maxRes.rows[0]?.max ?? 0) + 1;
+  }
+
+  const { rows } = await db.query<QuestionOption>(
+    `INSERT INTO question_options (question_id, option_text, "order")
+     VALUES ($1, $2, $3)
+     RETURNING id, question_id, option_text, "order", created_at, updated_at`,
+    [questionId, optionText, nextOrder]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Updates one option's text and/or order.
+ *
+ * @param {string} optionId - Option UUID.
+ * @param {object} data - Fields to update.
+ * @param {string} [data.option_text] - New text.
+ * @param {number} [data.order] - New order within the question.
+ * @returns {Promise<QuestionOption | null>} Updated option or null.
+ */
+export async function updateQuestionOption(
+  optionId: string,
+  data: { option_text?: string; order?: number }
+): Promise<QuestionOption | null> {
+  await ensureOptionOrderColumn();
+  const db = getDB();
+  const { rows } = await db.query<QuestionOption>(
+    `UPDATE question_options
+     SET option_text = COALESCE($1, option_text),
+         "order" = COALESCE($2, "order"),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $3
+     RETURNING id, question_id, option_text, "order", created_at, updated_at`,
+    [data.option_text ?? null, data.order ?? null, optionId]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Deletes one option.
+ *
+ * @param {string} optionId - Option UUID.
+ * @returns {Promise<boolean>} True when a row was deleted.
+ */
+export async function deleteQuestionOption(optionId: string): Promise<boolean> {
+  const db = getDB();
+  const result = await db.query(`DELETE FROM question_options WHERE id = $1`, [
+    optionId,
+  ]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Bulk-reorder options for a single question.
+ *
+ * @param {string} questionId - Parent question UUID.
+ * @param {Array<{ id: string; order: number }>} items - Desired option order.
+ * @returns {Promise<number>} Number of rows updated.
+ */
+export async function reorderQuestionOptions(
+  questionId: string,
+  items: Array<{ id: string; order: number }>
+): Promise<number> {
+  await ensureOptionOrderColumn();
+  const client = await getDB();
+  try {
+    await client.query("BEGIN");
+    let updated = 0;
+    for (const item of items) {
+      const res = await client.query(
+        `UPDATE question_options
+         SET "order" = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND question_id = $3`,
+        [item.order, item.id, questionId]
+      );
+      updated += res.rowCount ?? 0;
+    }
+    await client.query("COMMIT");
+    return updated;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new Error(`Failed to reorder options: ${(err as Error).message}`);
   }
 }
 
 /**
  * Retrieves all options belonging to a specific question.
  *
- * @param questionId - The ID of the question whose options should be fetched.
- * @returns A list of option objects associated with the given question.
+ * @param {string} questionId - Question UUID.
+ * @returns {Promise<QuestionOption[]>} Options ordered for display.
  */
 export async function getOptionsByQuestionId(
   questionId: string
 ): Promise<QuestionOption[]> {
+  await ensureOptionOrderColumn();
   const client = await getDB();
   const res = await client.query(
-    `SELECT id, option_text FROM question_options WHERE question_id = $1 ORDER BY id;`,
+    `SELECT id, question_id, option_text, "order", created_at, updated_at
+     FROM question_options
+     WHERE question_id = $1
+     ORDER BY "order" ASC NULLS LAST, id ASC`,
     [questionId]
   );
   return res.rows;
 }
 
 /**
- * 🔍 Get a single question by ID with its options
- * @param {string} questionId - The ID of the question to retrieve.
- * @returns {Promise<QuestionWithOptions | null>} A promise that resolves to the question with its options, or null if not found.
+ * Get a single question by ID with its options.
+ *
+ * @param {string} questionId - Question UUID.
+ * @returns {Promise<QuestionWithOptions | null>} Question or null.
  */
 export async function findQuestionById(
   questionId: string
 ): Promise<QuestionWithOptions | null> {
+  await ensureOptionOrderColumn();
   const client = await getDB();
 
   try {
     const query = `
       SELECT 
         q.*,
-        json_agg(
-          json_build_object(
-            'id', qo.id,
-            'question_id', qo.question_id,
-            'option_text', qo.option_text,
-            'created_at', qo.created_at,
-            'updated_at', qo.updated_at
-          ) ORDER BY qo.created_at
-        ) FILTER (WHERE qo.id IS NOT NULL) as options
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', qo.id,
+              'question_id', qo.question_id,
+              'option_text', qo.option_text,
+              'order', qo."order",
+              'created_at', qo.created_at,
+              'updated_at', qo.updated_at
+            ) ORDER BY qo."order" ASC NULLS LAST, qo.id ASC
+          ) FILTER (WHERE qo.id IS NOT NULL),
+          '[]'::json
+        ) as options
       FROM questions q
       LEFT JOIN question_options qo ON q.id = qo.question_id
       WHERE q.id = $1 AND q.is_deleted = FALSE
@@ -262,7 +450,6 @@ export async function findQuestionById(
     `;
 
     const result = await client.query(query, [questionId]);
-
     if (result.rows.length === 0) return null;
 
     const row = result.rows[0];
@@ -271,15 +458,15 @@ export async function findQuestionById(
       options: row.options || [],
     };
   } catch (err) {
-    throw new Error(`❌ Failed to fetch question: ${(err as Error).message}`);
+    throw new Error(`Failed to fetch question: ${(err as Error).message}`);
   }
 }
 
 /**
- * Soft delete a question (set is_deleted = true)
- * Options are preserved but the question becomes inactive.
- * @param {string} id - The ID of the question to soft delete.
- * @returns {Promise<boolean>} A promise that resolves to true if the question was successfully soft deleted, or false otherwise.
+ * Soft delete a question (set is_deleted = true).
+ *
+ * @param {string} id - Question UUID.
+ * @returns {Promise<boolean>} True when updated.
  */
 export async function softDeleteQuestion(id: string): Promise<boolean> {
   const client = await getDB();
@@ -295,38 +482,6 @@ export async function softDeleteQuestion(id: string): Promise<boolean> {
     );
     return result.rowCount !== null && result.rowCount > 0;
   } catch (err) {
-    throw new Error(`❌ Failed to delete question: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Hard delete a question (permanently removes the question and all its options)
- * @param {string} id - The ID of the question to permanently delete.
- * @returns {Promise<boolean>} A promise that resolves to true if the question and its options were successfully deleted, or false otherwise.
- */
-export async function hardDeleteQuestion(id: string): Promise<boolean> {
-  const client = await getDB();
-
-  try {
-    await client.query("BEGIN");
-
-    // Delete options first (or rely on CASCADE)
-    await client.query("DELETE FROM question_options WHERE question_id = $1", [
-      id,
-    ]);
-
-    // Delete question
-    const result = await client.query("DELETE FROM questions WHERE id = $1", [
-      id,
-    ]);
-
-    await client.query("COMMIT");
-
-    return result.rowCount !== null && result.rowCount > 0;
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw new Error(
-      `❌ Failed to hard delete question: ${(err as Error).message}`
-    );
+    throw new Error(`Failed to delete question: ${(err as Error).message}`);
   }
 }

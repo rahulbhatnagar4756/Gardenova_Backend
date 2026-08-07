@@ -64,6 +64,7 @@ const FEATURE_LIMIT_KEY: Record<FeatureType, keyof PlanFeatures> = {
 
 const UNLIMITED_USER_IDS = new Set<string>([
   "3625e30b-8bc7-4d9d-a144-12e98e5d6474",
+  "b0cef028-48e7-4ea2-9410-788dbc24bcb3",
 ]);
 
 /**

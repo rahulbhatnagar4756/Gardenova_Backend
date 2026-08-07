@@ -42,18 +42,18 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
             });
             return;
         }
-         const usage = await checkAndConsumeUsage(userPayload.userId, "landscape");
+        const usage = await checkAndConsumeUsage(userPayload.userId, "landscape");
 
-    if (!usage.allowed) {
-      res
-        .status(HTTP_STATUS.FORBIDDEN)
-        .json(
-          errorResponse(
-            `Monthly landscape generation limit reached (${usage.limit}). Upgrade your plan to continue.`
-          )
-        );
-      return;
-    }
+        if (!usage.allowed) {
+            res
+                .status(HTTP_STATUS.FORBIDDEN)
+                .json(
+                    errorResponse(
+                        `Monthly landscape generation limit reached (${usage.limit}). Upgrade your plan to continue.`
+                    )
+                );
+            return;
+        }
 
         const result = await processDesign({
             image_base64,
@@ -69,7 +69,7 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
         return;
     } catch (error) {
         console.error("Error generating landscape design:", error);
-        
+
         next(error);
     }
 };

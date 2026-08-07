@@ -37,20 +37,19 @@ export const questionValidation: ObjectSchema = Joi.object({
     }),
 });
 
+/** Shared option shape for create/update (API may also echo `order`). */
+const questionOptionSchema = Joi.object({
+  id: Joi.string().uuid().allow("", null).optional(),
+  option_text: Joi.string().min(1).max(255).required(),
+  order: Joi.number().integer().min(1).allow(null).optional(),
+}).unknown(false);
+
 export const questionCreateValidation: ObjectSchema = Joi.object({
   question_text: Joi.string().min(5).max(255).required(),
 
   order: Joi.number().integer().min(1).required(),
 
-  options: Joi.array()
-    .items(
-      Joi.object({
-        id: Joi.string().uuid().allow("", null).optional(),
-        option_text: Joi.string().min(1).max(255).required(),
-      })
-    )
-    .min(1)
-    .required(),
+  options: Joi.array().items(questionOptionSchema).min(1).required(),
 });
 
 export const questionUpdateValidation: ObjectSchema = Joi.object({
@@ -58,13 +57,28 @@ export const questionUpdateValidation: ObjectSchema = Joi.object({
 
   order: Joi.number().integer().min(1).required(),
 
-  options: Joi.array()
+  options: Joi.array().items(questionOptionSchema).min(1).required(),
+});
+
+/** Bulk reorder payload for questions or options. */
+export const reorderItemsValidation: ObjectSchema = Joi.object({
+  items: Joi.array()
     .items(
       Joi.object({
-        id: Joi.string().uuid().allow("", null).optional(),
-        option_text: Joi.string().min(1).max(255).required(),
+        id: Joi.string().uuid().required(),
+        order: Joi.number().integer().min(1).required(),
       })
     )
     .min(1)
     .required(),
 });
+
+export const optionCreateValidation: ObjectSchema = Joi.object({
+  option_text: Joi.string().min(1).max(255).required(),
+  order: Joi.number().integer().min(1).optional(),
+});
+
+export const optionUpdateValidation: ObjectSchema = Joi.object({
+  option_text: Joi.string().min(1).max(255).optional(),
+  order: Joi.number().integer().min(1).optional(),
+}).or("option_text", "order");
