@@ -15,20 +15,30 @@ import { sendVerificationEmailTemplate } from "../../templates/sendVerificationE
 import { contactUsEmailTemplate } from "../../templates/sendContactUsEmail";
 
 /**
- * Creates and configures an email transporter using Nodemailer.
+ * Creates and configures an email transporter using Nodemailer (Zoho SMTP).
  *
- * @returns {Transporter} A Nodemailer transporter instance configured with Gmail (or chosen service).
+ * Prefer `smtp.zoho.in` (India) / `smtp.zoho.com` — `mail.zoho.com` often times out on 465.
+ * Override with EMAIL_HOST / EMAIL_PORT when needed.
+ *
+ * @returns {Transporter} A Nodemailer transporter instance configured for Zoho.
  */
 export const createTransporter = (): Transporter => {
+  const host = process.env.EMAIL_HOST || "smtp.zoho.in";
+  const port = Number(process.env.EMAIL_PORT || 465);
+  const secure = port === 465;
+
   return nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false, // or your email service
+    host,
+    port,
+    secure,
+    requireTLS: !secure,
     auth: {
       user: config.EMAIL_USER,
-      pass: config.EMAIL_PASS, // Use app password for Gmail
+      pass: config.EMAIL_PASS,
     },
-
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000,
   });
 };
 
@@ -47,7 +57,7 @@ export const sendPasswordResetEmail = async (
   const transporter = createTransporter();
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: email,
     subject: "Password Reset - Your 6-Digit Code",
     html: passwordResetEmailTemplate(resetToken, userName),
@@ -108,7 +118,7 @@ export const sendLeadEmails = async (
 
   // 1. Send email to USER (with all partners info)
   const userMailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: userData.email,
     subject: `Quote Request Confirmation - ${partnersData.length} Partner${partnersData.length > 1 ? "s" : ""} | GARDENOVA`,
     html: leadSuccessEmailTemplateForUser(
@@ -120,7 +130,7 @@ export const sendLeadEmails = async (
   // 2. Send email to each PARTNER individually
   const partnerMailPromises = partnersData.map((partner) => {
     const partnerMailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: config.EMAIL_FROM,
       to: partner.email,
       subject: `New Lead Alert - ${userData.name} | GARDENOVA`,
       html: leadSuccessEmailTemplateForPartner(
@@ -135,7 +145,7 @@ export const sendLeadEmails = async (
 
   // 3. Send email to ADMIN (with all partners info)
   const adminMailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: adminEmail,
     subject: `New Lead Generated - ${partnersData.length} Partner${partnersData.length > 1 ? "s" : ""} → ${userData.name}`,
     html: leadSuccessEmailTemplateForAdmin(
@@ -189,7 +199,7 @@ export const sendProfessionalWelcomeEmail = async (
   // });
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: data.email,
     subject: "Welcome to GARDENOVA Professional - Your Account is Ready!",
     html: professionalWelcomeEmailTemplate(
@@ -233,7 +243,7 @@ export const sendLeadsEmailToSuppliers = async (
   const transporter = createTransporter();
   const supplierMailPromises = suppliersData.map((supplier) =>
     transporter.sendMail({
-      from: process.env.EMAIL_FROM,
+      from: config.EMAIL_FROM,
       to: supplier.email,
       subject: `New Lead Alert - ${userData.name} | GARDENOVA`,
       html: leadTemplateForSuppliers(supplier.company_name, userData.name, userData.email),
@@ -277,7 +287,7 @@ export const sendLeadCreationEmailToProfessional = async ({
 }): Promise<void> => {
   const transporter = createTransporter();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: professionalEmail,
     subject: subject,
     html: leadNotificationForProfessional(
@@ -323,7 +333,7 @@ export const sendLeadCreationEmailToUser = async ({
 }): Promise<void> => {
   const transporter = createTransporter();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: userEmail,
     subject: subject,
     html: leadNotificationForUser(
@@ -369,7 +379,7 @@ export const sendLeadCreationEmailTOAdmin = async ({
 
   const transporter = createTransporter();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: process.env.ADMIN_EMAIL,
     subject: subject,
 
@@ -404,7 +414,7 @@ export const sendLeadCreationEmailTOAdmin = async ({
 export const sendVerificationEmail = async (email:string, code:string, expiration:Date): Promise<void> => {
   const transporter = createTransporter();
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: config.EMAIL_FROM,
     to: email,
     subject: "Email Verification - Your Verification Code",
     html: sendVerificationEmailTemplate(code, expiration),
