@@ -29,7 +29,7 @@ const BASE_URL = process.env.APPDEV_URL || 'http://localhost:3000';
  * 8. Generate final edited image using mask-guided inpainting
  *
  * The system ensures:
- * - Deterministic preprocessing (fixed resolution 1024px max)
+ * - Deterministic preprocessing (fixed resolution 2048px max)
  * - Robust fallback behavior in segmentation pipeline
  * - Strict grounding of design decisions in vision output
  * - Mask-based editing (not full image regeneration)
@@ -61,8 +61,8 @@ export const processDesign = async (
 
   const processedBuffer = await sharp(rawBuffer)
   .rotate()                              // ← strips EXIF, bakes orientation into pixels
-  .resize(1024, 1024, { fit: 'inside' })
-  .jpeg({ quality: 85 })
+  .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+  .jpeg({ quality: 92 })
   .toBuffer();
 
   const processedBase64 = `data:image/jpeg;base64,${processedBuffer.toString('base64')}`;
