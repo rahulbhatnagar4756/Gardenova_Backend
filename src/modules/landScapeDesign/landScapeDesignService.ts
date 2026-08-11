@@ -2,7 +2,6 @@ import {
   buildImagePrompt,
   callGroqForPlanning,
   callInpainting,
-  callSegmentationAPI,
   callVisionForSceneDescription,
   // compressPromptForFlux,
   DesignResult,
@@ -61,8 +60,8 @@ export const processDesign = async (
 
   const processedBuffer = await sharp(rawBuffer)
   .rotate()                              // ← strips EXIF, bakes orientation into pixels
-  .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-  .jpeg({ quality: 92 })
+  .resize(1024, 1024, { fit: 'inside' })
+  .jpeg({ quality: 85 })
   .toBuffer();
 
   const processedBase64 = `data:image/jpeg;base64,${processedBuffer.toString('base64')}`;
@@ -77,7 +76,7 @@ export const processDesign = async (
   // console.log(`[2/6] Space: ${detectedSpace.spaceType} (${detectedSpace.category}, ${detectedSpace.confidence}) — ${detectedSpace.reasoning}`);
 
   // ── Step 2: Segment (get mask) ────────────────────────────────────────────
-  const { mask_base64 } = await callSegmentationAPI(processedBase64, detectedSpace.spaceType);
+  // const { mask_base64 } = await callSegmentationAPI(processedBase64, detectedSpace.spaceType);
   // console.log(`[3/6] Mask generated`);
 
 // ← ADD THIS DEBUG BLOCK
@@ -100,7 +99,7 @@ export const processDesign = async (
   // const compressedPrmpt = await compressPromptForFlux(imagePrompt);
   // console.log(`[6/6] Compressed Prompt: ${compressedPrmpt}`);
   // ── Step 6: Inpaint masked region only ────────────────────────────────────
-  const resultUrl = await callInpainting(processedBase64, mask_base64, imagePrompt, fileName);
+  const resultUrl = await callInpainting(processedBase64,  imagePrompt, fileName);
   // console.log(`[✅] Done: ${resultUrl}`);
 
   return {

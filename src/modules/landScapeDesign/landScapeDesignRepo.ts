@@ -1612,14 +1612,14 @@ Ultra realistic, lush immersive landscaping, premium rooftop garden, vibrant flo
  */
 export async function callInpainting(
   imageBase64: string,
-  maskBase64: string,
+  // maskBase64: string,
   prompt: string,
   fileName: string
 ): Promise<string> {
   const ENDPOINT = 'https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-kontext-max';
 
   const rawImageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const rawMaskBase64 = maskBase64.replace(/^data:image\/\w+;base64,/, '');
+  // const rawMaskBase64 = maskBase64.replace(/^data:image\/\w+;base64,/, '');
 
   // Anchor prompt — tells model to PRESERVE the scene, only ADD plants
   const anchoredPrompt = `
