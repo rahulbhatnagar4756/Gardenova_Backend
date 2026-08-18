@@ -1,10 +1,12 @@
-import Groq from "groq-sdk";
+import OpenAI from "openai";
 import fs from 'fs/promises';
 import path from 'path';
 import dotenv from "dotenv";
 dotenv.config();
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! });
+const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
+const GPT_VISION_MODEL = process.env.GPT_VISION_MODEL || "gpt-4.1-mini";
+const GPT_PLANNING_MODEL = process.env.GPT_PLANNING_MODEL || "gpt-4.1";
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 const BASE_URL = process.env.APPDEV_URL || 'http://localhost:3000';
@@ -786,10 +788,11 @@ export async function detectSpaceType(imageBuffer: Buffer): Promise<DetectedSpac
   const base64Image = imageBuffer.toString('base64');
   const dataUri = `data:image/jpeg;base64,${base64Image}`;
 
-  const completion = await groq.chat.completions.create({
-    model: 'qwen/qwen3.6-27b',
+  const completion = await openai.chat.completions.create({
+    model: GPT_VISION_MODEL,
     max_tokens: 200,
     temperature: 0.1,
+    response_format: { type: 'json_object' },
     messages: [
       {
         role: 'user',
@@ -1000,8 +1003,8 @@ CONDITION: [one sentence — overall state and mood]
  
 Start immediately with FLOOR. No preamble. No suggestions.`;
 
-  const completion = await groq.chat.completions.create({
-    model: 'qwen/qwen3.6-27b',
+  const completion = await openai.chat.completions.create({
+    model: GPT_VISION_MODEL,
     max_tokens: 700,
     temperature: 0.3,
     messages: [
@@ -1036,7 +1039,7 @@ Start immediately with FLOOR. No preamble. No suggestions.`;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Generates a structured interior/exterior transformation plan using a Groq LLM.
+ * Generates a structured interior/exterior transformation plan using a GPT model.
  *
  * The model is instructed to behave as a space-specific designer persona and
  * generate a step-by-step redesign plan strictly grounded in the provided
@@ -1059,7 +1062,7 @@ Start immediately with FLOOR. No preamble. No suggestions.`;
  *
  * @throws Error
  * Throws if:
- * - Groq returns an empty response
+ * - GPT returns an empty response
  * - JSON parsing fails or response is invalid
  * - Max retry attempts are exceeded
  * - Non-retryable API errors occur
@@ -1165,8 +1168,8 @@ Build FROM the described baseline — do not assume anything else exists.
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+      const completion = await openai.chat.completions.create({
+        model: GPT_PLANNING_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -1177,7 +1180,7 @@ Build FROM the described baseline — do not assume anything else exists.
       });
 
       const content = completion.choices[0]?.message?.content;
-      if (!content) throw new Error('Empty response from Groq planner');
+      if (!content) throw new Error('Empty response from GPT planner');
 
       return JSON.parse(content) as DesignPlan;
 
@@ -1188,12 +1191,12 @@ Build FROM the described baseline — do not assume anything else exists.
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
-      console.error('Groq planning error:', error);
-      throw new Error('Failed to generate design plan with Groq.');
+      console.error('GPT planning error:', error);
+      throw new Error('Failed to generate design plan with GPT.');
     }
   }
 
-  throw new Error('Groq planning failed after all retries.');
+  throw new Error('GPT planning failed after all retries.');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

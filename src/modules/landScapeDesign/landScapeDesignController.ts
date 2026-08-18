@@ -42,7 +42,7 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
             });
             return;
         }
-        const usage = await checkAndConsumeUsage(userPayload.userId, "landscape");
+       const usage = await checkAndConsumeUsage(userPayload.userId, "landscape");
 
         if (!usage.allowed) {
             res

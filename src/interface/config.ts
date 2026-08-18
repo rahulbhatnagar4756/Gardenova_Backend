@@ -27,6 +27,7 @@ export interface Config {
   GARDENOVA_PLANTAPI_KEY: string;
   GARDENOVA_PLANTAPI_URL: string;
   GARDENOVA_PLANTAPI_KEY_NAME: string;
+  OPENAI_API_KEY: string;
   FB_APP_ID: string;
   // APPDEV_URL: string;
   FB_APP_SECRET: string;
