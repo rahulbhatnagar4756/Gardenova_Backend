@@ -784,3 +784,116 @@ export async function updateUnverifiedUserRegistration(
 
   return result.rows[0] as IUser;
 }
+
+let refreshTokensTableReady: Promise<void> | null = null;
+
+/**
+ * Ensures `refresh_tokens` exists (idempotent).
+ *
+ * @returns {Promise<void>} Resolves when the table is ready.
+ */
+export async function ensureRefreshTokensTable(): Promise<void> {
+  if (!refreshTokensTableReady) {
+    refreshTokensTableReady = (async (): Promise<void> => {
+      const db = getDB();
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+          id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash  VARCHAR(128) NOT NULL UNIQUE,
+          expires_at  TIMESTAMPTZ NOT NULL,
+          revoked_at  TIMESTAMPTZ,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id
+          ON refresh_tokens (user_id);
+        CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at
+          ON refresh_tokens (expires_at);
+      `);
+    })().catch((err: unknown) => {
+      refreshTokensTableReady = null;
+      throw err;
+    });
+  }
+  await refreshTokensTableReady;
+}
+
+/**
+ * Persists a hashed refresh token for a user.
+ *
+ * @param {string} userId - User id.
+ * @param {string} refreshToken - Raw refresh token.
+ * @param {Date} expiresAt - Expiration timestamp.
+ * @returns {Promise<void>} Resolves when saved.
+ */
+export async function saveRefreshToken(
+  userId: string,
+  refreshToken: string,
+  expiresAt: Date
+): Promise<void> {
+  await ensureRefreshTokensTable();
+  const db = getDB();
+  const { hashRefreshToken } = await import("../../core/utils/usableMethods");
+  await db.query(
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+     VALUES ($1, $2, $3)`,
+    [userId, hashRefreshToken(refreshToken), expiresAt]
+  );
+}
+
+/**
+ * Finds a valid refresh token row by raw token value.
+ *
+ * @param {string} refreshToken - Raw refresh token from client.
+ * @returns {Promise<{ user_id: string } | null>} Matching row or null.
+ */
+export async function findValidRefreshToken(
+  refreshToken: string
+): Promise<{ user_id: string } | null> {
+  await ensureRefreshTokensTable();
+  const db = getDB();
+  const { hashRefreshToken } = await import("../../core/utils/usableMethods");
+  const { rows } = await db.query<{ user_id: string }>(
+    `SELECT user_id
+     FROM refresh_tokens
+     WHERE token_hash = $1
+       AND revoked_at IS NULL
+       AND expires_at > NOW()
+     LIMIT 1`,
+    [hashRefreshToken(refreshToken)]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Revokes a refresh token by raw token value.
+ *
+ * @param {string} refreshToken - Raw refresh token.
+ * @returns {Promise<void>} Resolves when revoked.
+ */
+export async function revokeRefreshToken(
+  refreshToken: string
+): Promise<void> {
+  const { hashRefreshToken } = await import("../../core/utils/usableMethods");
+  await revokeRefreshTokenByHash(hashRefreshToken(refreshToken));
+}
+
+/**
+ * Revokes a refresh token by stored hash.
+ *
+ * @param {string} tokenHash - SHA-256 hash of refresh token.
+ * @returns {Promise<void>} Resolves when revoked.
+ */
+export async function revokeRefreshTokenByHash(
+  tokenHash: string
+): Promise<void> {
+  await ensureRefreshTokensTable();
+  const db = getDB();
+  await db.query(
+    `UPDATE refresh_tokens
+     SET revoked_at = NOW()
+     WHERE token_hash = $1
+       AND revoked_at IS NULL`,
+    [tokenHash]
+  );
+}

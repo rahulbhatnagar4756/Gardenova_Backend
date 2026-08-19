@@ -24,6 +24,7 @@ import myPlantRoutes from "./modules/myPlants/myPlantRoute";
 import reminderRoutes from "./modules/reminder/reminder.Routes";
 // import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
+import soilRoutes from "./modules/soil/soilRoutes";
 import { connectDB } from "./core/config/db";
 import cron from "node-cron";
 // import { startReminderCron } from "./modules/reminder/reminder.cron";
@@ -123,6 +124,7 @@ app.use("/api/v1/allplants", myPlantRoutes);
 // app.use("/api/v1/suppliers", suppliersRoutes);
 //landscape design routes
 app.use("/api/v1/landscape", landScapeDesignRoutes);
+app.use("/api/v1/soil", soilRoutes);
 // Reminder Routes
 app.use("/api/v1/reminders",reminderRoutes);
 

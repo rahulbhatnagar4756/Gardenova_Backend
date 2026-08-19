@@ -6,9 +6,8 @@ import {
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import {
   downloadImageAsBuffer,
-  generatePhoneToken,
-  generateToken,
 } from "../../core/utils/usableMethods";
+import { issueAuthTokens, rotateAuthTokens } from "./authTokenService";
 import { error, warn } from "../../core/utils/logger";
 import { CustomError } from "../../interface/Error";
 import { ZodError, ZodIssue } from "zod";
@@ -30,10 +29,12 @@ import {
   findUserByEmail,
   findUserByEmailOrPhone,
   findUserById,
+  findValidRefreshToken,
   getRoleById,
   getRoleByName,
   markEmailVerified,
   resetPasswordResetFields,
+  revokeRefreshToken,
   sendEmailOtp,
   updatePasswordResetToken,
   updateUnverifiedUserRegistration,
@@ -399,20 +400,17 @@ export const login = async (
         return;
       }
 
-      const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
-
+      const tokens = await issueAuthTokens(user, role.name);
 
       const response_id = await client.query(
         "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
         [user.id]
       );
 
-
-
       res.status(HTTP_STATUS.OK).json(
         successResponse(
           {
-            token,
+            ...tokens,
             role: role.name,
             accountStatus: professionalStatus.accountStatus,
             statusMessage: professionalStatus.message,
@@ -425,7 +423,7 @@ export const login = async (
     }
 
     // ─── 6. Standard user login ────────────────────────────────────────────
-    const token = generateToken(user.email.toLowerCase(), role.name, user.id!);
+    const tokens = await issueAuthTokens(user, role.name);
     const response_id = await client.query(
       "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
       [user.id]
@@ -434,7 +432,7 @@ export const login = async (
     res.status(HTTP_STATUS.OK).json(
       successResponse(
         {
-          token,
+          ...tokens,
           role: role.name,
           responseId: response_id.rows[0]?.response_id || null,
         },
@@ -545,7 +543,7 @@ export const verifyEmailOtp = async (
       return;
     }
 
-    const token = generateToken(email, role.name, user.id!);
+    const tokens = await issueAuthTokens(user, role.name);
     const response_id = await client.query(
       "SELECT response_id FROM survey_answers WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
       [user.id]
@@ -554,7 +552,7 @@ export const verifyEmailOtp = async (
     res.status(HTTP_STATUS.OK).json(
       successResponse(
         {
-          token,
+          ...tokens,
           role: role.name,
           responseId: response_id.rows[0]?.response_id || null,
         },
@@ -567,69 +565,97 @@ export const verifyEmailOtp = async (
 };
 
 /**
- * Authenticates a user and returns a refresh JWT token.
+ * Exchanges a valid refresh token for a new access + refresh token pair.
  *
- * @param {AuthRequest} req - Express Auth Request.
- * @param {Response} res - Express response object used to send the response.
- * @param {NextFunction} next - Express next middleware function for error handling.
- * @returns {Promise<void>} Returns a promise that resolves when authentication is complete.
+ * @param {Request} req - Express request with `refreshToken` in body.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function.
+ * @returns {Promise<void>} Resolves when tokens are refreshed.
  */
 export const refreshTokenLogin = async (
-  req: AuthRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const userPayload = req.user as {
-    userId?: string;
-    userEmail?: string;
-    userPhone?: string;
-    exp?: number;
-  } | undefined;
-
-  if (!userPayload?.userId) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized request"));
-    return;
-  }
-
-  const currentTimestamp = Math.floor(Date.now() / 1000);
-  if (!userPayload.exp || userPayload.exp <= currentTimestamp) {
-    res.status(HTTP_STATUS.UNAUTHORIZED).json(
-      errorResponse("Token has expired or is invalid", {
-        code: "TOKEN_EXPIRED_OR_INVALID",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-      })
-    );
-    return;
-  }
-
   try {
-    const user = await findUserById(userPayload.userId);
-    if (!user) {
-      await warn("Refresh Login failed - user not found", { userId: userPayload.userId }, { source: "auth.refresh", req });
-      res.status(HTTP_STATUS.OK).json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
+    const refreshToken = String(req.body.refreshToken ?? "").trim();
+    if (!refreshToken) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("Refresh token is required"));
+      return;
+    }
+
+    const tokenRow = await findValidRefreshToken(refreshToken);
+    if (!tokenRow) {
+      res
+        .status(HTTP_STATUS.UNAUTHORIZED)
+        .json(errorResponse("Invalid or expired refresh token"));
+      return;
+    }
+
+    const user = await findUserById(tokenRow.user_id);
+    if (!user || user.isdeleted) {
+      res
+        .status(HTTP_STATUS.UNAUTHORIZED)
+        .json(errorResponse(MESSAGES.INVALID_CREDENTIALS));
       return;
     }
 
     const role = await getRoleById(user.role_id);
     if (!role) {
-      await error("Refresh Login failed - role not found", { userId: user.id, roleId: user.role_id }, { userId: user.id!, source: "auth.refresh", req });
       res.status(HTTP_STATUS.OK).json(errorResponse("Role not found"));
       return;
     }
 
-    // ── Email ya phone — jo bhi original token mein tha ─────
-    const token = userPayload.userEmail
-      ? generateToken(user.email!, role.name, user.id!)
-      : generatePhoneToken(user.phone_number!, role.name, user.id!);
+    const tokens = await rotateAuthTokens(refreshToken, user, role.name);
 
-    res.status(HTTP_STATUS.OK).json(successResponse({ token }, MESSAGES.LOGIN_SUCCESS));
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse({ ...tokens, role: role.name }, MESSAGES.TOKEN_REFRESHED));
   } catch (err: unknown) {
-    const errorObj: CustomError = err instanceof Error
-      ? { ...err }
-      : { name: "UnknownError", message: typeof err === "string" ? err : "An unknown error occurred" };
+    const errorObj: CustomError =
+      err instanceof Error
+        ? { ...err }
+        : {
+            name: "UnknownError",
+            message:
+              typeof err === "string" ? err : "An unknown error occurred",
+          };
 
-    await error("Refresh Login failed with unexpected error", { error: errorObj.message, stack: errorObj.stack }, { source: "auth.refresh", req });
+    await error(
+      "Refresh token exchange failed",
+      { error: errorObj.message, stack: errorObj.stack },
+      { source: "auth.refresh", req }
+    );
     next(errorObj);
+  }
+};
+
+/**
+ * Revokes a refresh token (logout).
+ *
+ * @param {Request} req - Express request with `refreshToken` in body.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function.
+ * @returns {Promise<void>} Resolves when logout completes.
+ */
+export const logout = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const refreshToken = String(req.body.refreshToken ?? "").trim();
+    if (refreshToken) {
+      await revokeRefreshToken(refreshToken);
+    }
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse(null, MESSAGES.LOGOUT_SUCCESS));
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -1078,14 +1104,11 @@ export const googleAuth = async (
         false
       );
     }
-    // Generate JWT token
-    const token = generateToken(user?.email!, "User", user?.id!);
+    const tokens = await issueAuthTokens(user, "User");
     // Send Final Response
     res.status(HTTP_STATUS.OK).json(
       successResponse(
-        {
-          token,
-        },
+        tokens,
         isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
       )
     );
@@ -1246,14 +1269,11 @@ export const facebookAuth = async (
       await updateUserFromOAuth(user.id!, fbUid, false, true, false);
     }
 
-    // Generate JWT token
-    const token = generateToken(user.email!, "User", user.id!);
+    const tokens = await issueAuthTokens(user, "User");
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(
-        {
-          token,
-        },
+        tokens,
         isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
       )
     );
@@ -1372,13 +1392,11 @@ export const appleAuth = async (req: Request, res: Response, next: NextFunction)
       await updateUserFromOAuth(existingUser.id!, appleId, false, false, true);
     }
 
-    const token = generateToken(existingUser.email!, "User", existingUser.id!);
+    const tokens = await issueAuthTokens(existingUser, "User");
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(
-        {
-          token,
-        },
+        tokens,
         isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
       )
     );

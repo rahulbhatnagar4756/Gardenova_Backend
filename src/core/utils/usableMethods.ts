@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt, { SignOptions, Secret } from "jsonwebtoken";
 import config from "../config/env";
 
@@ -29,7 +30,89 @@ function toExpiresIn(
 }
 
 /**
+ * Builds the encoded JWT payload shared by access tokens.
+ *
+ * @param {object} input - User identity fields.
+ * @param {string} [input.userEmail] - User email.
+ * @param {string} [input.userPhone] - User phone.
+ * @param {string} input.role - User role.
+ * @param {string} input.userId - User id.
+ * @returns {Record<string, string>} Encoded JWT payload.
+ */
+function buildEncodedJwtPayload(input: {
+  userEmail?: string;
+  userPhone?: string;
+  role: string;
+  userId: string;
+}): Record<string, string> {
+  const payload: Record<string, string> = {
+    role: Buffer.from(input.role).toString("base64"),
+    userId: Buffer.from(input.userId).toString("base64"),
+  };
+
+  if (input.userEmail) {
+    payload.userEmail = Buffer.from(input.userEmail).toString("base64");
+  }
+  if (input.userPhone) {
+    payload.userPhone = Buffer.from(input.userPhone).toString("base64");
+  }
+
+  return payload;
+}
+
+/**
+ * Generates a short-lived access JWT for a user.
+ *
+ * @param {string} userEmail - User email.
+ * @param {string} role - User role.
+ * @param {string} userId - User id.
+ * @returns {string} Signed access token.
+ */
+export const generateAccessToken = (
+  userEmail: string,
+  role: string,
+  userId: string
+): string => {
+  const options: SignOptions = {
+    expiresIn: toExpiresIn(config.JWT_ACCESS_EXPIRE),
+    algorithm: "HS512",
+  };
+
+  return jwt.sign(
+    buildEncodedJwtPayload({ userEmail, role, userId }),
+    jwtSecret,
+    options
+  );
+};
+
+/**
+ * Generates a short-lived access JWT for phone-based auth.
+ *
+ * @param {string} userPhone - User phone number.
+ * @param {string} role - User role.
+ * @param {string} userId - User id.
+ * @returns {string} Signed access token.
+ */
+export const generatePhoneAccessToken = (
+  userPhone: string,
+  role: string,
+  userId: string
+): string => {
+  const options: SignOptions = {
+    expiresIn: toExpiresIn(config.JWT_ACCESS_EXPIRE),
+    algorithm: "HS512",
+  };
+
+  return jwt.sign(
+    buildEncodedJwtPayload({ userPhone, role, userId }),
+    jwtSecret,
+    options
+  );
+};
+
+/**
  * Generates a JWT token for a user.
+ * Kept for backward compatibility with existing callers.
  *
  * @param {string} userEmail - The email of the user for whom the token is generated.
  * @param {string} role - The role of the user (e.g., "admin", "user").
@@ -40,26 +123,54 @@ export const generateToken = (
   userEmail: string,
   role: string,
   userId: string
-): string => {
-  const options: SignOptions = {
-    expiresIn: toExpiresIn(config.JWT_EXPIRE),
-    algorithm: "HS512",
-  };
-  // Encode each parameter to base64
-  const encodedEmail = Buffer.from(userEmail).toString("base64");
-  const encodedRole = Buffer.from(role).toString("base64");
-  const encodedUserId = Buffer.from(userId).toString("base64");
+): string => generateAccessToken(userEmail, role, userId);
 
-  return jwt.sign(
-    {
-      userEmail: encodedEmail,
-      role: encodedRole,
-      userId: encodedUserId,
-    },
-    jwtSecret,
-    options
-  );
-};
+/**
+ * Creates a random opaque refresh token.
+ *
+ * @returns {string} Raw refresh token.
+ */
+export const generateOpaqueRefreshToken = (): string =>
+  crypto.randomBytes(48).toString("hex");
+
+/**
+ * Hashes a refresh token for secure DB storage.
+ *
+ * @param {string} refreshToken - Raw refresh token.
+ * @returns {string} SHA-256 hash.
+ */
+export const hashRefreshToken = (refreshToken: string): string =>
+  crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+/**
+ * Parses a duration string into milliseconds.
+ *
+ * @param {string} value - Duration like `30d`, `15m`, or seconds as number string.
+ * @returns {number} Milliseconds.
+ */
+export function parseDurationToMs(value: string): number {
+  const asNumber = Number(value);
+  if (!Number.isNaN(asNumber)) return asNumber * 1000;
+
+  const match = value.match(/^(\d+)(ms|s|m|h|d|w|y)$/);
+  if (!match) {
+    throw new Error(`Invalid duration: ${value}`);
+  }
+
+  const amount = Number(match[1]);
+  const multipliers = {
+    ms: 1,
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+    w: 604_800_000,
+    y: 31_536_000_000,
+  } as const;
+  const unit = match[2] as keyof typeof multipliers;
+
+  return amount * multipliers[unit];
+}
 
 /**
  * Downloads a remote image and converts it into a Buffer.
@@ -97,23 +208,4 @@ export const generatePhoneToken = (
   userPhone: string,
   role: string,
   userId: string
-): string => {
-  const options: SignOptions = {
-    expiresIn: toExpiresIn(config.JWT_EXPIRE),
-    algorithm: "HS512",
-  };
-
-  const encodedPhone  = Buffer.from(userPhone).toString("base64");
-  const encodedRole   = Buffer.from(role).toString("base64");
-  const encodedUserId = Buffer.from(userId).toString("base64");
-
-  return jwt.sign(
-    {
-      userPhone: encodedPhone,
-      role:      encodedRole,
-      userId:    encodedUserId,
-    },
-    jwtSecret,
-    options
-  );
-};
+): string => generatePhoneAccessToken(userPhone, role, userId);

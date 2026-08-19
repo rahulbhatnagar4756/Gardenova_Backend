@@ -6,6 +6,7 @@ import {
   verifyPasswordResetToken,
   handlePasswordResetToken,
   refreshTokenLogin,
+  logout,
   googleAuth,
   facebookAuth,
   appleAuth,
@@ -24,6 +25,8 @@ import {
   appleAuthValidation,
   sendEmailOtpValidation,
   verifyEmailOtpValidation,
+  refreshTokenValidation,
+  logoutValidation,
 } from "./authValidations";
 import validateRequest from "../../core/middleware/validateRequest";
 import auth from "../../core/middleware/authMiddleware";
@@ -185,16 +188,50 @@ router.post("/login", validateRequest(loginValidation), login);
 /**
  * @swagger
  * /api/v1/auth/refresh:
- *   get:
- *     summary: Refresh user token
+ *   post:
+ *     summary: Refresh access token
+ *     description: Exchange a valid refresh token for a new access + refresh token pair.
  *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 example: "a1b2c3d4e5f6..."
  *     responses:
  *       200:
- *         description: Refresh Login successful
+ *         description: Token refreshed successfully
  *       401:
- *         description: Invalid credentials
+ *         description: Invalid or expired refresh token
  */
-router.get("/refresh", auth, refreshTokenLogin);
+router.post("/refresh", validateRequest(refreshTokenValidation), refreshTokenLogin);
+
+/**
+ * @swagger
+ * /api/v1/auth/logout:
+ *   post:
+ *     summary: Logout and revoke refresh token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ */
+router.post("/logout", validateRequest(logoutValidation), logout);
 
 /**
  * @swagger

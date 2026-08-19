@@ -4,6 +4,8 @@ export interface Config {
   PORT: number;
   JWT_SECRET: string;
   JWT_EXPIRE: string;
+  JWT_ACCESS_EXPIRE: string;
+  JWT_REFRESH_EXPIRE: string;
   APPDEV_URL: string;
   AWS_A_K_ID: string;
   AWS_S_A_KEY: string;

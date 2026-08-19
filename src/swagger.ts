@@ -64,6 +64,7 @@ const options = {
     "./src/modules/professional/*.ts",
     "./src/modules/suppliers/*.ts",
     "./src/modules/landScapeDesign/*.ts",
+    "./src/modules/soil/*.ts",
     "./src/modules/contactus/*.ts",
     "./src/modules/Blog/*.ts",
     "./src/modules/reminder/*.ts",

@@ -73,6 +73,17 @@ export const verifyEmailOtpValidation = Joi.object({
   otp: Joi.string().length(6).pattern(/^\d+$/).required(),
 });
 
+export const refreshTokenValidation = Joi.object({
+  refreshToken: Joi.string().min(20).required().messages({
+    "any.required": "Refresh token is required",
+    "string.empty": "Refresh token is required",
+  }),
+});
+
+export const logoutValidation = Joi.object({
+  refreshToken: Joi.string().min(20).optional(),
+});
+
 // Unified Validation for Send/Resend Password Reset Token
 export const handlePasswordResetTokenValidation = Joi.object({
   email: Joi.string()

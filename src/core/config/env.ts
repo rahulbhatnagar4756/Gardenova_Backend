@@ -23,6 +23,8 @@ const config: Config = {
   PORT: parseInt(getEnv("PORT"), 10),
   JWT_SECRET: getEnv("JWT_SECRET"),
   JWT_EXPIRE: getEnv("JWT_EXPIRE"),
+  JWT_ACCESS_EXPIRE: process.env.JWT_ACCESS_EXPIRE ?? process.env.JWT_EXPIRE ?? "15m",
+  JWT_REFRESH_EXPIRE: process.env.JWT_REFRESH_EXPIRE ?? "30d",
   APPDEV_URL: getEnv("APPDEV_URL"),
   AWS_A_K_ID: getEnv("AWS_A_K_ID"),
   AWS_S_A_KEY: getEnv("AWS_S_A_KEY"),

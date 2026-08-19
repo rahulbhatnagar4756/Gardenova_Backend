@@ -18,6 +18,8 @@ export const MESSAGES = {
   USER_CREATED: "User registered successfully",
   USER_REGISTER_OTP_SENT: "Registration successful. Please verify the OTP sent to your email",
   LOGIN_SUCCESS: "Login successful",
+  TOKEN_REFRESHED: "Token refreshed successfully",
+  LOGOUT_SUCCESS: "Logged out successfully",
   INVALID_CREDENTIALS: "Invalid email or password",
   EMAIL_NOT_VERIFIED: "Please verify your email before logging in",
   USER_EXISTS: "User with this email already exists",
