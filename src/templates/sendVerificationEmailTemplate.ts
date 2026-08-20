@@ -24,10 +24,42 @@
  *   new Date(Date.now() + 10 * 60 * 1000)
  * );
  */
+/**
+ * Formats an expiration Date into a human-readable "X minutes" string
+ * and an absolute UTC time string for display in emails.
+ *
+ * @param {Date} expiration - Expiry timestamp.
+ * @returns {{ minutes: number; utcString: string }} Formatted values.
+ */
+function formatExpiry(expiration: Date): { minutes: number; utcString: string } {
+  const msLeft = expiration.getTime() - Date.now();
+  const minutes = Math.max(1, Math.round(msLeft / 60_000));
+
+  const utcString = expiration.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  return { minutes, utcString };
+}
+
+/**
+ * Generates the HTML template for the email verification message.
+ *
+ * @param {string} code - The verification code sent to the user.
+ * @param {Date} expiration - Expiration date/time of the code.
+ * @returns {string} HTML string for the verification email.
+ */
 export const sendVerificationEmailTemplate = (
   code: string,
   expiration: Date
 ): string => {
+  const { minutes, utcString } = formatExpiry(expiration);
   return `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
   <html xmlns="http://www.w3.org/1999/xhtml">
@@ -89,7 +121,8 @@ export const sendVerificationEmailTemplate = (
                 </div>
 
                 <p style="text-align:center; color:#424242;">
-                  This code expires at <strong>${expiration.toLocaleString()}</strong>
+                  This code expires in <strong>${minutes} minute${minutes !== 1 ? "s" : ""}</strong>
+                  &nbsp;·&nbsp; ${utcString}
                 </p>
 
                 <hr style="margin:30px 0; border:0; border-top:1px solid #ddd;" />

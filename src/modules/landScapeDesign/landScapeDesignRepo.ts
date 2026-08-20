@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import fs from 'fs/promises';
 import path from 'path';
 import dotenv from "dotenv";
+import { getDB } from "../../core/config/db";
 dotenv.config();
 
 const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
@@ -226,6 +227,8 @@ export interface DesignResult {
   gardenUrl: string;
   description: string;
   detectedSpace: DetectedSpace;
+  style: string;
+  questionsAndAnswers: Array<{ question: string; answer: string }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -877,6 +880,158 @@ export async function detectSpaceType(imageBuffer: Buffer): Promise<DetectedSpac
  * - mask_buffer: raw PNG buffer
  * - mask_base64: base64-encoded PNG mask
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// getNativePlants
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface NativePlant {
+  commonName: string;
+  latinName: string;
+  type: 'tree' | 'shrub' | 'flowering' | 'ground_cover' | 'climber' | 'grass';
+  sunlight: 'full_sun' | 'partial_shade' | 'full_shade';
+  waterNeeds: 'low' | 'moderate' | 'high';
+  notes: string;
+}
+
+export interface NativePlantsResult {
+  region: string;
+  climate: string;
+  plants: NativePlant[];
+}
+
+export interface SurveyAnswerForDesign {
+  question: string;
+  answer: string;
+  order: number;
+}
+
+/**
+ * Loads the user's onboarding survey answers for garden plant selection.
+ *
+ * Uses an explicit responseId when provided; otherwise uses the latest
+ * survey_answers row for the user.
+ *
+ * @param userId - Authenticated user id
+ * @param responseId - Optional survey response id
+ * @returns Ordered question/answer pairs
+ */
+export async function getUserSurveyAnswersForDesign(
+  userId: string,
+  responseId?: string
+): Promise<SurveyAnswerForDesign[]> {
+  const db = getDB();
+
+  const resolvedResponseId = responseId ?? (
+    await db.query<{ response_id: string }>(
+      `SELECT response_id
+         FROM survey_answers
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [userId]
+    )
+  ).rows[0]?.response_id;
+
+  if (!resolvedResponseId) {
+    return [];
+  }
+
+  const result = await db.query<{
+    question_text: string;
+    selected_option: string | null;
+    question_order: number;
+  }>(
+    `SELECT
+        q.question_text,
+        sa.selected_option,
+        q."order" AS question_order
+       FROM survey_answers sa
+       JOIN questions q ON q.id = sa.question_id
+      WHERE sa.response_id = $1
+        AND q.is_deleted = false
+      ORDER BY q."order" ASC NULLS LAST, q.id ASC`,
+    [resolvedResponseId]
+  );
+
+  return result.rows
+    .filter((row) => (row.selected_option ?? "").trim().length > 0)
+    .map((row) => ({
+      question: row.question_text,
+      answer: (row.selected_option ?? "").trim(),
+      order: row.question_order,
+    }));
+}
+
+/**
+ * Uses GPT to identify regionally native and climate-appropriate plants
+ * for the given GPS coordinates.
+ *
+ * The model returns up to 10 plants suited to the local climate, soil, and light conditions.
+ *
+ * @param latitude - Decimal latitude
+ * @param longitude - Decimal longitude
+ * @returns Structured list of native/suitable plants with care metadata
+ */
+export async function getNativePlants(
+  latitude: number,
+  longitude: number,
+): Promise<NativePlantsResult> {
+  const completion = await openai.chat.completions.create({
+    model: GPT_PLANNING_MODEL,
+    temperature: 0.2,
+    max_tokens: 900,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `You are a professional horticulturist and landscape botanist.
+Given GPS coordinates, identify the climate zone and recommend native or well-adapted garden plants.
+Return ONLY valid JSON — no markdown, no extra text.`,
+      },
+      {
+        role: 'user',
+        content: `GPS: latitude=${latitude}, longitude=${longitude}
+
+Identify the region and climate zone, then list 8–10 plants (native or regionally adapted) best suited for a garden in that location.
+
+Return ONLY this JSON structure:
+{
+  "region": "city/country name",
+  "climate": "climate classification (e.g. tropical, arid, temperate)",
+  "plants": [
+    {
+      "commonName": "string",
+      "latinName": "string",
+      "type": "tree | shrub | flowering | ground_cover | climber | grass",
+      "sunlight": "full_sun | partial_shade | full_shade",
+      "waterNeeds": "low | moderate | high",
+      "notes": "1 sentence — why it suits this climate and where to place it"
+    }
+  ]
+}
+
+Rules:
+- Prefer plants native to or well-established in the region
+- Mix types: include at least 2 flowering, 1 ground_cover, 1 climber
+- All plants must realistically grow outdoors in that climate
+- Keep notes concise and practical`,
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error('Empty response from GPT native plants lookup');
+
+  return JSON.parse(content) as NativePlantsResult;
+}
+
+/**
+ * Calls a segmentation model (or fallback rules) to generate an edit mask.
+ *
+ * @param imageBase64 - Raw base64 string or full data URI image.
+ * @param spaceType - Optional space type used to guide masking.
+ * @returns A `SegmentationResult` containing a mask buffer and base64.
+ */
 export async function callSegmentationAPI(
   imageBase64: string,
   spaceType: SpaceType = 'generic_indoor',
@@ -1034,6 +1189,231 @@ Start immediately with FLOOR. No preamble. No suggestions.`;
   return description;
 }
 
+export interface SpaceVisionAndNativePlantsResult {
+  detectedSpace: DetectedSpace;
+  description: string;
+  nativePlants: NativePlantsResult;
+}
+
+/**
+ * Single-call pipeline helper:
+ * - Uses ONE vision request to classify the space
+ * - Produces the structured scene description
+ * - Also recommends native / climate-appropriate plants from lat/long
+ *
+ * This is intended to reduce the overall prompt/token usage vs calling
+ * detectSpaceType + callVisionForSceneDescription + getNativePlants separately.
+ *
+ * @param imageBuffer - Raw image buffer (JPEG/PNG/WebP).
+ * @param latitude - GPS latitude in decimal degrees.
+ * @param longitude - GPS longitude in decimal degrees.
+ * @param mimeType - Input image mime type for the vision model.
+ * @returns Combined result with detected space, scene description, and native plants.
+ */
+export async function callVisionForSpaceAndNativePlants(
+  imageBuffer: Buffer,
+  latitude: number,
+  longitude: number,
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/jpeg',
+): Promise<SpaceVisionAndNativePlantsResult> {
+  if (!imageBuffer || imageBuffer.length < 1000) {
+    throw new Error(`Invalid image buffer: ${imageBuffer?.length ?? 0} bytes`);
+  }
+
+  const base64Image = imageBuffer.toString('base64');
+  const dataUri = `data:${mimeType};base64,${base64Image}`;
+
+  const prompt = `You are both:
+(A) a professional interior/exterior space assessor (from an image) AND
+(B) a horticulture expert (from GPS coordinates).
+
+Return ONLY valid JSON with no markdown and no extra keys.
+
+GPS INPUT:
+latitude=${latitude}
+longitude=${longitude}
+
+IMAGE TASK (must be grounded in the image only):
+1) detectedSpace:
+   - spaceType: one of: balcony|terrace|yard|rooftop|patio|garden|bedroom|living_room|kitchen|bathroom|dining_room|office|hallway|basement|generic_indoor|generic_outdoor
+   - category: indoor or outdoor
+   - confidence: high or medium or low
+   - reasoning: one sentence (based on visible cues)
+
+2) description:
+   Use this exact structure (each line should be short):
+   FLOOR: ...
+   WALLS & CEILING: ...
+   OBJECTS PRESENT: ...
+   LIGHT: ...
+   SURROUNDINGS: ...
+   CONDITION: ...
+   Start immediately with FLOOR. Do not include any intro text.
+
+GPS TASK (plants can be based on GPS, not image):
+3) nativePlants:
+   - Provide region + climate
+   - Provide 6–8 plants total (realistic outdoors for that location)
+   - Include at least:
+     * 2 flowering plants
+     * 1 ground_cover
+     * 1 climber
+
+Return JSON ONLY in this format:
+{
+  "detectedSpace": {
+    "spaceType": "string",
+    "category": "indoor | outdoor",
+    "confidence": "high | medium | low",
+    "reasoning": "string"
+  },
+  "description": "string with newline separators",
+  "nativePlants": {
+    "region": "string",
+    "climate": "string",
+    "plants": [
+      {
+        "commonName": "string",
+        "latinName": "string",
+        "type": "tree | shrub | flowering | ground_cover | climber | grass",
+        "sunlight": "full_sun | partial_shade | full_shade",
+        "waterNeeds": "low | moderate | high",
+        "notes": "short 1 sentence placement/care note"
+      }
+    ]
+  }
+}
+`;
+
+  const completion = await openai.chat.completions.create({
+    model: GPT_VISION_MODEL,
+    max_tokens: 1300,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: dataUri } },
+        ],
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error('Empty response from combined vision+plants model');
+
+  return JSON.parse(content) as SpaceVisionAndNativePlantsResult;
+}
+
+/**
+ * Single-call vision helper using onboarding survey answers instead of GPS.
+ * Detects space, describes the scene, and recommends plants from quiz answers.
+ *
+ * @param imageBuffer - Raw image buffer
+ * @param surveyAnswers - Onboarding question/answer pairs
+ * @param mimeType - Image mime type
+ * @returns Combined space, description, and recommended plants
+ */
+export async function callVisionForSpaceAndSurveyPlants(
+  imageBuffer: Buffer,
+  surveyAnswers: SurveyAnswerForDesign[],
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/jpeg',
+): Promise<SpaceVisionAndNativePlantsResult> {
+  if (!imageBuffer || imageBuffer.length < 1000) {
+    throw new Error(`Invalid image buffer: ${imageBuffer?.length ?? 0} bytes`);
+  }
+
+  const base64Image = imageBuffer.toString('base64');
+  const dataUri = `data:${mimeType};base64,${base64Image}`;
+
+  const surveyBlock = surveyAnswers
+    .map((item, index) => `${index + 1}. ${item.question}: ${item.answer}`)
+    .join('\n');
+
+  const prompt = `You are both:
+(A) a professional interior/exterior space assessor (from an image) AND
+(B) a horticulture expert who chooses plants from a user's onboarding quiz.
+
+Return ONLY valid JSON with no markdown and no extra keys.
+
+ONBOARDING ANSWERS (this is the ONLY source for plant choice — do not use GPS):
+${surveyBlock}
+
+IMAGE TASK (must be grounded in the image only):
+1) detectedSpace:
+   - spaceType: one of: balcony|terrace|yard|rooftop|patio|garden|bedroom|living_room|kitchen|bathroom|dining_room|office|hallway|basement|generic_indoor|generic_outdoor
+   - category: indoor or outdoor
+   - confidence: high or medium or low
+   - reasoning: one sentence (based on visible cues)
+
+2) description:
+   Use this exact structure (each line should be short):
+   FLOOR: ...
+   WALLS & CEILING: ...
+   OBJECTS PRESENT: ...
+   LIGHT: ...
+   SURROUNDINGS: ...
+   CONDITION: ...
+   Start immediately with FLOOR. Do not include any intro text.
+
+SURVEY TASK (plants must match the onboarding answers, not location):
+3) nativePlants:
+   - region: "onboarding survey"
+   - climate: copy from the climate/sunlight answers
+   - Provide 6–8 plants that fit the quiz (space, sunlight, watering, goal, experience)
+   - Include at least 2 flowering, 1 ground_cover, 1 climber when the space is outdoor
+   - For indoor space prefer indoor-friendly plants
+
+Return JSON ONLY in this format:
+{
+  "detectedSpace": {
+    "spaceType": "string",
+    "category": "indoor | outdoor",
+    "confidence": "high | medium | low",
+    "reasoning": "string"
+  },
+  "description": "string with newline separators",
+  "nativePlants": {
+    "region": "onboarding survey",
+    "climate": "string",
+    "plants": [
+      {
+        "commonName": "string",
+        "latinName": "string",
+        "type": "tree | shrub | flowering | ground_cover | climber | grass",
+        "sunlight": "full_sun | partial_shade | full_shade",
+        "waterNeeds": "low | moderate | high",
+        "notes": "short 1 sentence why it matches the quiz answers"
+      }
+    ]
+  }
+}
+`;
+
+  const completion = await openai.chat.completions.create({
+    model: GPT_VISION_MODEL,
+    max_tokens: 1300,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: dataUri } },
+        ],
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error('Empty response from survey vision+plants model');
+
+  return JSON.parse(content) as SpaceVisionAndNativePlantsResult;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // callGroqForPlanning
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1074,6 +1454,12 @@ export async function callGroqForPlanning(
 ): Promise<DesignPlan> {
 
   const config = SPACE_CONFIG[detectedSpace.category];
+  const plannerPrefs: Record<string, string> | undefined = prefs
+    ? Object.fromEntries(Object.entries(prefs).filter(([key]) => key !== 'style'))
+    : undefined;
+  const plannerContext = plannerPrefs && Object.keys(plannerPrefs).length > 0
+    ? plannerPrefs
+    : undefined;
 
   const systemPrompt = `
 You are an expert ${config.persona} with 10+ years of experience designing real-world spaces.
@@ -1099,6 +1485,8 @@ Every plan MUST include:
 - Layering (foreground / midground / background)
 - Height variation (low / medium / tall)
 - Visual balance (avoid clutter or emptiness)
+- Dense planting (planting beds, not a few identical pots)
+- Garden lighting (path lights, uplights, lanterns) — required for outdoor plans
 
 4. ZONING LOGIC
 Break the space into functional micro-zones:
@@ -1107,10 +1495,14 @@ Break the space into functional micro-zones:
 - Transition/edge areas
 
 5. STYLE INTELLIGENCE
-- NEVER use generic styles like "Modern".
-- Choose a DISTINCT, CONTEXT-AWARE style.
-- Style must reflect the actual space conditions.
-Examples: ${config.styleExamples}
+- NEVER use a user-requested, preferred, or client-sent style.
+- Infer ONE DISTINCT garden style only from:
+  - the detected space type and category (balcony, rooftop, terrace, yard, indoor room, etc.)
+  - onboarding survey answers when present (sunlight, watering, climate, goal, experience)
+  - region/climate/plant list when present
+- Style must fit the actual area (example: a small balcony is not a luxury estate garden).
+- Never default to generic "Modern" or "luxury rooftop" unless the space is actually a rooftop.
+Examples of area-fit styles: ${config.styleExamples}
 
 6. PRACTICAL EXECUTION
 - Use real materials, real plants, real objects.
@@ -1129,7 +1521,7 @@ Return ONLY valid JSON.
 
 {
   "summary": "One strong, specific transformation vision",
-  "style": "Specific non-generic style",
+  "style": "Inferred from space type and survey/location context only",
   "steps": [
     {
       "step": 1,
@@ -1148,6 +1540,7 @@ STEP QUALITY RULES:
 - 5–7 steps total
 - Order: lowest effort → highest
 - NO filler steps
+- For outdoor: at least one Lighting step AND dense Softscape beds (never "a few pots in a row")
 - Each step must feel like a professional designer decision
 `;
 
@@ -1159,7 +1552,9 @@ SCENE DESCRIPTION (treat this as ground truth — do not invent anything beyond 
 ${sceneDescription}
  
 USER PREFERENCES:
-${prefs ? JSON.stringify(prefs) : 'None provided — create a general plan for this exact space.'}
+${plannerContext ? JSON.stringify(plannerContext) : 'None provided — infer style from the space type and scene only.'}
+ 
+Do NOT treat any field as a preferred visual style. Choose style from the space type plus survey/location context only.
  
 IMPORTANT: Every step must be directly informed by the scene above.
 Build FROM the described baseline — do not assume anything else exists.
@@ -1182,7 +1577,8 @@ Build FROM the described baseline — do not assume anything else exists.
       const content = completion.choices[0]?.message?.content;
       if (!content) throw new Error('Empty response from GPT planner');
 
-      return JSON.parse(content) as DesignPlan;
+      const plan = JSON.parse(content) as DesignPlan;
+      return plan;
 
     } catch (error: unknown) {
       const err = error as { status?: number };
@@ -1204,38 +1600,32 @@ Build FROM the described baseline — do not assume anything else exists.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Builds an image editing (inpainting) prompt for a generative model.
+ * Trims text to a Flux-safe length so the garden instructions are not cut off.
  *
- * The prompt is carefully structured to ensure the model performs
- * *edits on the existing scene* rather than generating a new scene from scratch.
+ * @param value - Source text
+ * @param maxChars - Maximum characters to keep
+ * @returns Trimmed text
+ */
+function clipForFlux(value: string, maxChars: number): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trim()}...`;
+}
+
+/**
+ * Builds a compact Flux image-editing prompt for a garden transformation.
  *
- * Key behavior:
- * - Converts a design plan into actionable visual modifications
- * - Preserves original architectural structure (walls, floors, perspective)
- * - Adapts vocabulary based on indoor vs outdoor spaces
- * - Infers lighting condition from scene description
- *
- * Outdoor prompts focus on:
- * - landscaping (softscape)
- * - structural additions (hardscape)
- * - lighting enhancements
- *
- * Indoor prompts focus on:
- * - furniture placement
- * - decor and styling
- * - textiles and finishes
- * - lighting and paint updates
- *
- * @param plan - Generated design plan containing structured transformation steps
+ * @param plan - Generated design plan
  * @param sceneDescription - Vision model description of the original image
- * @param detectedSpace - Classified space type and category (indoor/outdoor)
- *
- * @returns A single optimized text prompt for image editing / inpainting models
+ * @param detectedSpace - Classified space type and category
+ * @param extraPlants - Optional extra plant names (for example native plants)
+ * @returns Compact garden prompt within Flux size limits
  */
 export function buildImagePrompt(
   plan: DesignPlan,
   sceneDescription: string,
-  detectedSpace: DetectedSpace
+  detectedSpace: DetectedSpace,
+  extraPlants?: string
 ): string {
 
   const isAfternoon = sceneDescription.toLowerCase().includes('afternoon');
@@ -1263,291 +1653,49 @@ export function buildImagePrompt(
     .map(s => s.action)
     .join(', ');
 
-  const planSections = [
-    plants && `Softscape: ${plants}`,
-    hardscape && `Hardscape: ${hardscape}`,
-    lighting && `Lighting: ${lighting}`,
-    water && `Water features: ${water}`,
-  ].filter(Boolean).join('\n');
-  //   return `
-  // Ultra-photorealistic architectural garden transformation of an existing ${detectedSpace.spaceType}.
+  const derivedStyle = plan.style?.trim() || `${detectedSpace.spaceType} garden`;
+  const plantList = clipForFlux([plants, extraPlants].filter(Boolean).join(', '), 280);
+  const hardscapeList = clipForFlux(hardscape, 140);
+  const lightingList = clipForFlux(lighting, 100);
+  const waterList = clipForFlux(water, 80);
+  const isOutdoor = detectedSpace.category === 'outdoor';
 
-  // Transform this space into a visually rich, dense, and immersive premium garden environment.
-  // The final result must feel like a fully developed, mature garden — NOT a minimally decorated space.
+  if (isOutdoor) {
+    return `Lush overflowing garden with many plants, colorful flowers, and warm garden lights. Creative ${derivedStyle} landscape, not an empty lawn with a few pots.
 
-  // --------------------------------------------------
-  // SCENE CONTEXT
-  // --------------------------------------------------
-  // ${sceneDescription}
+KEEP: building, fence, sky, camera angle.
+CHANGE: fill this ${detectedSpace.spaceType} with a dense mature garden.
 
-  // --------------------------------------------------
-  // ⚠️ STRUCTURAL PRESERVATION — ABSOLUTE
-  // --------------------------------------------------
-  // DO NOT modify, remove, move, redesign, or reinterpret:
-  // - Walls, textures, paint
-  // - Windows, doors, glass
-  // - Railings, staircase, pergola, structures
-  // - Floor levels or geometry
-  // - Camera angle or perspective
+PLANT DENSITY (MANDATORY):
+- Continuous mixed planting beds along BOTH sides, all corners, and the far end
+- Dozens of plants, mixed sizes: groundcover, flowering clusters, mid shrubs, tall plants
+- NO identical white pots in a straight row
+- NO sparse leftover lawn in the middle with nothing else
+- Flowers clearly visible: pink, yellow, orange, red, purple, white
 
-  // Architecture must remain EXACTLY identical (pixel-preserved).
-  // ONLY ADD garden elements layered on top.
+GARDEN LIGHTS (MANDATORY, must be visible):
+- Warm path bollard lights along the walkway
+- Uplights on shrubs and trees
+- Wall lanterns or string lights
+- Soft golden evening garden glow
 
-  // --------------------------------------------------
-  // 🚫 SURROUNDING PROTECTION (CRITICAL)
-  // --------------------------------------------------
-  // - DO NOT change or reinterpret surroundings in ANY way
-  // - Do NOT add, remove, or alter background buildings, sky, or external environment
-  // - Do NOT extend or shrink the visible space
-  // - Only work strictly WITHIN the existing visible boundaries
+CREATIVITY:
+- Curved or staggered stepping-stone path, not two boring parallel paver strips
+- One seating nook or feature planter as a focal point
+- Layered heights and varied textures
 
-  // ❗ Any modification outside the original space is strictly forbidden
+${plantList ? `Include these plants: ${plantList}.` : ''}
+${hardscapeList ? `Hardscape: ${hardscapeList}.` : ''}
+${lightingList ? `Lights: ${lightingList}.` : ''}
+Photorealistic, ${lightingCondition}.`;
+  }
 
-  // --------------------------------------------------
-  // 🌸 FLOWER DENSITY BOOST (CRITICAL)
-  // --------------------------------------------------
-  // - Flower presence must be HIGH and clearly visible
-  // - At least 40–60% of plants must include flowering species
+  return `Lush indoor plant styling of this ${detectedSpace.spaceType}: many plants, mixed heights, warm accent lights. ${derivedStyle} look.
 
-  // - Distribute flowers across:
-  //   - ground level clusters
-  //   - mid-height shrubs
-  //   - trailing plants on railings
-
-  // - Use bold contrasting colors:
-  //   pink, magenta, yellow, orange, red, purple
-
-  // - Flowers must appear:
-  //   - dense
-  //   - vibrant
-  //   - naturally spread (not isolated)
-
-  // ❗ Green-only foliage is NOT acceptable — flowers must dominate visually
-
-  // --------------------------------------------------
-  // 🌿 GROUND TRANSFORMATION — PREMIUM TRIMMED LAWN (MANDATORY)
-  // --------------------------------------------------
-  // - Convert entire visible floor into a perfectly maintained natural grass lawn
-
-  // - Grass must appear:
-  //   - evenly trimmed to a consistent height
-  //   - dense and well-maintained
-  //   - soft and lush with fine blade detail
-  //   - clean and professionally landscaped
-
-  // - Subtle realism is still required:
-  //   - slight tonal variation (light and dark greens)
-  //   - natural sunlight variation across surface
-  //   - very minor imperfections ONLY (not messy or overgrown)
-
-  // - Strictly avoid:
-  //   ❌ irregular growth
-  //   ❌ patchy or wild grass
-  //   ❌ dry or uneven areas
-  //   ❌ artificial turf or plastic-like texture
-
-  // - Lawn must feel like a high-end residential garden (manicured, premium quality)
-
-  // - Blend edges cleanly into walls and structures
-  // - Maintain neat boundaries around all edges
-
-  // --------------------------------------------------
-  // 🔥 DENSITY ENFORCEMENT (CRITICAL RULE)
-  // --------------------------------------------------
-  // - Increase plant and flower presence by MINIMUM 4x, with strong floral dominance
-  // - Empty or unused spaces are NOT allowed
-  // - Every edge, corner, and boundary must contain greenery-mandatory
-  // - The space must feel surrounded by plants, not empty with plants
-
-  // --------------------------------------------------
-  // 🌺 EDGE & BOUNDARY ACTIVATION (VERY IMPORTANT)
-  // --------------------------------------------------
-  // - All wall edges must have continuous planting strips
-  // - Corners must include dense plant clusters
-  // - No bare perimeter lines should remain visible
-
-  // --------------------------------------------------
-  // 🌿 VERTICAL GREENERY (DESIGN-PATTERN BASED — MANDATORY)
-  // --------------------------------------------------
-  // - All large walls MUST include vertical greenery, BUT NOT full-wall coverage
-
-  // - Greenery must follow intentional architectural patterns such as:
-  //   - vertical strips (green columns)
-  //   - grid or panel sections
-  //   - framed trellis segments
-  //   - corner climbing clusters
-  //   - spaced modular patches
-
-  // - Maintain visible wall surface between greenery sections (40–60% wall visibility required)
-
-  // - Use climbers like ivy, jasmine, or flowering vines ONLY within defined zones:
-  //   - along edges
-  //   - around windows/frames
-  //   - in vertical bands or structured layouts
-
-  // - Avoid random or fully spread growth
-
-  // ❗ DO NOT:
-  //   ❌ cover entire wall uniformly
-  //   ❌ create a continuous green blanket
-  //   ❌ hide full wall texture
-
-  // ✅ DO:
-  //   ✔ create rhythm and repetition in placement
-  //   ✔ leave clean negative space between greenery
-  //   ✔ make it look like intentional landscape design (not overgrown nature)
-
-  // - Combine with:
-  //   - trellis frames
-  //   - wall-mounted planters
-  //   - geometric green panels
-
-  // ❗ Wall must feel designed, not overrun by plants
-
-  // --------------------------------------------------
-  // 🌺 RAILING / PERIMETER ZONE
-  // --------------------------------------------------
-  // - Fully cover railings with cascading flowering plants
-  // - Plants must spill outward and downward naturally
-  // - Add base shrubs or grasses at railing level
-  // - This area must appear lush, overflowing, and continuous
-
-
-  // --------------------------------------------------
-  // 🪨 PATHWAY INTEGRATION (MANDATORY)
-  // --------------------------------------------------
-  // - Introduce a natural stepping stone pathway across the grass
-  // - Stones must:
-  //   - be irregular in shape
-  //   - be slightly embedded into grass
-  //   - follow a logical walking path (not random placement)
-
-  // - Spacing must feel natural and walkable
-  // - Grass should slightly overlap stone edges for realism
-
-  // ❗ Path must enhance composition, not dominate the scene
-
-
-  // --------------------------------------------------
-  // 🌼 COLOR & FLOWER DISTRIBUTION
-  // --------------------------------------------------
-  // - Strong visible flowering presence (NOT only foliage)
-  // - Include contrasting colors:
-  //   - pink / magenta
-  //   - yellow
-  //   - red or purple
-  // - Flowers must be clearly visible across the scene
-
-  // --------------------------------------------------
-  // 🎯 FOCAL ELEMENT (REQUIRED)
-  // --------------------------------------------------
-  // Include at least ONE visual anchor:
-  // - seating area OR
-  // - feature planter OR
-  // - small deck OR
-  // - garden feature
-
-  // Scene must not feel empty or directionless
-
-  // --------------------------------------------------
-  // 🌿 DEPTH & LAYERING (MANDATORY)
-  // --------------------------------------------------
-  // - Foreground: grass + low plants
-  // - Midground: shrubs + clusters
-  // - Background: climbers + vertical greenery
-
-  // ❗ Flat composition is NOT acceptable
-
-  // --------------------------------------------------
-  // 🌞 LIGHTING & REALISM
-  // --------------------------------------------------
-  // ${lightingCondition}
-
-  // - Natural sunlight with soft realistic shadows
-  // - Slight warmth
-  // - Light interacting with leaves (subtle highlights)
-
-  // --------------------------------------------------
-  // 📸 RENDER QUALITY
-  // --------------------------------------------------
-  // - Ultra photorealistic (NO CGI look)
-  // - Real textures (grass, soil, leaves)
-  // - Slight imperfections for realism
-  // - Depth of field with subtle foreground softness
-  // - Professional architectural photography look
-
-
-  // --------------------------------------------------
-  // 🌿 MID-HEIGHT PLANT ENFORCEMENT (VERY IMPORTANT)
-  // --------------------------------------------------
-  // - Add a strong layer of medium-height plants (2–4 feet tall)
-  // - Use shrubs, bushy plants, and compact ornamental plants
-  // - These must fill the MIDGROUND space visually
-
-  // - Avoid over-reliance on:
-  //   ❌ only grass (too flat)
-  //   ❌ only tall climbers (too vertical)
-
-  // - Ensure smooth transition:
-  //   low plants → medium shrubs → tall vertical greens
-
-  // ❗ Mid-height density is mandatory for realistic depth
-
-  // --------------------------------------------------
-  // ✅ FINAL VALIDATION (STRICT)
-  // --------------------------------------------------
-  // Reject output if:
-  // - Grass looks flat or artificial
-  // - Any wall is bare
-  // - Edges are empty
-  // - Plants look sparse
-  // - No focal point exists
-
-  // Accept ONLY if:
-  // - Space feels dense, lush, and immersive
-  // - Plant coverage is visually dominant
-  // - Garden feels mature and established
-  // - Architecture is perfectly preserved
-  // `.trim();
-  return `Ultra-photorealistic luxury garden transformation of this existing ${detectedSpace.spaceType}.
- 
-SCENE:
-${sceneDescription}
- 
-[IMPORTANT]
-Preserve the original architecture, staircase, walls, windows, camera angle, and spatial layout exactly while transforming the visible empty areas into a lush premium landscaped garden.
- 
-Create a complete immersive garden redesign with high greenery density, elegant hardscape details, warm lighting, and no visually empty spaces.
- 
-LANDSCAPING:
-- Dense layered greenery throughout the space
-- Rich flowering plants in pink, yellow, red, orange, purple, and white
-- Premium ornamental shrubs, tropical foliage, decorative grasses, and flowering bushes
-- Continuous planting along edges, railings, pathways, and corners
-- Cascading flowering plants on railings and pergola edges
-- Elegant vertical greenery sections with structured partial wall coverage only
-- Include dedicated plant beds with clean brick or stone edging
- 
-GROUND & PATHWAY:
-- Dense premium natural lawn with realistic texture and soft tonal variation
-- Modern stepping stone pathway integrated naturally into the grass
-- Curved or rectangular brick-bordered planting sections
-- Add subtle elevation variation and layered landscaping depth
- 
-DESIGN ELEMENTS:
-- Add modern premium garden styling elements
-- Include decorative planters, garden lanterns, warm bollard lights, wall lights, and subtle uplighting for plants
-- Add one elegant focal feature such as a wooden bench, sitting corner, planter island, or deck area
-- Enhance pergola areas with climbing vines or hanging plants
- 
-LIGHTING:
-${lightingCondition}
-Warm premium ambient lighting with realistic shadows and architectural photography aesthetics.
-Use soft golden-hour tones or elegant evening garden illumination.
- 
-STYLE:
-Ultra realistic, lush immersive landscaping, premium rooftop garden, vibrant flowers, luxury outdoor living atmosphere, professionally designed garden composition, realistic textures, architectural photography quality.`
-
+Keep walls, floor, windows, camera angle. Fill empty corners and unused floor.
+Dense planters, trailing plants, a few flowering plants. Add warm floor lamps or plant uplights.
+${plantList ? `Plants: ${plantList}.` : ''}
+Photorealistic, ${lightingCondition}.`;
 }
 
 
@@ -1624,19 +1772,15 @@ export async function callInpainting(
   const rawImageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
   // const rawMaskBase64 = maskBase64.replace(/^data:image\/\w+;base64,/, '');
 
-  // Anchor prompt — tells model to PRESERVE the scene, only ADD plants
-  const anchoredPrompt = `
-  Photorealistic. Preserve all existing structures, walls, floor, railings, architecture exactly.
-  Only add: potted plants, flowering plants, green foliage, small garden pots placed naturally 
-  in the masked region. Same lighting, same perspective, same camera angle as original photo.
-  Do not alter anything outside the masked area.
-  ${prompt}
-`.trim();
+  // Style-first prompt: Flux weights earlier tokens more. Do not override with a generic plant-only look.
+  const anchoredPrompt = `${prompt}
+
+Photorealistic garden makeover of the original photo. Keep the same camera. Add dense plants, flowers, and visible warm garden lights.`.trim();
 
   const negativePrompt = `
-    completely new scene, different room, different location, changed architecture,
-    distorted perspective, different layout, unrealistic geometry, cartoon, painting,
-    low quality, blurry, watermark, text, extra limbs
+    empty lawn, sparse plants, few plants, identical white pots in a row, only pots, no lights,
+    unlit garden, barren fence, two parallel paver strips, minimal empty space,
+    bare concrete, plastic turf, cgi, cartoon, new building, different camera
   `.trim();
 
   const submitResponse = await fetch(ENDPOINT, {
@@ -1651,7 +1795,7 @@ export async function callInpainting(
       prompt: anchoredPrompt,
       negative_prompt: negativePrompt,
       num_inference_steps: 40,
-      guidance_scale: 15,   // ← lowered: lets model respect original image more
+      guidance_scale: 8.5,
       // strength: 0.75,
       num_images: 1,
       output_format: 'jpeg',

@@ -67,6 +67,10 @@ export const MESSAGES = {
   CONVERSATION_FAILED: "Plant conversation failed",
   NO_ANSWER_RECEIVED:
     "No answer received from the plant identification service",
+  GARDEN_CHAT_REPLY: "Gardening reply generated successfully",
+  GARDEN_CHAT_NOT_RELATED:
+    "This chat is not gardening related. Please ask a plant or garden question.",
+  GARDEN_CHAT_HISTORY: "Garden chat history fetched successfully",
 
   //#region Password Messages
   PASSWORD_RESET_SENT: "Password reset email sent successfully",
