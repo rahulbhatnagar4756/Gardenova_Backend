@@ -28,6 +28,7 @@ const BASE_URL = (process.env.APPDEV_URL || "http://localhost:3000").replace(
   /\/$/,
   ""
 );
+const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const IMAGE_ONLY_PROMPT =
   "Please analyze this plant or garden photo and help me.";
 
@@ -55,12 +56,13 @@ export interface GardenChatReplyResult {
  * Parses a base64 image string or data URI into a buffer and mime type.
  *
  * @param imageBase64 - Raw base64 or data URI
- * @returns Image buffer and mime type
+ * @returns Image buffer, mime type, extension, and data URI
  */
 function parseBase64Image(imageBase64: string): {
   buffer: Buffer;
   mime: string;
   ext: string;
+  dataUri: string;
 } {
   const matches = imageBase64.match(/^data:(.+);base64,(.+)$/);
   const mime = matches?.[1] ?? "image/jpeg";
@@ -71,38 +73,62 @@ function parseBase64Image(imageBase64: string): {
     : mime.includes("webp")
       ? "webp"
       : "jpeg";
-  return { buffer, mime, ext };
+  const dataUri = matches
+    ? imageBase64
+    : `data:${mime};base64,${b64}`;
+  return { buffer, mime, ext, dataUri };
 }
 
 /**
  * Saves an uploaded chat image to local storage.
+ * Returns null when disk write fails so chat can still continue.
  *
  * @param imageBase64 - Raw base64 or data URI
- * @returns Relative upload path
+ * @returns Relative upload path or null
  */
-async function saveGardenChatImage(imageBase64: string): Promise<string> {
-  const { buffer, ext } = parseBase64Image(imageBase64);
-  const fileName = `${randomUUID()}.${ext}`;
-  return uploadBufferLocal(buffer, fileName, "garden-chat");
+async function saveGardenChatImage(imageBase64: string): Promise<string | null> {
+  try {
+    const { buffer, ext } = parseBase64Image(imageBase64);
+    if (!buffer.length) {
+      return null;
+    }
+
+    const gardenChatDir = path.join(UPLOAD_DIR, "garden-chat");
+    await fs.mkdir(gardenChatDir, { recursive: true });
+
+    const fileName = `${randomUUID()}.${ext}`;
+    const relativePath = await uploadBufferLocal(buffer, fileName, "garden-chat");
+    const fullPath = path.join(UPLOAD_DIR, relativePath);
+    await fs.access(fullPath);
+    return relativePath;
+  } catch (error) {
+    console.error("[garden-chat] Failed to save image to disk:", error);
+    return null;
+  }
 }
 
 /**
- * Builds a data URI for a stored chat image.
+ * Builds a data URI for a stored chat image when the file exists.
  *
  * @param relativePath - Path under uploads/
- * @returns Data URI for vision models
+ * @returns Data URI or null when the file is missing
  */
-async function imageUrlToDataUri(relativePath: string): Promise<string> {
-  const fullPath = path.join(process.cwd(), "uploads", relativePath);
-  const buffer = await fs.readFile(fullPath);
-  const ext = path.extname(relativePath).slice(1).toLowerCase();
-  const mime =
-    ext === "png"
-      ? "image/png"
-      : ext === "webp"
-        ? "image/webp"
-        : "image/jpeg";
-  return `data:${mime};base64,${buffer.toString("base64")}`;
+async function imageUrlToDataUri(relativePath: string): Promise<string | null> {
+  try {
+    const fullPath = path.join(UPLOAD_DIR, relativePath);
+    const buffer = await fs.readFile(fullPath);
+    const ext = path.extname(relativePath).slice(1).toLowerCase();
+    const mime =
+      ext === "png"
+        ? "image/png"
+        : ext === "webp"
+          ? "image/webp"
+          : "image/jpeg";
+    return `data:${mime};base64,${buffer.toString("base64")}`;
+  } catch {
+    // console.warn(`[garden-chat] Missing image file: ${relativePath}`);
+    return null;
+  }
 }
 
 /**
@@ -164,26 +190,34 @@ function toQuestionAnswerTurns(messages: GardenChatMessage[]): GardenChatTurn[] 
 
 /**
  * Turns stored messages into OpenAI chat history (last 10), including images.
+ * Prefers in-memory data URIs for the current request so disk misses cannot break chat.
  *
  * @param messages - Chronological stored messages
+ * @param inlineImages - Optional map of relative path -> data URI for the current turn
  * @returns LLM message list
  */
 async function toLlmHistory(
-  messages: GardenChatMessage[]
+  messages: GardenChatMessage[],
+  inlineImages: Record<string, string> = {}
 ): Promise<ChatCompletionMessageParam[]> {
   const history: ChatCompletionMessageParam[] = [];
 
   for (const item of messages) {
     if (item.role === "user" && item.imageUrl) {
-      const dataUri = await imageUrlToDataUri(item.imageUrl);
-      history.push({
-        role: "user",
-        content: [
-          { type: "text", text: item.content },
-          { type: "image_url", image_url: { url: dataUri } },
-        ],
-      });
-      continue;
+      const dataUri =
+        inlineImages[item.imageUrl] ??
+        (await imageUrlToDataUri(item.imageUrl));
+
+      if (dataUri) {
+        history.push({
+          role: "user",
+          content: [
+            { type: "text", text: item.content },
+            { type: "image_url", image_url: { url: dataUri } },
+          ],
+        });
+        continue;
+      }
     }
 
     history.push({
@@ -199,9 +233,16 @@ async function toLlmHistory(
  * Returns true when at least one user message includes an image.
  *
  * @param messages - Stored messages
+ * @param inlineImages - Optional in-memory images for the current turn
  * @returns Whether vision model should be used
  */
-function historyHasImages(messages: GardenChatMessage[]): boolean {
+function historyHasImages(
+  messages: GardenChatMessage[],
+  inlineImages: Record<string, string> = {}
+): boolean {
+  if (Object.keys(inlineImages).length > 0) {
+    return true;
+  }
   return messages.some((item) => item.role === "user" && Boolean(item.imageUrl));
 }
 
@@ -318,7 +359,19 @@ export async function handleGardenChat(input: {
   }
 
   const storedContent = messageText || IMAGE_ONLY_PROMPT;
-  const imageUrl = imageBase64 ? await saveGardenChatImage(imageBase64) : null;
+  const inlineImages: Record<string, string> = {};
+  let imageUrl: string | null = null;
+
+  if (imageBase64) {
+    const { dataUri } = parseBase64Image(imageBase64);
+    imageUrl = await saveGardenChatImage(imageBase64);
+    // Keep the request image in memory so vision works even if disk read fails.
+    if (imageUrl) {
+      inlineImages[imageUrl] = dataUri;
+    } else {
+      inlineImages["__current__"] = dataUri;
+    }
+  }
 
   const userMessage = await insertGardenChatMessage({
     conversationId,
@@ -333,8 +386,29 @@ export async function handleGardenChat(input: {
     input.userId,
     HISTORY_LIMIT
   );
-  const history = await toLlmHistory(recent);
-  const model = historyHasImages(recent)
+  const history = await toLlmHistory(recent, inlineImages);
+
+  // If disk save failed, still attach the current image to the latest user turn.
+  if (inlineImages["__current__"]) {
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const item = history[index];
+      if (item?.role === "user") {
+        history[index] = {
+          role: "user",
+          content: [
+            { type: "text", text: storedContent },
+            {
+              type: "image_url",
+              image_url: { url: inlineImages["__current__"] },
+            },
+          ],
+        };
+        break;
+      }
+    }
+  }
+
+  const model = historyHasImages(recent, inlineImages)
     ? GARDEN_CHAT_VISION_MODEL
     : GARDEN_CHAT_MODEL;
 
