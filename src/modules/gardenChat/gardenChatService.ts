@@ -6,10 +6,9 @@ import { randomUUID } from "crypto";
 import { MESSAGES } from "../../core/utils/constants";
 import { uploadBufferLocal } from "../landScapeDesign/landScapeDesignRepo";
 import {
-  countGardenChatMessages,
   findLatestConversationId,
   findLatestGardenChatMessages,
-  findGardenChatMessagesPaginated,
+  findAllGardenChatMessages,
   GardenChatMessage,
   insertGardenChatMessage,
 } from "./gardenChatRepository";
@@ -35,15 +34,20 @@ const IMAGE_ONLY_PROMPT =
 export interface GardenChatHistoryItem {
   role: "user" | "assistant";
   content: string;
-  imageUrl?: string | null;
-  createdAt?: string;
+  imageUrl: string | null;
+  createdAt: string;
+}
+
+export interface GardenChatTurn {
+  question: GardenChatHistoryItem;
+  answer: GardenChatHistoryItem | null;
 }
 
 export interface GardenChatReplyResult {
   conversationId: string;
   isGardeningRelated: boolean;
   reply: string;
-  history: GardenChatHistoryItem[];
+  history: GardenChatTurn[];
 }
 
 /**
@@ -117,16 +121,44 @@ function toPublicImageUrl(relativePath: string): string {
 /**
  * Maps stored messages to API history items.
  *
- * @param messages - Chronological stored messages
+ * @param item - Stored message
  * @returns History list for responses
  */
-function toResponseHistory(messages: GardenChatMessage[]): GardenChatHistoryItem[] {
-  return messages.map((item) => ({
+function toHistoryItem(item: GardenChatMessage): GardenChatHistoryItem {
+  return {
     role: item.role,
     content: item.content,
-    ...(item.imageUrl ? { imageUrl: toPublicImageUrl(item.imageUrl) } : {}),
-    ...(item.createdAt ? { createdAt: item.createdAt } : {}),
-  }));
+    imageUrl: item.imageUrl ? toPublicImageUrl(item.imageUrl) : null,
+    createdAt: item.createdAt,
+  };
+}
+
+/**
+ * Groups stored messages into user question + assistant answer turns.
+ *
+ * @param messages - Chronological stored messages
+ * @returns Question/answer pairs
+ */
+function toQuestionAnswerTurns(messages: GardenChatMessage[]): GardenChatTurn[] {
+  const turns: GardenChatTurn[] = [];
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const current = messages[index];
+    if (!current || current.role !== "user") {
+      continue;
+    }
+
+    const next = messages[index + 1];
+    const answer =
+      next?.role === "assistant" ? toHistoryItem(next) : null;
+
+    turns.push({
+      question: toHistoryItem(current),
+      answer,
+    });
+  }
+
+  return turns;
 }
 
 /**
@@ -322,14 +354,14 @@ export async function handleGardenChat(input: {
   const updated = await findLatestGardenChatMessages(
     conversationId,
     input.userId,
-    HISTORY_LIMIT
+    HISTORY_LIMIT * 2
   );
 
   return {
     conversationId,
     isGardeningRelated,
     reply,
-    history: toResponseHistory(updated),
+    history: toQuestionAnswerTurns(updated).slice(-HISTORY_LIMIT),
   };
 }
 
@@ -347,8 +379,8 @@ export interface GardenChatHistoryPagination {
  * @param input.userId - Authenticated user id
  * @param input.conversationId - Optional conversation id
  * @param input.page - Page number (default 1)
- * @param input.limit - Messages per page (default 10)
- * @returns Conversation id, paginated messages, and pagination metadata
+ * @param input.limit - Turns (question+answer pairs) per page (default 10)
+ * @returns Conversation id, paginated Q&A turns, and pagination metadata
  */
 export async function getGardenChatHistory(input: {
   userId: string;
@@ -357,7 +389,7 @@ export async function getGardenChatHistory(input: {
   limit?: number;
 }): Promise<{
   conversationId: string | null;
-  history: GardenChatHistoryItem[];
+  history: GardenChatTurn[];
   pagination: GardenChatHistoryPagination;
 }> {
   const page = input.page ?? 1;
@@ -379,20 +411,15 @@ export async function getGardenChatHistory(input: {
     };
   }
 
-  const totalCount = await countGardenChatMessages(conversationId, input.userId);
+  const messages = await findAllGardenChatMessages(conversationId, input.userId);
+  const turns = toQuestionAnswerTurns(messages);
+  const totalCount = turns.length;
   const totalPages = totalCount === 0 ? 0 : Math.ceil(totalCount / limit);
   const offset = (page - 1) * limit;
 
-  const messages = await findGardenChatMessagesPaginated(
-    conversationId,
-    input.userId,
-    limit,
-    offset
-  );
-
   return {
     conversationId,
-    history: toResponseHistory(messages),
+    history: turns.slice(offset, offset + limit),
     pagination: {
       currentPage: page,
       totalPages,

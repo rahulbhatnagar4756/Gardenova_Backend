@@ -16,7 +16,7 @@ const router = Router();
  *     summary: Chat with the gardening bot
  *     description: >
  *       Verifies the message is gardening related first.
- *       Accepts text only, image only (image_base64), or both.
+ *       Accepts text only, image only (`image_base64`), or both together as JSON.
  *       If it is gardening related, answers using the last 10 messages as conversation history.
  *       If it is not, returns a refusal and does not give a gardening answer.
  *     tags: [Garden Chat]
@@ -34,7 +34,7 @@ const router = Router();
  *                 example: My tomato leaves are turning yellow. What should I do?
  *               image_base64:
  *                 type: string
- *                 description: Base64 encoded image or data URI. At least one of message or image_base64 is required.
+ *                 description: Base64 encoded image or data URI. Use this, message, or both.
  *               conversationId:
  *                 type: string
  *                 format: uuid
@@ -54,7 +54,7 @@ router.post("/", auth, validateRequest(gardenChatMessageValidation), sendGardenC
  * /api/v1/garden-chat/history:
  *   get:
  *     summary: Get garden chat message history
- *     description: Returns paginated messages for the current or selected conversation.
+ *     description: Returns paginated question-and-answer turns for the current or selected conversation.
  *     tags: [Garden Chat]
  *     security:
  *       - bearerAuth: []

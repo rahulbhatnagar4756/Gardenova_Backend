@@ -5,7 +5,7 @@ import Joi, { ObjectSchema } from "joi";
  * Accepts text only, image only, or both.
  */
 export const gardenChatMessageValidation: ObjectSchema = Joi.object({
-  message: Joi.string().trim().max(2000).optional(),
+  message: Joi.string().trim().max(2000).allow("").optional(),
   image_base64: Joi.string().trim().min(1).optional(),
   conversationId: Joi.string().uuid().optional(),
 }).custom((value, helpers) => {

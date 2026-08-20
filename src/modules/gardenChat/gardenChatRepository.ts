@@ -237,6 +237,40 @@ export async function findGardenChatMessagesPaginated(
 }
 
 /**
+ * Returns every message in a conversation in chronological order.
+ *
+ * @param conversationId - Conversation thread id
+ * @param userId - Owner user id
+ * @returns Chronological message list
+ */
+export async function findAllGardenChatMessages(
+  conversationId: string,
+  userId: string
+): Promise<GardenChatMessage[]> {
+  await ensureGardenChatTable();
+  const db = getDB();
+  const result = await db.query<{
+    id: string;
+    conversation_id: string;
+    user_id: string;
+    role: GardenChatRole;
+    content: string;
+    image_url: string | null;
+    is_gardening: boolean | null;
+    created_at: Date;
+  }>(
+    `SELECT id, conversation_id, user_id, role, content, image_url, is_gardening, created_at
+       FROM garden_chat_messages
+      WHERE conversation_id = $1
+        AND user_id = $2
+      ORDER BY created_at ASC, id ASC`,
+    [conversationId, userId]
+  );
+
+  return result.rows.map(mapRow);
+}
+
+/**
  * Maps a database row to the API message shape.
  *
  * @param row - Raw SQL row
