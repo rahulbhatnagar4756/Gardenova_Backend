@@ -17,8 +17,8 @@ const router = Router();
  *     description: >
  *       Verifies the message is gardening related first.
  *       Accepts text only, image only (`image_base64`), or both together as JSON.
- *       If it is gardening related, answers using the last 10 messages as conversation history.
- *       If it is not, returns a refusal and does not give a gardening answer.
+ *       If it is gardening related, answers using the last 10 messages as conversation context.
+ *       The response includes only the current question and assistant answer.
  *     tags: [Garden Chat]
  *     security:
  *       - bearerAuth: []

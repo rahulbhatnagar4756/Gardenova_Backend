@@ -47,7 +47,8 @@ export interface GardenChatReplyResult {
   conversationId: string;
   isGardeningRelated: boolean;
   reply: string;
-  history: GardenChatTurn[];
+  question: GardenChatHistoryItem;
+  answer: GardenChatHistoryItem;
 }
 
 /**
@@ -319,7 +320,7 @@ export async function handleGardenChat(input: {
   const storedContent = messageText || IMAGE_ONLY_PROMPT;
   const imageUrl = imageBase64 ? await saveGardenChatImage(imageBase64) : null;
 
-  await insertGardenChatMessage({
+  const userMessage = await insertGardenChatMessage({
     conversationId,
     userId: input.userId,
     role: "user",
@@ -343,7 +344,7 @@ export async function handleGardenChat(input: {
     ? await answerGardeningQuestion(history, model)
     : NOT_RELATED_REPLY;
 
-  await insertGardenChatMessage({
+  const assistantMessage = await insertGardenChatMessage({
     conversationId,
     userId: input.userId,
     role: "assistant",
@@ -351,17 +352,12 @@ export async function handleGardenChat(input: {
     isGardening: isGardeningRelated,
   });
 
-  const updated = await findLatestGardenChatMessages(
-    conversationId,
-    input.userId,
-    HISTORY_LIMIT * 2
-  );
-
   return {
     conversationId,
     isGardeningRelated,
     reply,
-    history: toQuestionAnswerTurns(updated).slice(-HISTORY_LIMIT),
+    question: toHistoryItem(userMessage),
+    answer: toHistoryItem(assistantMessage),
   };
 }
 
