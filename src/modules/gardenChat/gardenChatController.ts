@@ -5,7 +5,23 @@ import {
   errorResponse,
   successResponse,
 } from "../../core/utils/responseFormatter";
+import { isPaidUser } from "../../core/utils/planLimits";
 import { getGardenChatHistory, handleGardenChat } from "./gardenChatService";
+
+/**
+ * Sends a paid-only rejection for free users.
+ *
+ * @param res - Express response
+ * @returns void
+ */
+function rejectFreeUser(res: Response): void {
+  res.status(HTTP_STATUS.FORBIDDEN).json(
+    errorResponse(MESSAGES.GARDEN_CHAT_PAID_ONLY, {
+      requiresUpgrade: true,
+      isPaid: false,
+    })
+  );
+}
 
 /**
  * POST /api/v1/garden-chat
@@ -25,6 +41,12 @@ export const sendGardenChat = async (
     const userPayload = req.user as { userId?: string } | undefined;
     if (!userPayload?.userId) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
+    }
+
+    const paid = await isPaidUser(userPayload.userId);
+    if (!paid) {
+      rejectFreeUser(res);
       return;
     }
 
@@ -71,6 +93,12 @@ export const listGardenChatHistory = async (
     const userPayload = req.user as { userId?: string } | undefined;
     if (!userPayload?.userId) {
       res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
+    }
+
+    const paid = await isPaidUser(userPayload.userId);
+    if (!paid) {
+      rejectFreeUser(res);
       return;
     }
 

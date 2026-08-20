@@ -71,6 +71,8 @@ export const MESSAGES = {
   GARDEN_CHAT_NOT_RELATED:
     "This chat is not gardening related. Please ask a plant or garden question.",
   GARDEN_CHAT_HISTORY: "Garden chat history fetched successfully",
+  GARDEN_CHAT_PAID_ONLY:
+    "Garden chat is available for paid users only. Please upgrade your plan to continue.",
 
   //#region Password Messages
   PASSWORD_RESET_SENT: "Password reset email sent successfully",

@@ -68,6 +68,27 @@ const UNLIMITED_USER_IDS = new Set<string>([
 ]);
 
 /**
+ * Returns true when the user has a paid (non-free) active subscription.
+ *
+ * @param userId - Authenticated user id
+ * @returns Whether the user may access paid-only features
+ */
+export const isPaidUser = async (userId: string): Promise<boolean> => {
+  if (UNLIMITED_USER_IDS.has(userId)) {
+    return true;
+  }
+
+  const plan = await getUserActivePlan(userId);
+  if (!plan) {
+    return false;
+  }
+
+  const code = plan.code?.toLowerCase() ?? "free";
+  const tier = plan.tier?.toLowerCase() ?? "free";
+  return code !== "free" && tier !== "free";
+};
+
+/**
  * Checks whether a user has remaining usage for a feature and, if allowed,
  * atomically consumes one usage from their monthly quota.
  *

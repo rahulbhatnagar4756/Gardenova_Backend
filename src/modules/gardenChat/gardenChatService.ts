@@ -482,7 +482,8 @@ export async function getGardenChatHistory(input: {
   }
 
   const messages = await findAllGardenChatMessages(conversationId, input.userId);
-  const turns = toQuestionAnswerTurns(messages);
+  // Newest question/answer turns first
+  const turns = toQuestionAnswerTurns(messages).reverse();
   const totalCount = turns.length;
   const totalPages = totalCount === 0 ? 0 : Math.ceil(totalCount / limit);
   const offset = (page - 1) * limit;
