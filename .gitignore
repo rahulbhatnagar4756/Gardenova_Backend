@@ -1,8 +1,16 @@
 ﻿node_modules
-uploads
+
+# Keep empty upload folders in git; ignore all uploaded files
+uploads/*
+!uploads/.gitkeep
+!uploads/garden-chat/
+uploads/garden-chat/*
+!uploads/garden-chat/.gitkeep
+
 scan_images
 /dist
 .env
+
 # Firebase / Google keys — never commit
 src/core/config/*.json
 src/core/utils/serviceAccount.json
