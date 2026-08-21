@@ -245,9 +245,9 @@ export const processDesignWithLocation = async (data: {
   };
 };
 
-export interface DesignResultWithSurvey extends DesignResult {
+export type DesignResultWithSurvey = Omit<DesignResult, "questionsAndAnswers"> & {
   recommendedPlants: NativePlantsResult;
-}
+};
 
 /**
  * Full pipeline that chooses plants from onboarding survey answers, not GPS.
@@ -323,7 +323,6 @@ export const processDesignWithSurvey = async (data: {
     description,
     detectedSpace,
     recommendedPlants,
-    questionsAndAnswers: toQuestionsAndAnswers(surveyAnswers),
     style: plan.style,
   };
 };
