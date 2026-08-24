@@ -25,6 +25,7 @@ import reminderRoutes from "./modules/reminder/reminder.Routes";
 // import professionalRoutes from "./modules/professional/professionalRoutes";
 import landScapeDesignRoutes from "./modules/landScapeDesign/landScapeDesignRoutes";
 import gardenChatRoutes from "./modules/gardenChat/gardenChatRoutes";
+import gardenInsightsRoutes from "./modules/gardenInsights/gardenInsightsRoutes";
 import soilRoutes from "./modules/soil/soilRoutes";
 import { connectDB } from "./core/config/db";
 import cron from "node-cron";
@@ -126,6 +127,7 @@ app.use("/api/v1/allplants", myPlantRoutes);
 //landscape design routes
 app.use("/api/v1/landscape", landScapeDesignRoutes);
 app.use("/api/v1/garden-chat", gardenChatRoutes);
+app.use("/api/v1/garden-insights", gardenInsightsRoutes);
 app.use("/api/v1/soil", soilRoutes);
 // Reminder Routes
 app.use("/api/v1/reminders",reminderRoutes);

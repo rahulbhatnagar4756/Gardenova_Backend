@@ -73,6 +73,7 @@ export const MESSAGES = {
   GARDEN_CHAT_HISTORY: "Garden chat history fetched successfully",
   GARDEN_CHAT_PAID_ONLY:
     "Garden chat is available for paid users only. Please upgrade your plan to continue.",
+  GARDEN_INSIGHTS_FETCHED: "Garden insight scores fetched successfully",
 
   //#region Password Messages
   PASSWORD_RESET_SENT: "Password reset email sent successfully",

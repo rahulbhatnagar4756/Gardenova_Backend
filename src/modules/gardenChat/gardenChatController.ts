@@ -117,6 +117,18 @@ export const listGardenChatHistory = async (
       ...(page !== undefined && Number.isFinite(page) ? { page } : {}),
       ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
     });
+    const  suggestionsQustion =[
+      "Why are my plant’s leaves turning yellow?",
+      "Which plants are best for beginners?",
+      "Which plants are suitable for balconies?"
+      ];
+
+    if(result.history.length === 0) {
+      res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse( {suggestionsQustion}, MESSAGES.GARDEN_CHAT_HISTORY));
+      return;
+    }
 
     res
       .status(HTTP_STATUS.OK)
