@@ -281,6 +281,7 @@ router.delete("/plants/:id", auth, deletePlantController);
  * /api/v1/admin/plants/identify:
  *   post:
  *     summary: Identify plant species and health in one unified request
+ *     description: Diagnoses the plant and saves the full result to the user's scan history. The response includes `scanId` for later lookup.
  *     tags: [Plant Identification]
  *     security:
  *       - bearerAuth: []

@@ -360,16 +360,36 @@ export const diagnosePlantController = async (
       Array.isArray(req.body?.images) && typeof req.body.images[0] === "string"
         ? (req.body.images[0] as string)
         : undefined;
-    const logPayload: { userId: string; diagnosis: typeof apiResponse; image?: string } = {
+    const latitude =
+      typeof req.body?.latitude === "number" ? req.body.latitude : undefined;
+    const longitude =
+      typeof req.body?.longitude === "number" ? req.body.longitude : undefined;
+
+    const logPayload: {
+      userId: string;
+      diagnosis: typeof apiResponse;
+      image?: string;
+      latitude?: number;
+      longitude?: number;
+    } = {
       userId: user.id!,
       diagnosis: apiResponse,
     };
     if (firstImage) logPayload.image = firstImage;
-    void logDiagnosisScan(logPayload);
+    if (latitude !== undefined) logPayload.latitude = latitude;
+    if (longitude !== undefined) logPayload.longitude = longitude;
 
-    res
-      .status(HTTP_STATUS.OK)
-      .json(successResponse(apiResponse, "Plant diagnosed successfully"));
+    const scanId = await logDiagnosisScan(logPayload);
+
+    res.status(HTTP_STATUS.OK).json(
+      successResponse(
+        {
+          scanId,
+          ...apiResponse,
+        },
+        "Plant diagnosed successfully"
+      )
+    );
   } catch (error: unknown) {
     // console.log("Error in diagnosePlantController:", error);
     if (error instanceof ZodError) {

@@ -14,6 +14,8 @@ export interface GardenInsightSlice {
     | "growthPotential";
   label: string;
   percent: number;
+  matchPercent: number;
+  matchedCount: number;
 }
 
 export interface GardenInsightsResult {
@@ -24,11 +26,11 @@ export interface GardenInsightsResult {
 }
 
 const ZERO_CHART: GardenInsightSlice[] = [
-  { key: "lightFit", label: "Light Fit", percent: 0 },
-  { key: "waterConsistency", label: "Water Consistency", percent: 0 },
-  { key: "experienceReadiness", label: "Experience Readiness", percent: 0 },
-  { key: "spaceUtilization", label: "Space Utilization", percent: 0 },
-  { key: "growthPotential", label: "Growth Potential", percent: 0 },
+  { key: "lightFit", label: "Light Fit", percent: 0, matchPercent: 0, matchedCount: 0 },
+  { key: "waterConsistency", label: "Water Consistency", percent: 0, matchPercent: 0, matchedCount: 0 },
+  { key: "experienceReadiness", label: "Experience Readiness", percent: 0, matchPercent: 0, matchedCount: 0 },
+  { key: "spaceUtilization", label: "Space Utilization", percent: 0, matchPercent: 0, matchedCount: 0 },
+  { key: "growthPotential", label: "Growth Potential", percent: 0, matchPercent: 0, matchedCount: 0 },
 ];
 
 const QUESTION_ORDER = {
@@ -113,254 +115,347 @@ function toPiePercents(rawScores: number[]): number[] {
   return floors;
 }
 
+type LightLevel = "full" | "partial" | "shade" | "artificial" | null;
+type WaterLevel = "frequent" | "average" | "minimum" | null;
+type CareLevel = "low" | "medium" | "high" | null;
+type ExperienceLevel = "beginner" | "casual" | "experienced" | null;
+
 /**
- * Scores how well a plant matches the user's light conditions (0–1).
+ * Normalizes catalog text so JSON arrays and snake_case still match.
+ *
+ * @param value - Raw catalog field
+ * @returns Lowercase plain text
+ */
+function normalizeCatalogText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[{}"[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Reads the user's sunlight class from the onboarding answer.
+ *
+ * @param answer - Sunlight answer
+ * @returns Light class or null
+ */
+function userLightLevel(answer: string): LightLevel {
+  if (!answer) return null;
+  if (hasAny(answer, ["artificial", "no natural", "grow light"])) return "artificial";
+  if (hasAny(answer, ["full", "6+", "direct"])) return "full";
+  if (hasAny(answer, ["partial", "3", "some shade"])) return "partial";
+  if (hasAny(answer, ["shade", "less than 3", "mostly", "low light"])) return "shade";
+  return null;
+}
+
+/**
+ * Reads sunlight classes listed on the plant catalog record.
+ *
+ * @param sunlight - Catalog sunlight text
+ * @returns Light classes the plant can tolerate
+ */
+function plantLightLevels(sunlight: string): LightLevel[] {
+  const value = normalizeCatalogText(sunlight);
+  const levels: LightLevel[] = [];
+  if (value.includes("full sun") || value.includes("fullsun")) levels.push("full");
+  if (value.includes("part") || value.includes("filtered") || value.includes("dappled")) {
+    levels.push("partial");
+  }
+  if (value.includes("shade") || value.includes("low light")) levels.push("shade");
+  return [...new Set(levels)];
+}
+
+/**
+ * Distance between two light classes, used for partial credit.
+ *
+ * @param userLevel - User light class
+ * @param plantLevel - Plant light class
+ * @returns 0–2
+ */
+function lightDistance(userLevel: LightLevel, plantLevel: LightLevel): number {
+  const order: LightLevel[] = ["shade", "partial", "full"];
+  const userIndex = order.indexOf(userLevel);
+  const plantIndex = order.indexOf(plantLevel);
+  if (userIndex < 0 || plantIndex < 0) return 2;
+  return Math.abs(userIndex - plantIndex);
+}
+
+/**
+ * Reads the user's watering habit from the onboarding answer.
+ *
+ * @param answer - Watering answer
+ * @returns Water class or null
+ */
+function userWaterLevel(answer: string): WaterLevel {
+  if (!answer) return null;
+  if (hasAny(answer, ["daily"])) return "frequent";
+  if (hasAny(answer, ["2", "3", "few", "twice"])) return "average";
+  if (hasAny(answer, ["week", "weekend", "occasional"])) return "minimum";
+  if (hasAny(answer, ["rare", "forget", "travel"])) return "minimum";
+  return null;
+}
+
+/**
+ * Reads the plant catalog watering class.
+ *
+ * @param watering - Catalog watering text
+ * @param droughtTolerant - Drought-tolerant flag
+ * @returns Water class or null
+ */
+function plantWaterLevel(
+  watering: string,
+  droughtTolerant: boolean | null
+): WaterLevel {
+  const value = normalizeCatalogText(watering);
+  if (value.includes("frequent") || value.includes("often") || value.includes("regular")) {
+    return "frequent";
+  }
+  if (value.includes("average") || value.includes("moderate") || value.includes("medium")) {
+    return "average";
+  }
+  if (value.includes("minimum") || value.includes("none") || value.includes("low") || droughtTolerant === true) {
+    return "minimum";
+  }
+  return droughtTolerant === false ? "average" : null;
+}
+
+/**
+ * Reads the plant care difficulty from catalog fields.
+ *
+ * @param plant - Plant catalog row
+ * @returns Care class or null
+ */
+function plantCareLevel(plant: UserPlantInsightRow): CareLevel {
+  const care = normalizeCatalogText(`${plant.careLevel ?? ""} ${plant.maintenance ?? ""}`);
+  if (hasAny(care, ["high", "hard", "difficult", "advanced"])) return "high";
+  if (hasAny(care, ["medium", "moderate", "average"])) return "medium";
+  if (hasAny(care, ["low", "easy", "beginner"])) return "low";
+  return null;
+}
+
+/**
+ * Reads the user's experience class from the onboarding answer.
+ *
+ * @param answer - Experience answer
+ * @returns Experience class or null
+ */
+function userExperienceLevel(answer: string): ExperienceLevel {
+  if (!answer) return null;
+  if (hasAny(answer, ["beginner", "never", "total"])) return "beginner";
+  if (hasAny(answer, ["casual", "mixed", "tried"])) return "casual";
+  if (hasAny(answer, ["experience", "expert", "advanced"])) return "experienced";
+  return "casual";
+}
+
+/**
+ * Light score with adjacent-class credit. Missing catalog light still gets a modest score.
  *
  * @param sunlightAnswer - Onboarding sunlight answer
- * @param plant - Plant catalog row
- * @returns Fit score
+ * @param plant - Plant on the user's account
+ * @returns 0–1
  */
 function scoreLightFit(
   sunlightAnswer: string,
   plant: UserPlantInsightRow
 ): number {
-  const sunlight = (plant.sunlight ?? "").toLowerCase();
-  const indoor = plant.indoor === true;
+  const userLevel = userLightLevel(sunlightAnswer);
+  if (!userLevel) return 0.45;
 
-  if (!sunlightAnswer) {
-    return indoor || sunlight.length > 0 ? 0.45 : 0.2;
+  if (userLevel === "artificial") {
+    if (plant.indoor === true) return 1;
+    const levels = plantLightLevels(plant.sunlight ?? "");
+    if (levels.includes("shade") || levels.includes("partial")) return 0.65;
+    return 0.35;
   }
 
-  if (hasAny(sunlightAnswer, ["artificial", "no natural", "grow light"])) {
-    return indoor ? 1 : sunlight.includes("shade") ? 0.55 : 0.2;
+  const plantLevels = plantLightLevels(plant.sunlight ?? "");
+  if (plantLevels.length === 0) {
+    return plant.indoor === true && userLevel !== "full" ? 0.55 : 0.4;
   }
 
-  if (hasAny(sunlightAnswer, ["full", "6+", "direct"])) {
-    if (sunlight.includes("full sun")) return 1;
-    if (sunlight.includes("part")) return 0.5;
-    if (sunlight.includes("shade")) return 0.15;
-    return 0.3;
-  }
-
-  if (hasAny(sunlightAnswer, ["partial", "3", "some shade"])) {
-    if (sunlight.includes("part")) return 1;
-    if (sunlight.includes("full sun") || sunlight.includes("filtered")) return 0.6;
-    if (sunlight.includes("shade")) return 0.45;
-    return 0.4;
-  }
-
-  if (hasAny(sunlightAnswer, ["shade", "less than 3", "mostly", "low light"])) {
-    if (sunlight.includes("full shade")) return 1;
-    if (sunlight.includes("shade")) return 0.8;
-    if (sunlight.includes("part")) return 0.5;
-    return 0.2;
-  }
-
-  return indoor ? 0.5 : 0.4;
+  const best = Math.min(...plantLevels.map((level) => lightDistance(userLevel, level)));
+  if (best === 0) return 1;
+  if (best === 1) return 0.65;
+  return 0.25;
 }
 
 /**
- * Scores watering habit vs plant needs, plus reminder consistency (0–1).
+ * Water score from plant watering needs vs user habit.
+ * Reminders add a small bonus; they are not required.
  *
  * @param wateringAnswer - Onboarding watering answer
- * @param plant - Plant catalog and reminder row
- * @returns Fit score
+ * @param plant - Plant on the user's account
+ * @returns 0–1
  */
 function scoreWaterConsistency(
   wateringAnswer: string,
   plant: UserPlantInsightRow
 ): number {
-  const watering = (plant.watering ?? "").toLowerCase();
-  const drought = plant.droughtTolerant === true;
+  const userLevel = userWaterLevel(wateringAnswer);
+  const plantLevel = plantWaterLevel(plant.watering ?? "", plant.droughtTolerant);
 
-  let needMatch = 0.4;
-  if (hasAny(wateringAnswer, ["daily"])) {
-    if (watering.includes("frequent")) needMatch = 1;
-    else if (watering.includes("average")) needMatch = 0.5;
-    else if (watering.includes("minimum") || watering.includes("none")) needMatch = 0.1;
-    else needMatch = 0.35;
-  } else if (hasAny(wateringAnswer, ["2", "3", "few", "twice"])) {
-    if (watering.includes("average")) needMatch = 1;
-    else if (watering.includes("frequent")) needMatch = 0.7;
-    else if (watering.includes("minimum")) needMatch = 0.4;
-    else needMatch = 0.5;
-  } else if (hasAny(wateringAnswer, ["week", "weekend", "occasional"])) {
-    if (drought && watering.includes("minimum")) needMatch = 1;
-    else if (watering.includes("minimum")) needMatch = 0.8;
-    else if (drought) needMatch = 0.7;
-    else if (watering.includes("average")) needMatch = 0.4;
-    else needMatch = 0.25;
-  } else if (hasAny(wateringAnswer, ["rare", "forget", "travel"])) {
-    if (drought && watering.includes("minimum")) needMatch = 1;
-    else if (drought || watering.includes("minimum") || watering.includes("none")) {
-      needMatch = 0.85;
-    } else if (watering.includes("average")) needMatch = 0.2;
-    else needMatch = 0.1;
+  let needMatch = 0.45;
+  if (userLevel && plantLevel) {
+    if (userLevel === plantLevel) needMatch = 0.85;
+    else if (
+      (userLevel === "frequent" && plantLevel === "average") ||
+      (userLevel === "average" && plantLevel !== "minimum") ||
+      (userLevel === "minimum" && plantLevel === "average")
+    ) {
+      needMatch = 0.55;
+    } else {
+      needMatch = 0.25;
+    }
+  } else if (plantLevel) {
+    needMatch = 0.5;
   }
 
-  let habit = plant.wateringNotificationEnabled ? 0.85 : 0.45;
-  const now = Date.now();
-
-  if (plant.nextWateredAt) {
-    const next = new Date(plant.nextWateredAt).getTime();
-    if (!Number.isNaN(next) && next < now) {
-      habit *= 0.55;
+  if (plant.wateringNotificationEnabled) {
+    needMatch = Math.min(1, needMatch + 0.15);
+    if (plant.nextWateredAt) {
+      const next = new Date(plant.nextWateredAt).getTime();
+      if (!Number.isNaN(next) && next < Date.now()) {
+        needMatch = Math.max(0.2, needMatch - 0.2);
+      }
     }
   }
 
-  if (plant.lastWateredAt) {
-    const last = new Date(plant.lastWateredAt).getTime();
-    const daysSince = (now - last) / (1000 * 60 * 60 * 24);
-    const expectedDays = plant.wateringReminderFrequency || 7;
-    if (daysSince <= expectedDays) {
-      habit = Math.max(habit, 0.9);
-    } else if (daysSince > expectedDays * 2) {
-      habit = Math.min(habit, 0.35);
-    }
-  }
-
-  return needMatch * 0.65 + habit * 0.35;
+  return needMatch;
 }
 
 /**
- * Scores whether plant difficulty matches the user's experience (0–1).
+ * Experience score: beginners prefer easy plants, but harder plants still get credit.
  *
  * @param experienceAnswer - Onboarding experience answer
- * @param plant - Plant catalog row
- * @returns Fit score
+ * @param plant - Plant on the user's account
+ * @returns 0–1
  */
 function scoreExperienceReadiness(
   experienceAnswer: string,
   plant: UserPlantInsightRow
 ): number {
-  const care = `${plant.careLevel ?? ""} ${plant.maintenance ?? ""}`.toLowerCase();
-  const isLow = care.includes("low");
-  const isMedium = care.includes("medium") || care.includes("moderate");
-  const isHigh = care.includes("high");
+  const experience = userExperienceLevel(experienceAnswer) ?? "casual";
+  const care = plantCareLevel(plant) ?? "medium";
 
-  if (!experienceAnswer) {
-    if (isLow) return 0.7;
-    if (isMedium) return 0.5;
-    return 0.35;
-  }
-
-  if (hasAny(experienceAnswer, ["beginner", "never", "total"])) {
-    if (isLow) return 0.9;
-    if (isMedium) return 0.4;
-    if (isHigh) return 0.12;
+  if (experience === "beginner") {
+    if (care === "low") return 1;
+    if (care === "medium") return 0.6;
     return 0.3;
   }
 
-  if (hasAny(experienceAnswer, ["casual", "mixed", "tried"])) {
-    if (isLow || isMedium) return 1;
-    if (isHigh) return 0.55;
-    return 0.7;
+  if (experience === "casual") {
+    if (care === "high") return 0.55;
+    return 0.9;
   }
 
-  return 0.9;
+  return 0.95;
 }
 
 /**
- * Scores whether the plant form fits the user's growing space (0–1).
+ * Space score with partial credit when a plant is a reasonable fit.
  *
  * @param spaceAnswer - Onboarding space answer
- * @param plant - Plant catalog row
- * @returns Fit score
+ * @param plant - Plant on the user's account
+ * @returns 0–1
  */
 function scoreSpaceUtilization(
   spaceAnswer: string,
   plant: UserPlantInsightRow
 ): number {
-  const type = (plant.type ?? "").toLowerCase();
+  const type = normalizeCatalogText(plant.type ?? "");
   const indoor = plant.indoor === true;
   const maxSize = Number.parseFloat(plant.dimensionMaxValue ?? "");
-  const isCompact = Number.isFinite(maxSize) && maxSize > 0 && maxSize <= 120;
+  const isCompact = Number.isFinite(maxSize) && maxSize > 0 && maxSize <= 150;
+  const isTree = type.includes("tree");
 
-  if (!spaceAnswer) {
-    return indoor || type.length > 0 ? 0.45 : 0.25;
-  }
+  if (!spaceAnswer) return indoor ? 0.5 : 0.45;
 
   if (hasAny(spaceAnswer, ["indoor", "window", "shelf", "living"])) {
     if (indoor) return 1;
-    if (type.includes("herb") || type.includes("shrub")) return 0.5;
-    return 0.15;
+    if (isCompact || type.includes("herb")) return 0.55;
+    return 0.25;
   }
 
   if (hasAny(spaceAnswer, ["balcony", "terrace", "pot"])) {
     if (indoor || isCompact) return 1;
-    if (type.includes("herb") || type.includes("shrub")) return 0.8;
-    if (type.includes("vine") || type.includes("climber")) return 0.65;
-    if (type.includes("tree")) return 0.2;
-    return 0.4;
+    if (type.includes("herb") || type.includes("shrub") || type.includes("vine") || type.includes("climber")) {
+      return 0.85;
+    }
+    if (isTree) return 0.3;
+    return 0.5;
   }
 
   if (hasAny(spaceAnswer, ["corporate", "office"])) {
-    if (type.includes("tree")) return 1;
-    if (type.includes("shrub") || type.includes("palm")) return 0.7;
-    if (indoor) return 0.25;
-    return 0.35;
+    if (isTree || type.includes("shrub") || type.includes("palm")) return 1;
+    if (indoor) return 0.45;
+    return 0.4;
   }
 
-  if (type.includes("tree") || type.includes("shrub")) return 1;
-  if (type.includes("herb") || type.includes("grass")) return 0.8;
-  if (indoor) return 0.35;
-  return 0.5;
+  if (isTree || type.includes("shrub") || type.includes("herb") || type.includes("grass")) return 1;
+  if (indoor) return 0.45;
+  return 0.55;
 }
 
 /**
- * Scores goal + climate + growth rate as overall growth potential (0–1).
+ * Growth score from goal, climate, and plant vigor. Climate mismatch no longer zeros the score.
  *
  * @param goalAnswer - Onboarding goal answer
  * @param climateAnswer - Onboarding climate answer
- * @param plant - Plant catalog row
- * @returns Fit score
+ * @param plant - Plant on the user's account
+ * @returns 0–1
  */
 function scoreGrowthPotential(
   goalAnswer: string,
   climateAnswer: string,
   plant: UserPlantInsightRow
 ): number {
-  let goal = 0.35;
-  if (!goalAnswer) {
-    goal = 0.4;
-  } else if (hasAny(goalAnswer, ["food", "vegetable", "edible", "herb"])) {
-    if (plant.edibleFruit && plant.edibleLeaf) goal = 1;
-    else if (plant.edibleFruit || plant.edibleLeaf) goal = 0.8;
-    else if ((plant.type ?? "").toLowerCase().includes("herb")) goal = 0.6;
-    else goal = 0.15;
+  const type = normalizeCatalogText(plant.type ?? "");
+  let goal = 0.45;
+
+  if (hasAny(goalAnswer, ["food", "vegetable", "edible", "herb"])) {
+    if (plant.edibleFruit || plant.edibleLeaf || type.includes("herb")) goal = 1;
+    else goal = 0.35;
   } else if (hasAny(goalAnswer, ["bloom", "flower", "color"])) {
-    if (plant.flowers) goal = 0.95;
-    else if ((plant.type ?? "").toLowerCase().includes("ornamental")) goal = 0.5;
-    else goal = 0.15;
+    goal = plant.flowers ? 1 : 0.4;
   } else if (hasAny(goalAnswer, ["green", "foliage", "calm", "privacy"])) {
-    const type = (plant.type ?? "").toLowerCase();
-    if (plant.leaf && (type.includes("tree") || type.includes("shrub"))) goal = 1;
-    else if (plant.leaf || type.includes("tree") || type.includes("shrub")) goal = 0.7;
-    else goal = 0.3;
+    goal = plant.leaf || type.includes("tree") || type.includes("shrub") || indoorLike(plant)
+      ? 0.95
+      : 0.5;
   } else if (hasAny(goalAnswer, ["low", "minimal", "easy", "effort"])) {
-    const care = `${plant.careLevel ?? ""} ${plant.maintenance ?? ""}`.toLowerCase();
-    if (care.includes("low") && plant.droughtTolerant) goal = 1;
-    else if (care.includes("low")) goal = 0.8;
-    else if (plant.droughtTolerant) goal = 0.6;
-    else goal = 0.25;
+    const care = plantCareLevel(plant);
+    if (care === "low" || plant.droughtTolerant) goal = 1;
+    else if (care === "medium") goal = 0.6;
+    else goal = 0.4;
   }
 
-  let climate = 0.5;
+  let climate = 0.6;
   if (hasAny(climateAnswer, ["tropical", "humid"])) {
-    climate = plant.tropical ? 1 : 0.35;
+    climate = plant.tropical ? 1 : 0.45;
   } else if (hasAny(climateAnswer, ["dry", "arid"])) {
-    climate = plant.droughtTolerant ? 1 : 0.3;
+    climate = plant.droughtTolerant ? 1 : 0.45;
   } else if (hasAny(climateAnswer, ["cold", "season"])) {
-    climate = plant.tropical ? 0.25 : 0.7;
+    climate = plant.tropical ? 0.4 : 0.8;
   }
 
-  const growthRate = (plant.growthRate ?? "").toLowerCase();
-  let vigor = 0.5;
-  if (growthRate.includes("high") || growthRate.includes("fast")) vigor = 1;
-  else if (growthRate.includes("moderate") || growthRate.includes("medium")) vigor = 0.7;
-  else if (growthRate.includes("low") || growthRate.includes("slow")) vigor = 0.4;
+  const growthRate = normalizeCatalogText(plant.growthRate ?? "");
+  let vigor = 0.55;
+  if (hasAny(growthRate, ["high", "fast"])) vigor = 1;
+  else if (hasAny(growthRate, ["moderate", "medium", "average"])) vigor = 0.7;
+  else if (hasAny(growthRate, ["low", "slow"])) vigor = 0.45;
 
   return goal * 0.5 + climate * 0.3 + vigor * 0.2;
+}
+
+/**
+ * Returns true when the plant is typically grown indoors.
+ *
+ * @param plant - Plant catalog row
+ * @returns Whether the plant is indoor
+ */
+function indoorLike(plant: UserPlantInsightRow): boolean {
+  return plant.indoor === true;
 }
 
 /**
@@ -394,23 +489,34 @@ export async function getGardenInsights(
   const goalAnswer = answerByOrder(answers, QUESTION_ORDER.goal);
   const climateAnswer = answerByOrder(answers, QUESTION_ORDER.climate);
 
-  const raw = [
-    averageScore(plants, (plant) => scoreLightFit(sunlightAnswer, plant)),
-    averageScore(plants, (plant) => scoreWaterConsistency(wateringAnswer, plant)),
-    averageScore(plants, (plant) =>
-      scoreExperienceReadiness(experienceAnswer, plant)
-    ),
-    averageScore(plants, (plant) => scoreSpaceUtilization(spaceAnswer, plant)),
-    averageScore(plants, (plant) =>
-      scoreGrowthPotential(goalAnswer, climateAnswer, plant)
-    ),
+  const scorers: Array<(plant: UserPlantInsightRow) => number> = [
+    (plant: UserPlantInsightRow): number => scoreLightFit(sunlightAnswer, plant),
+    (plant: UserPlantInsightRow): number =>
+      scoreWaterConsistency(wateringAnswer, plant),
+    (plant: UserPlantInsightRow): number =>
+      scoreExperienceReadiness(experienceAnswer, plant),
+    (plant: UserPlantInsightRow): number =>
+      scoreSpaceUtilization(spaceAnswer, plant),
+    (plant: UserPlantInsightRow): number =>
+      scoreGrowthPotential(goalAnswer, climateAnswer, plant),
   ];
 
-  const percents = toPiePercents(raw);
-  const chart: GardenInsightSlice[] = ZERO_CHART.map((slice, index) => ({
-    ...slice,
-    percent: percents[index] ?? 0,
-  }));
+  const matchRates = scorers.map((scoreFn) => averageScore(plants, scoreFn));
+  const pieShares = toPiePercents(matchRates);
+
+  const chart: GardenInsightSlice[] = ZERO_CHART.map((slice, index) => {
+    const scoreFn = scorers[index];
+    const rate = matchRates[index] ?? 0;
+    const matchedCount = scoreFn
+      ? plants.filter((plant) => scoreFn(plant) >= 0.5).length
+      : 0;
+    return {
+      ...slice,
+      percent: pieShares[index] ?? 0,
+      matchPercent: Math.round(rate * 100),
+      matchedCount,
+    };
+  });
 
   return {
     plantCount: plants.length,

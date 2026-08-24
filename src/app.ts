@@ -12,6 +12,7 @@ import ruleRoutes from "./modules/admin/rules/ruleRoutes";
 import partnerProfileRoutes from "./modules/partnerProfile/partnerProfileRoute";
 import answerRoutes from "./modules/answers/answerRoutes";
 import plantRoutes from "./modules/plant/plantRoutes";
+import plantScanRoutes from "./modules/plant/plantScanRoutes";
 import stateCityRoutes from "./modules/stateCity/stateCityRoutes";
 import leadsRoutes from "./modules/admin/leads/leadsRoute";
 import dashboardRoutes from "./modules/admin/dashboard/dashboardRoutes";
@@ -102,6 +103,7 @@ app.use("/api/v1/partnerProfile", partnerProfileRoutes);
 app.use("/api/v1/answers", answerRoutes);
 // Add Plants user selected data Routes
 app.use("/api/v1/admin", plantRoutes);
+app.use("/api/v1/plant-scans", plantScanRoutes);
 // State City Country Routes
 app.use("/api/v1/stateCityData", stateCityRoutes);
 // Leads Routes

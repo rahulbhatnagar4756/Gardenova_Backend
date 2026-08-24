@@ -127,19 +127,23 @@ export function extractPredictedDisease(diagnosis: PlantDiagnosis): {
 }
 
 /**
- * Writes one diagnosis scan log row for the admin portal.
+ * Writes one diagnosis scan row with the full diagnose payload.
  *
- * @param {object} input - Log payload.
- * @param {string} input.userId - Authenticated user id.
- * @param {string | undefined} input.image - First request image (base64/URL).
- * @param {PlantDiagnosis} input.diagnosis - Diagnose API result.
- * @returns {Promise<void>} Resolves when the row is stored (best-effort).
+ * @param input - Log payload
+ * @param input.userId - Authenticated user id
+ * @param input.image - First request image (base64/URL)
+ * @param input.diagnosis - Full diagnose API result
+ * @param input.latitude - Optional scan latitude
+ * @param input.longitude - Optional scan longitude
+ * @returns Inserted scan id, or null if persistence failed
  */
 export async function logDiagnosisScan(input: {
   userId: string;
   image?: string;
   diagnosis: PlantDiagnosis;
-}): Promise<void> {
+  latitude?: number;
+  longitude?: number;
+}): Promise<string | null> {
   try {
     await ensureDiagnosisScansTable();
     const imageUrl = await persistScanImage(input.image);
@@ -147,17 +151,18 @@ export async function logDiagnosisScan(input: {
       input.diagnosis
     );
     const plantName =
-      input.diagnosis.plantInfo?.scientificName ||
       input.diagnosis.plantInfo?.commonNames?.[0] ||
+      input.diagnosis.plantInfo?.scientificName ||
       null;
 
     const db = getDB();
-    await db.query(
+    const result = await db.query<{ id: string }>(
       `
       INSERT INTO diagnosis_scans (
         user_id, image_url, predicted_disease, confidence_score,
         plant_name, is_plant, is_healthy, raw_result
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      RETURNING id
       `,
       [
         input.userId,
@@ -168,31 +173,24 @@ export async function logDiagnosisScan(input: {
         input.diagnosis.isPlant,
         input.diagnosis.healthStatus?.isHealthy ?? null,
         JSON.stringify({
-          confidence: input.diagnosis.confidence,
-          plantInfo: input.diagnosis.plantInfo
-            ? {
-                scientificName: input.diagnosis.plantInfo.scientificName,
-                commonNames: input.diagnosis.plantInfo.commonNames,
-                probability: input.diagnosis.plantInfo.probability,
-              }
-            : null,
-          healthStatus: {
-            isHealthy: input.diagnosis.healthStatus?.isHealthy,
-            healthProbability: input.diagnosis.healthStatus?.healthProbability,
-            issues: (input.diagnosis.healthStatus?.issues ?? []).map((i) => ({
-              name: i.name,
-              type: i.type,
-              probability: i.probability,
-              severity: i.severity,
-            })),
-          },
+          ...input.diagnosis,
+          location:
+            input.latitude !== undefined || input.longitude !== undefined
+              ? {
+                  latitude: input.latitude ?? null,
+                  longitude: input.longitude ?? null,
+                }
+              : undefined,
         }),
       ]
     );
+
+    return result.rows[0]?.id ?? null;
   } catch (err) {
     console.error(
       "[diagnosisScanLog] failed to persist scan",
       err instanceof Error ? err.message : err
     );
+    return null;
   }
 }
