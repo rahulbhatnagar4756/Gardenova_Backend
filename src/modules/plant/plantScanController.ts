@@ -5,7 +5,12 @@ import {
   errorResponse,
   successResponse,
 } from "../../core/utils/responseFormatter";
-import { getUserPlantScanById, listUserPlantScans } from "./plantScanService";
+import { checkAndConsumeUsage } from "../../core/utils/planLimits";
+import {
+  compareUserPlantScan,
+  getUserPlantScanById,
+  listUserPlantScans,
+} from "./plantScanService";
 
 /**
  * GET /api/v1/plant-scans
@@ -77,6 +82,79 @@ export const getPlantScanByIdController = async (
     res
       .status(HTTP_STATUS.OK)
       .json(successResponse(scan, MESSAGES.PLANT_SCAN_DETAIL_FETCHED));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/v1/plant-scans/:id/compare
+ * Scans a new plant photo, saves it to history, and compares it with the given scan.
+ *
+ * @param req - Authenticated request
+ * @param res - Express response
+ * @param next - Error middleware
+ */
+export const comparePlantScanController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userPayload = req.user as { userId?: string } | undefined;
+    if (!userPayload?.userId) {
+      res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+      return;
+    }
+
+    const scanId = String(req.params.id ?? "");
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(scanId)) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse("Invalid scan id"));
+      return;
+    }
+
+    const historyScan = await getUserPlantScanById(userPayload.userId, scanId);
+    if (!historyScan) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Scan not found"));
+      return;
+    }
+
+    const usage = await checkAndConsumeUsage(userPayload.userId, "diagnosis");
+    if (!usage.allowed) {
+      res
+        .status(HTTP_STATUS.FORBIDDEN)
+        .json(
+          errorResponse(
+            `Monthly diagnosis scan limit reached (${usage.limit}). Upgrade your plan to continue.`
+          )
+        );
+      return;
+    }
+
+    const body = req.body as {
+      image_base64?: string;
+      latitude?: number;
+      longitude?: number;
+    };
+
+    const plants = await compareUserPlantScan({
+      userId: userPayload.userId,
+      historyScanId: scanId,
+      imageBase64: body.image_base64 ?? "",
+      ...(typeof body.latitude === "number" ? { latitude: body.latitude } : {}),
+      ...(typeof body.longitude === "number" ? { longitude: body.longitude } : {}),
+    });
+
+    if (!plants) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Scan not found"));
+      return;
+    }
+
+    res
+      .status(HTTP_STATUS.OK)
+      .json(successResponse({ plants }, MESSAGES.PLANT_SCAN_COMPARED));
   } catch (err) {
     next(err);
   }

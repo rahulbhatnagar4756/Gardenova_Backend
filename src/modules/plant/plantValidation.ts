@@ -93,3 +93,21 @@ export const plantIdentifyValidation = Joi.object({
 
   similar_images: Joi.boolean().default(true).optional(),
 });
+
+/**
+ * Body schema for comparing a new plant photo against a saved scan.
+ */
+export const plantScanCompareValidation: ObjectSchema = Joi.object({
+  image_base64: Joi.string().trim().min(20).optional(),
+  image: Joi.string().trim().min(20).optional(),
+  latitude: Joi.number().optional(),
+  longitude: Joi.number().optional(),
+}).custom((value, helpers) => {
+  const image = (value.image_base64 ?? value.image ?? "").trim();
+  if (!image) {
+    return helpers.error("any.custom", {
+      message: "Provide image_base64",
+    });
+  }
+  return { ...value, image_base64: image };
+});

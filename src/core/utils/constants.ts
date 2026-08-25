@@ -76,6 +76,7 @@ export const MESSAGES = {
   GARDEN_INSIGHTS_FETCHED: "Garden insight scores fetched successfully",
   PLANT_SCANS_FETCHED: "Plant scans fetched successfully",
   PLANT_SCAN_DETAIL_FETCHED: "Plant scan details fetched successfully",
+  PLANT_SCAN_COMPARED: "Plant scans compared successfully",
 
   //#region Password Messages
   PASSWORD_RESET_SENT: "Password reset email sent successfully",
