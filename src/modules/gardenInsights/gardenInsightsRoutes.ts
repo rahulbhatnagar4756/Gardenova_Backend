@@ -10,11 +10,11 @@ const router = Router();
  *   get:
  *     summary: Get garden pie-chart insight scores
  *     description: >
- *       Scores each plant on the account against onboarding answers.
- *       A plant scores 1 only on an exact match, otherwise 0.
- *       If the user has no plants, every slice is 0%.
- *       `percent` is the pie share (sums to 100). `matchPercent` is the
- *       share of the user's plants that strictly match that metric.
+ *       Scores recommended plants (from onboarding answers) against those answers.
+ *       Uses Light / Water / Experience / Space / Growth fit with partial credit.
+ *       If there is no survey or no recommended plants, every slice is 0%.
+ *       `percent` is the pie share (sums to 100). `matchPercent` is how well
+ *       the recommended plants match that metric.
  *     tags: [Garden Insights]
  *     security:
  *       - bearerAuth: []

@@ -1029,8 +1029,16 @@ export const googleAuth = async (
       return;
     }
 
-    let user = await findUserByEmail(email);
+    const normalizedEmail = email.toLowerCase();
+    let user = await findUserByEmail(normalizedEmail);
     let isNewUser = false;
+
+    if (user?.isdeleted) {
+      res
+        .status(HTTP_STATUS.FORBIDDEN)
+        .json(errorResponse("User profile is deleted"));
+      return;
+    }
 
     // New User Registration
     if (!user) {
@@ -1070,10 +1078,10 @@ export const googleAuth = async (
       // Create new user
       const userData = await createUserFromOAuth(
         name!,
-        email,
+        normalizedEmail,
         uid,
         role.id!,
-        email_verified === true,
+        email_verified !== false,
         true,
         false,
         false
@@ -1095,16 +1103,30 @@ export const googleAuth = async (
       // Bind updated user data to user
       user = userData;
     } else {
-      // Update Google uid if any register user google uid changes..
+      // Existing email/password (or other) account: link Google and log in.
+      if (user.google_uid && user.google_uid !== uid) {
+        res
+          .status(HTTP_STATUS.CONFLICT)
+          .json(
+            errorResponse(
+              "This email is already linked to a different Google account"
+            )
+          );
+        return;
+      }
+
       await updateUserFromOAuth(
         user.id!,
-        user.google_uid ? undefined : uid,
+        uid,
         true,
         false,
-        false
+        false,
+        email_verified !== false
       );
     }
-    const tokens = await issueAuthTokens(user, "User");
+
+    const role = await getRoleById(user.role_id);
+    const tokens = await issueAuthTokens(user, role?.name ?? "user");
     // Send Final Response
     res.status(HTTP_STATUS.OK).json(
       successResponse(

@@ -1,6 +1,6 @@
 import {
   findLatestSurveyAnswers,
-  findUserPlantsForInsights,
+  findRecommendedPlantsForInsights,
   SurveyAnswerRow,
   UserPlantInsightRow,
 } from "./gardenInsightsRepository";
@@ -70,7 +70,7 @@ function answerByOrder(answers: SurveyAnswerRow[], order: number): string {
 /**
  * Averages per-plant scores into a 0–1 value.
  *
- * @param plants - User plants
+ * @param plants - Recommended plants
  * @param scoreFn - Per-plant scorer
  * @returns Average score
  */
@@ -253,7 +253,7 @@ function userExperienceLevel(answer: string): ExperienceLevel {
  * Light score with adjacent-class credit. Missing catalog light still gets a modest score.
  *
  * @param sunlightAnswer - Onboarding sunlight answer
- * @param plant - Plant on the user's account
+ * @param plant - Recommended plant
  * @returns 0–1
  */
 function scoreLightFit(
@@ -286,7 +286,7 @@ function scoreLightFit(
  * Reminders add a small bonus; they are not required.
  *
  * @param wateringAnswer - Onboarding watering answer
- * @param plant - Plant on the user's account
+ * @param plant - Recommended plant
  * @returns 0–1
  */
 function scoreWaterConsistency(
@@ -329,7 +329,7 @@ function scoreWaterConsistency(
  * Experience score: beginners prefer easy plants, but harder plants still get credit.
  *
  * @param experienceAnswer - Onboarding experience answer
- * @param plant - Plant on the user's account
+ * @param plant - Recommended plant
  * @returns 0–1
  */
 function scoreExperienceReadiness(
@@ -357,7 +357,7 @@ function scoreExperienceReadiness(
  * Space score with partial credit when a plant is a reasonable fit.
  *
  * @param spaceAnswer - Onboarding space answer
- * @param plant - Plant on the user's account
+ * @param plant - Recommended plant
  * @returns 0–1
  */
 function scoreSpaceUtilization(
@@ -403,7 +403,7 @@ function scoreSpaceUtilization(
  *
  * @param goalAnswer - Onboarding goal answer
  * @param climateAnswer - Onboarding climate answer
- * @param plant - Plant on the user's account
+ * @param plant - Recommended plant
  * @returns 0–1
  */
 function scoreGrowthPotential(
@@ -459,19 +459,17 @@ function indoorLike(plant: UserPlantInsightRow): boolean {
 }
 
 /**
- * Builds pie-chart garden scores from onboarding answers and the user's plants.
- * Returns all zeros when the user has not added any plants.
+ * Builds pie-chart garden scores from onboarding answers and recommended plants.
+ * Returns all zeros when there is no survey or no recommended plants.
  *
  * @param userId - Authenticated user id
- * @returns Pie-chart slices totaling 100 when plants exist, otherwise 0
+ * @returns Pie-chart slices totaling 100 when recommended plants exist, otherwise 0
  */
 export async function getGardenInsights(
   userId: string
 ): Promise<GardenInsightsResult> {
-  const [answers, plants] = await Promise.all([
-    findLatestSurveyAnswers(userId),
-    findUserPlantsForInsights(userId),
-  ]);
+  const answers = await findLatestSurveyAnswers(userId);
+  const plants = await findRecommendedPlantsForInsights(answers);
 
   if (plants.length === 0) {
     return {

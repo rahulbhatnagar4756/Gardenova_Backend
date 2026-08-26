@@ -1,4 +1,10 @@
 import { getDB } from "../../core/config/db";
+import { IUserAnswer } from "../answers/answerController";
+import {
+  FieldIndex,
+  TOTAL_QUESTIONS,
+  getRecommendedPlants,
+} from "../answers/answerRepository";
 
 export interface SurveyAnswerRow {
   question: string;
@@ -81,85 +87,54 @@ export async function findLatestSurveyAnswers(
 }
 
 /**
- * Loads all plants on the user's account with catalog traits needed for scoring.
+ * Loads onboarding-recommended plants and maps them into the insight row shape.
  *
- * @param userId - Authenticated user id
- * @returns User plants joined to catalog attributes
+ * @param answers - Latest survey answers
+ * @returns Recommended plants with catalog traits used for scoring
  */
-export async function findUserPlantsForInsights(
-  userId: string
+export async function findRecommendedPlantsForInsights(
+  answers: SurveyAnswerRow[]
 ): Promise<UserPlantInsightRow[]> {
-  const db = getDB();
+  if (answers.length === 0) {
+    return [];
+  }
 
-  const result = await db.query<{
-    user_plant_id: string;
-    common_name: string | null;
-    sunlight: string | null;
-    watering: string | null;
-    care_level: string | null;
-    maintenance: string | null;
-    indoor: boolean | null;
-    type: string | null;
-    growth_rate: string | null;
-    drought_tolerant: boolean | null;
-    tropical: boolean | null;
-    flowers: boolean | null;
-    edible_fruit: boolean | null;
-    edible_leaf: boolean | null;
-    leaf: boolean | null;
-    dimension_max_value: string | null;
-    watering_notification_enabled: boolean | null;
-    watering_reminder_frequency: number | null;
-    last_watered_at: Date | null;
-    next_watered_at: Date | null;
-  }>(
-    `SELECT
-        up.id AS user_plant_id,
-        pc.common_name,
-        pc.sunlight::text AS sunlight,
-        pc.watering,
-        pc.care_level,
-        pc.maintenance,
-        pc.indoor,
-        pc.type,
-        pc.growth_rate,
-        pc.drought_tolerant,
-        pc.tropical,
-        pc.flowers,
-        pc.edible_fruit,
-        pc.edible_leaf,
-        pc.leaf,
-        pc.dimension_max_value::text AS dimension_max_value,
-        up.watering_notification_enabled,
-        up.watering_reminder_frequency,
-        up.last_watered_at,
-        up.next_watered_at
-       FROM user_plants up
-       JOIN plant_table_final pc ON pc.id = up.plant_id
-      WHERE up.user_id = $1`,
-    [userId]
-  );
+  const quizAnswers: (IUserAnswer | null)[] = new Array(TOTAL_QUESTIONS).fill(
+    null
+  ) as (IUserAnswer | null)[];
 
-  return result.rows.map((row) => ({
-    userPlantId: row.user_plant_id,
-    commonName: row.common_name,
-    sunlight: row.sunlight,
-    watering: row.watering,
-    careLevel: row.care_level,
-    maintenance: row.maintenance,
-    indoor: row.indoor,
-    type: row.type,
-    growthRate: row.growth_rate,
-    droughtTolerant: row.drought_tolerant,
-    tropical: row.tropical,
-    flowers: row.flowers,
-    edibleFruit: row.edible_fruit,
-    edibleLeaf: row.edible_leaf,
-    leaf: row.leaf,
-    dimensionMaxValue: row.dimension_max_value,
-    wateringNotificationEnabled: row.watering_notification_enabled,
-    wateringReminderFrequency: row.watering_reminder_frequency,
-    lastWateredAt: row.last_watered_at,
-    nextWateredAt: row.next_watered_at,
+  for (const row of answers) {
+    const fieldIndex = Number(row.order) - 1;
+    if (fieldIndex < FieldIndex.space_type || fieldIndex > FieldIndex.experience) {
+      continue;
+    }
+    quizAnswers[fieldIndex] = {
+      selectedOption: row.answer,
+    };
+  }
+
+  const recommended = await getRecommendedPlants(quizAnswers);
+
+  return recommended.map((plant) => ({
+    userPlantId: String(plant.id),
+    commonName: plant.commonName,
+    sunlight: plant.sunlight,
+    watering: plant.watering,
+    careLevel: plant.careLevel,
+    maintenance: plant.maintenance,
+    indoor: plant.indoor,
+    type: plant.type,
+    growthRate: plant.growthRate,
+    droughtTolerant: plant.droughtTolerant,
+    tropical: plant.tropical,
+    flowers: plant.flowers,
+    edibleFruit: plant.edibleFruit,
+    edibleLeaf: plant.edibleLeaf,
+    leaf: plant.leaf,
+    dimensionMaxValue: null,
+    wateringNotificationEnabled: null,
+    wateringReminderFrequency: null,
+    lastWateredAt: null,
+    nextWateredAt: null,
   }));
 }

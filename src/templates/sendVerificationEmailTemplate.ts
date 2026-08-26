@@ -32,8 +32,7 @@
  * @returns {{ minutes: number; utcString: string }} Formatted values.
  */
 function formatExpiry(expiration: Date): { minutes: number; utcString: string } {
-  const msLeft = expiration.getTime() - Date.now();
-  const minutes = Math.max(1, Math.round(msLeft / 60_000));
+  const minutes = 5;
 
   const utcString = expiration.toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -42,6 +41,8 @@ function formatExpiry(expiration: Date): { minutes: number; utcString: string } 
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
     timeZoneName: "short",
   });
 

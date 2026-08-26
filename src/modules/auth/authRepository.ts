@@ -211,11 +211,11 @@ export async function findUserByEmail(email: string): Promise<IUser | null> {
   const query = `
     SELECT *
     FROM users
-    WHERE email = $1
+    WHERE LOWER(email) = LOWER($1)
     LIMIT 1;
   `;
 
-  const result = await client.query(query, [email]);
+  const result = await client.query(query, [email.toLowerCase()]);
   return result.rows[0] || null;
 }
 
@@ -443,6 +443,7 @@ export async function createUserProfileWithImage(
  * @param isGoogleToken - True if the user authenticated via Google.
  * @param isFacebookToken - True if the user authenticated via Facebook.
  * @param isAppleToken - True if the user authenticated via Apple.
+ * @param markEmailVerified
  * @returns Promise resolving when the user OAuth data is updated.
  */
 export async function updateUserFromOAuth(
@@ -450,9 +451,10 @@ export async function updateUserFromOAuth(
   uid: string | undefined,
   isGoogleToken: boolean,
   isFacebookToken: boolean,
-  isAppleToken: boolean
+  isAppleToken: boolean,
+  markEmailVerified = false
 ): Promise<void> {
-  if (!uid) return; // nothing to update
+  if (!uid && !markEmailVerified) return;
 
   const db = await getDB();
 
@@ -463,14 +465,26 @@ export async function updateUserFromOAuth(
   else if (isAppleToken) uidColumn = "apple_uid";
   else throw new Error("No OAuth provider flag provided");
 
-  const query = `
-    UPDATE users
-    SET ${uidColumn} = $1,
-        updated_at = NOW()
-    WHERE id = $2
-  `;
+  const query = uid
+    ? `
+      UPDATE users
+      SET ${uidColumn} = COALESCE(${uidColumn}, $1),
+          is_email_verified = CASE WHEN $3 THEN TRUE ELSE is_email_verified END,
+          updated_at = NOW()
+      WHERE id = $2
+    `
+    : `
+      UPDATE users
+      SET is_email_verified = TRUE,
+          updated_at = NOW()
+      WHERE id = $1
+    `;
 
-  await db.query(query, [uid, userId]);
+  if (uid) {
+    await db.query(query, [uid, userId, markEmailVerified]);
+  } else {
+    await db.query(query, [userId]);
+  }
 }
 
 
