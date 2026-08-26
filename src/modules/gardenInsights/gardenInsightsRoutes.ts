@@ -10,11 +10,12 @@ const router = Router();
  *   get:
  *     summary: Get garden pie-chart insight scores
  *     description: >
- *       Scores recommended plants (from onboarding answers) against those answers.
- *       Uses Light / Water / Experience / Space / Growth fit with partial credit.
- *       If there is no survey or no recommended plants, every slice is 0%.
- *       `percent` is the pie share (sums to 100). `matchPercent` is how well
- *       the recommended plants match that metric.
+ *       Derives five fitness scores from the user's onboarding answers only
+ *       (no plant catalog and no My Plants).
+ *       Light Fit = sunlight + space; Water Consistency = watering habit;
+ *       Experience Readiness = experience; Space Utilization = space + goal;
+ *       Growth Potential = climate + watering + sunlight.
+ *       `score` is 0–100 for that dimension. `percent` is the pie share (sums to 100).
  *     tags: [Garden Insights]
  *     security:
  *       - bearerAuth: []
@@ -35,10 +36,7 @@ const router = Router();
  *                 data:
  *                   type: object
  *                   properties:
- *                     plantCount:
- *                       type: integer
- *                       example: 3
- *                     hasPlants:
+ *                     hasSurvey:
  *                       type: boolean
  *                       example: true
  *                     totalPercent:
@@ -58,12 +56,9 @@ const router = Router();
  *                           percent:
  *                             type: integer
  *                             example: 18
- *                           matchPercent:
+ *                           score:
  *                             type: integer
- *                             example: 67
- *                           matchedCount:
- *                             type: integer
- *                             example: 2
+ *                             example: 85
  *       401:
  *         description: Unauthorized
  */

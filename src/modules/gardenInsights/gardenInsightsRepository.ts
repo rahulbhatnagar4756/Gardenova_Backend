@@ -1,38 +1,9 @@
 import { getDB } from "../../core/config/db";
-import { IUserAnswer } from "../answers/answerController";
-import {
-  FieldIndex,
-  TOTAL_QUESTIONS,
-  getRecommendedPlants,
-} from "../answers/answerRepository";
 
 export interface SurveyAnswerRow {
   question: string;
   answer: string;
   order: number;
-}
-
-export interface UserPlantInsightRow {
-  userPlantId: string;
-  commonName: string | null;
-  sunlight: string | null;
-  watering: string | null;
-  careLevel: string | null;
-  maintenance: string | null;
-  indoor: boolean | null;
-  type: string | null;
-  growthRate: string | null;
-  droughtTolerant: boolean | null;
-  tropical: boolean | null;
-  flowers: boolean | null;
-  edibleFruit: boolean | null;
-  edibleLeaf: boolean | null;
-  leaf: boolean | null;
-  dimensionMaxValue: string | null;
-  wateringNotificationEnabled: boolean | null;
-  wateringReminderFrequency: number | null;
-  lastWateredAt: Date | null;
-  nextWateredAt: Date | null;
 }
 
 /**
@@ -84,57 +55,4 @@ export async function findLatestSurveyAnswers(
       answer: (row.selected_option ?? "").trim(),
       order: row.question_order,
     }));
-}
-
-/**
- * Loads onboarding-recommended plants and maps them into the insight row shape.
- *
- * @param answers - Latest survey answers
- * @returns Recommended plants with catalog traits used for scoring
- */
-export async function findRecommendedPlantsForInsights(
-  answers: SurveyAnswerRow[]
-): Promise<UserPlantInsightRow[]> {
-  if (answers.length === 0) {
-    return [];
-  }
-
-  const quizAnswers: (IUserAnswer | null)[] = new Array(TOTAL_QUESTIONS).fill(
-    null
-  ) as (IUserAnswer | null)[];
-
-  for (const row of answers) {
-    const fieldIndex = Number(row.order) - 1;
-    if (fieldIndex < FieldIndex.space_type || fieldIndex > FieldIndex.experience) {
-      continue;
-    }
-    quizAnswers[fieldIndex] = {
-      selectedOption: row.answer,
-    };
-  }
-
-  const recommended = await getRecommendedPlants(quizAnswers);
-
-  return recommended.map((plant) => ({
-    userPlantId: String(plant.id),
-    commonName: plant.commonName,
-    sunlight: plant.sunlight,
-    watering: plant.watering,
-    careLevel: plant.careLevel,
-    maintenance: plant.maintenance,
-    indoor: plant.indoor,
-    type: plant.type,
-    growthRate: plant.growthRate,
-    droughtTolerant: plant.droughtTolerant,
-    tropical: plant.tropical,
-    flowers: plant.flowers,
-    edibleFruit: plant.edibleFruit,
-    edibleLeaf: plant.edibleLeaf,
-    leaf: plant.leaf,
-    dimensionMaxValue: null,
-    wateringNotificationEnabled: null,
-    wateringReminderFrequency: null,
-    lastWateredAt: null,
-    nextWateredAt: null,
-  }));
 }
