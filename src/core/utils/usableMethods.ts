@@ -74,7 +74,7 @@ export const generateAccessToken = (
   userId: string
 ): string => {
   const options: SignOptions = {
-    expiresIn: toExpiresIn(config.JWT_ACCESS_EXPIRE),
+    expiresIn: toExpiresIn(config.JWT_EXPIRE),
     algorithm: "HS512",
   };
 

@@ -1127,10 +1127,24 @@ export const googleAuth = async (
 
     const role = await getRoleById(user.role_id);
     const tokens = await issueAuthTokens(user, role?.name ?? "user");
-    // Send Final Response
+
+    const client = getDB();
+    const surveyResult = await client.query<{ response_id: string }>(
+      `SELECT response_id
+         FROM survey_answers
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [user.id]
+    );
+
     res.status(HTTP_STATUS.OK).json(
       successResponse(
-        tokens,
+        {
+          ...tokens,
+          role: role?.name ?? "user",
+          responseId: surveyResult.rows[0]?.response_id ?? null,
+        },
         isNewUser ? MESSAGES.USER_CREATED : MESSAGES.LOGIN_SUCCESS
       )
     );

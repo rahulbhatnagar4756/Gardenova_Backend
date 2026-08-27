@@ -410,7 +410,7 @@ router.post(
  *                 example: U
  *     responses:
  *       200:
- *         description: Authentication successful
+ *         description: Authentication successful. Includes tokens, role, and latest survey responseId.
  */
 router.post("/google", validateRequest(googleAuthValidation), googleAuth);
 
