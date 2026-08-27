@@ -12,7 +12,7 @@ export interface GardenInsightSlice {
     | "growthPotential";
   label: string;
   percent: number;
-  score: number;
+  piePercent: number;
 }
 
 export interface GardenInsightsResult {
@@ -22,11 +22,11 @@ export interface GardenInsightsResult {
 }
 
 const ZERO_CHART: GardenInsightSlice[] = [
-  { key: "lightFit", label: "Light Fit", percent: 0, score: 0 },
-  { key: "waterConsistency", label: "Water Consistency", percent: 0, score: 0 },
-  { key: "experienceReadiness", label: "Experience Readiness", percent: 0, score: 0 },
-  { key: "spaceUtilization", label: "Space Utilization", percent: 0, score: 0 },
-  { key: "growthPotential", label: "Growth Potential", percent: 0, score: 0 },
+  { key: "lightFit", label: "Light Fit", percent: 0, piePercent: 0 },
+  { key: "waterConsistency", label: "Water Consistency", percent: 0, piePercent: 0 },
+  { key: "experienceReadiness", label: "Experience Readiness", percent: 0, piePercent: 0 },
+  { key: "spaceUtilization", label: "Space Utilization", percent: 0, piePercent: 0 },
+  { key: "growthPotential", label: "Growth Potential", percent: 0, piePercent: 0 },
 ];
 
 /** Matches `questions.order` in the onboarding quiz. */
@@ -69,6 +69,26 @@ function answerByOrder(answers: SurveyAnswerRow[], order: number): string {
   return (
     answers.find((item) => Number(item.order) === order)?.answer ?? ""
   ).toLowerCase();
+}
+
+/**
+ * Finds an answer by question text first, then falls back to question order.
+ *
+ * @param answers - Survey rows
+ * @param questionKeywords - Keywords expected in the question text
+ * @param fallbackOrder - Fallback 1-based question order
+ * @returns Selected option text
+ */
+function answerFor(
+  answers: SurveyAnswerRow[],
+  questionKeywords: string[],
+  fallbackOrder: number
+): string {
+  const byText = answers.find((item) => hasAny(item.question, questionKeywords));
+  if (byText?.answer) {
+    return byText.answer.toLowerCase();
+  }
+  return answerByOrder(answers, fallbackOrder);
 }
 
 /**
@@ -322,12 +342,12 @@ export async function getGardenInsights(
     };
   }
 
-  const space = answerByOrder(answers, QUESTION_ORDER.space);
-  const sunlight = answerByOrder(answers, QUESTION_ORDER.sunlight);
-  const goal = answerByOrder(answers, QUESTION_ORDER.goal);
-  const watering = answerByOrder(answers, QUESTION_ORDER.watering);
-  const climate = answerByOrder(answers, QUESTION_ORDER.climate);
-  const experience = answerByOrder(answers, QUESTION_ORDER.experience);
+  const space = answerFor(answers, ["space", "where do you", "balcony", "garden space"], QUESTION_ORDER.space);
+  const sunlight = answerFor(answers, ["sunlight", "sun light", "how much light", "how much sun"], QUESTION_ORDER.sunlight);
+  const goal = answerFor(answers, ["goal", "want to grow", "looking to"], QUESTION_ORDER.goal);
+  const watering = answerFor(answers, ["water"], QUESTION_ORDER.watering);
+  const climate = answerFor(answers, ["climate", "weather"], QUESTION_ORDER.climate);
+  const experience = answerFor(answers, ["experience", "skill", "how experienced"], QUESTION_ORDER.experience);
 
   const raw = [
     scoreLightFit(sunlight, space),
@@ -341,8 +361,8 @@ export async function getGardenInsights(
 
   const chart: GardenInsightSlice[] = ZERO_CHART.map((slice, index) => ({
     ...slice,
-    percent: pieShares[index] ?? 0,
-    score: Math.round((raw[index] ?? 0) * 100),
+    percent: Math.round((raw[index] ?? 0) * 100),
+    piePercent: pieShares[index] ?? 0,
   }));
 
   return {

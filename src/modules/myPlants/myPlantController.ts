@@ -209,7 +209,7 @@ export const AddPlantToUser = async (
         if (err instanceof Error) {
             const knownErrors: Record<string, number> = {
                 "Plant species not found":  HTTP_STATUS.NOT_FOUND,
-                "Plant already added to user": HTTP_STATUS.CONFLICT,
+                "Plant already added": HTTP_STATUS.CONFLICT,
             };
  
             const statusCode = knownErrors[err.message] ?? HTTP_STATUS.BAD_REQUEST;

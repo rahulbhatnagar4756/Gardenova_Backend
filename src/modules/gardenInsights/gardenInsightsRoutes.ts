@@ -15,7 +15,8 @@ const router = Router();
  *       Light Fit = sunlight + space; Water Consistency = watering habit;
  *       Experience Readiness = experience; Space Utilization = space + goal;
  *       Growth Potential = climate + watering + sunlight.
- *       `score` is 0–100 for that dimension. `percent` is the pie share (sums to 100).
+ *       `percent` is 0–100 for that dimension and changes when answers change.
+ *       `piePercent` is the pie-chart share (sums to 100).
  *     tags: [Garden Insights]
  *     security:
  *       - bearerAuth: []
@@ -55,10 +56,10 @@ const router = Router();
  *                             example: Light Fit
  *                           percent:
  *                             type: integer
- *                             example: 18
- *                           score:
- *                             type: integer
  *                             example: 85
+ *                           piePercent:
+ *                             type: integer
+ *                             example: 22
  *       401:
  *         description: Unauthorized
  */
