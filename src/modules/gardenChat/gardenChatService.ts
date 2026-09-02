@@ -32,6 +32,9 @@ const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 const IMAGE_ONLY_PROMPT =
   "Please analyze this plant or garden photo and help me.";
 
+const GREETING_PATTERN =
+  /^(hi+|h+e+y+|hello+|hola|namaste|namaskar|good\s+(morning|afternoon|evening|night)|gm|gn|howdy|yo+|sup+|what'?s\s+up|how\s+are\s+you|how'?s\s+it\s+going|thanks?|thank\s+you|ok+|okay|bye+|see\s+you)[\s!.?,]*$/i;
+
 export interface GardenChatHistoryItem {
   role: "user" | "assistant";
   content: string;
@@ -247,6 +250,19 @@ function historyHasImages(
 }
 
 /**
+ * Returns true when the user message is a short greeting or courtesy line
+ * that the garden bot should answer instead of rejecting as off-topic.
+ *
+ * @param message - Latest user message text
+ * @returns True when the message is a greeting
+ */
+function isGreetingMessage(message: string): boolean {
+  const text = message.trim();
+  if (!text || text.length > 80) return false;
+  return GREETING_PATTERN.test(text);
+}
+
+/**
  * Verifies whether the current user message is gardening related,
  * using the last 10 messages as context for follow-up questions.
  *
@@ -270,8 +286,9 @@ async function isGardeningRelatedChat(
 
 Gardening includes: plants, soil, watering, fertilizer, pests, diseases, pruning, pots, indoor/outdoor gardens, lawns, landscape, compost, seeds, sunlight, humidity, and follow-up questions that clearly continue a garden conversation.
 Photos of plants, gardens, leaves, pests, soil, pots, or outdoor spaces to diagnose are gardening related.
+Greetings and short courtesy messages are also allowed: hi, hello, hey, good morning, thanks, bye, how are you.
 
-Not gardening: sports, politics, coding, finance, general chit-chat with no garden context, unrelated selfies or objects.
+Not gardening: sports, politics, coding, finance, news, recipes unrelated to plants, general questions with no garden context, unrelated selfies or objects.
 
 Use the conversation history so follow-ups like "what about watering?" stay related.
 
@@ -308,11 +325,12 @@ async function answerGardeningQuestion(
       {
         role: "system",
         content: `You are Gardenova, a practical gardening assistant.
-Answer only gardening problems using the conversation history.
+Answer gardening problems using the conversation history.
 When the user shares a plant or garden photo, identify visible issues and give clear, useful steps.
+If the user greets you (hi, hello, good morning, thanks, bye), reply warmly in 1-2 short sentences and invite a plant or garden question. Do not refuse greetings.
 Stay concise.
 If a follow-up depends on earlier messages, use that context.
-Do not discuss unrelated topics.`,
+Do not discuss unrelated non-garden topics.`,
       },
       ...history,
     ],
@@ -412,7 +430,9 @@ export async function handleGardenChat(input: {
     ? GARDEN_CHAT_VISION_MODEL
     : GARDEN_CHAT_MODEL;
 
-  const isGardeningRelated = await isGardeningRelatedChat(history, model);
+  const isGreeting = !imageBase64 && isGreetingMessage(storedContent);
+  const isGardeningRelated =
+    isGreeting || (await isGardeningRelatedChat(history, model));
 
   const reply = isGardeningRelated
     ? await answerGardeningQuestion(history, model)
