@@ -126,9 +126,13 @@ export const register = async (
           await sendEmailOtp(normalizedEmail);
         } catch (otpErr) {
           if (otpErr instanceof OtpCooldownError) {
-            res
-              .status(HTTP_STATUS.TOO_MANY_REQUESTS)
-              .json(errorResponse(otpErr.message));
+            // Same success shape as OTP-sent so the app can still open the OTP screen
+            res.status(HTTP_STATUS.OK).json(
+              successResponse(
+                { email: normalizedEmail, requiresEmailVerification: true },
+                otpErr.message
+              )
+            );
             return;
           }
           throw otpErr;
@@ -188,9 +192,13 @@ export const register = async (
       await sendEmailOtp(normalizedEmail);
     } catch (otpErr) {
       if (otpErr instanceof OtpCooldownError) {
-        res
-          .status(HTTP_STATUS.TOO_MANY_REQUESTS)
-          .json(errorResponse(otpErr.message));
+        // Same success shape as OTP-sent so the app can still open the OTP screen
+        res.status(HTTP_STATUS.OK).json(
+          successResponse(
+            { email: normalizedEmail, requiresEmailVerification: true },
+            otpErr.message
+          )
+        );
         return;
       }
       throw otpErr;
