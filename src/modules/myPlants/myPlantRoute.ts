@@ -1,8 +1,8 @@
 import express from "express";
 import auth from "../../core/middleware/authMiddleware";
-import { AddPlantToUser, completeNotificationController, deleteUserPlantController, disableNotificationController, getAllPlants, getAllPlantsAdmin, getAllUserPlants,  getNotificationsController,  getPlantById,  getUserPlantById,  rescheduleNotificationController,  updateUserPlantController } from "./myPlantController";
+import { AddPlantToUser, addPlantByScientificNameController, completeNotificationController, deleteUserPlantController, disableNotificationController, getAllPlants, getAllPlantsAdmin, getAllUserPlants,  getNotificationsController,  getPlantById,  getUserPlantById,  rescheduleNotificationController,  updateUserPlantController } from "./myPlantController";
 import validateRequest from "../../core/middleware/validateRequest";
-import { reminderValidation } from "./myPlantValidation";
+import { addPlantByScientificNameValidation, reminderValidation } from "./myPlantValidation";
 import multer from "multer";
 import path from "path";
 import { importPlantsController } from "./myPlantController";
@@ -516,6 +516,53 @@ router.patch("/updatePlant/:userPlantId", auth, updateUserPlantController);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post("/addplant", auth, validateRequest(reminderValidation), AddPlantToUser);
+
+/**
+ * @swagger
+ * /api/v1/allplants/add-by-scientific-name:
+ *   post:
+ *     summary: Add a plant to the user by scientific name
+ *     description: |
+ *       Looks up `scientific_name` in the plant catalog.
+ *       If the plant exists it is added to the authenticated user's account.
+ *       If it does not exist, GPT fills all catalog fields, the plant image is
+ *       downloaded and stored locally, then the new plant is added to the user.
+ *     tags: [My Plants]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - scientific_name
+ *             properties:
+ *               scientific_name:
+ *                 type: string
+ *                 example: "Monstera deliciosa"
+ *     responses:
+ *       201:
+ *         description: Plant added to the user account
+ *       400:
+ *         description: Validation error or lookup failure
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Scientific name is not a known plant
+ *       409:
+ *         description: Plant already added to the user
+ *       500:
+ *         description: Internal server error
+ */
+router.post(
+  "/add-by-scientific-name",
+  auth,
+  validateRequest(addPlantByScientificNameValidation),
+  addPlantByScientificNameController
+);
+
 /**
  * @swagger
  * /api/v1/allPlants/user/myplants:

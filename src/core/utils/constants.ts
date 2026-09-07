@@ -58,6 +58,7 @@ export const MESSAGES = {
   PLANT_UPDATED: "Plant updated successfully",
   PLANT_DELETED: "Plant deleted successfully",
   PLANT_NOT_FOUND: "Plant not found",
+  PLANT_ADDED_TO_USER: "Plant added to your account successfully",
   PLANT_HISTORY_SAVED: "Plant history saved successfully",
   TIPS_RETRIEVED: "Personalized tips retrieved successfully",
   IDENTIFICATION_COMPLETED: "Plant identification completed",

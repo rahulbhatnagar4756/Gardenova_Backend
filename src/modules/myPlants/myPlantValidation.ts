@@ -101,3 +101,19 @@ export const reminderValidation: ObjectSchema = Joi.object({
 })
   .required()
   .unknown(false);
+
+/**
+ * Joi schema for adding a plant to the user by scientific name.
+ * Looks up `plant_table_final` first; if missing, GPT fills the catalog row.
+ */
+export const addPlantByScientificNameValidation: ObjectSchema = Joi.object({
+  scientific_name: Joi.string().trim().min(2).max(255).required().messages({
+    "string.base": "Scientific name must be a string",
+    "string.empty": "Scientific name is required",
+    "string.min": "Scientific name must be at least 2 characters",
+    "string.max": "Scientific name cannot exceed 255 characters",
+    "any.required": "Scientific name is required",
+  }),
+})
+  .required()
+  .unknown(false);

@@ -19,9 +19,11 @@ import { addPlantToUserService,
     rescheduleNotificationService,
     updateUserPlantService, 
  } from "./myPlantServices";
+import { addPlantByScientificNameService } from "./addPlantByScientificNameService";
 import { ZodError } from "zod";
 import { getPlantDetailsByIdService } from "./myPlantServices";
 import { FlatUpdateUserPlantInput } from "../../interface/myPlants";
+import { MESSAGES } from "../../core/utils/constants";
 
 
 /**
@@ -220,6 +222,65 @@ export const AddPlantToUser = async (
         next(err);
     }
 };
+
+/**
+ * Adds a plant to the authenticated user's collection by scientific name.
+ * Uses the catalog when the species exists; otherwise GPT fills the catalog
+ * row, downloads an image, and then links the plant to the user.
+ *
+ * @param {AuthRequest} req - Express request with `scientific_name` in the body.
+ * @param {Response} res - Express response object.
+ * @param {NextFunction} next - Express next middleware function.
+ * @returns {Promise<void>} Sends the added plant payload.
+ */
+export const addPlantByScientificNameController = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    const userPayload = req.user as AuthUserPayload | undefined;
+
+    if (!userPayload?.userId) {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized"));
+        return;
+    }
+
+    if (userPayload.role !== "User") {
+        res.status(HTTP_STATUS.UNAUTHORIZED).json(errorResponse("Unauthorized Role"));
+        return;
+    }
+
+    const user = await findUserById(userPayload.userId);
+    if (!user?.id) {
+        res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("User not found"));
+        return;
+    }
+
+    try {
+        const data = await addPlantByScientificNameService(
+            user.id,
+            req.body.scientific_name as string
+        );
+
+        res.status(HTTP_STATUS.CREATED).json(
+            successResponse(data, MESSAGES.PLANT_ADDED_TO_USER)
+        );
+    } catch (err) {
+        if (err instanceof Error) {
+            const knownErrors: Record<string, number> = {
+                "Plant not found": HTTP_STATUS.NOT_FOUND,
+                "Plant already added to user": HTTP_STATUS.CONFLICT,
+            };
+            const statusCode = knownErrors[err.message];
+            if (statusCode) {
+                res.status(statusCode).json(errorResponse(err.message));
+                return;
+            }
+        }
+        next(err);
+    }
+};
+
 /**
  * Retrieves all plants associated with the authenticated user.
  *
