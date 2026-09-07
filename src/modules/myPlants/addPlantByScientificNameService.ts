@@ -94,17 +94,55 @@ export interface AddPlantByScientificNameResult {
 }
 
 /**
- * Converts mixed GPT values into a TEXT column value.
- * Arrays and objects are stored as JSON strings to match existing catalog rows.
+ * Flattens GPT arrays/objects into a plain TEXT column value.
+ * `["part shade"]` becomes `part shade`; nested objects become `key: value`.
  *
  * @param {unknown} value - Raw GPT field.
  * @returns {string | null} Database text or null.
  */
 function toDbText(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
-  if (Array.isArray(value) || typeof value === "object") {
-    return JSON.stringify(value);
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const looksLikeJson =
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"));
+    if (looksLikeJson) {
+      try {
+        return toDbText(JSON.parse(trimmed) as unknown);
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
   }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => toDbText(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length ? parts.join(", ") : null;
+  }
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if ("part" in obj) {
+      const part = toDbText(obj.part);
+      const color = toDbText(obj.color);
+      if (part && color) return `${part}: ${color}`;
+      return part ?? color;
+    }
+    const parts = Object.entries(obj)
+      .map(([key, nested]) => {
+        const flat = toDbText(nested);
+        return flat ? `${key}: ${flat}` : null;
+      })
+      .filter((item): item is string => Boolean(item));
+    return parts.length ? parts.join(", ") : null;
+  }
+
   const str = String(value).trim();
   return str.length ? str : null;
 }
@@ -226,7 +264,7 @@ Return ONLY valid JSON:
   "found": true,
   "common_name": "string",
   "scientific_name": "accepted binomial",
-  "other_name": ["common aliases"],
+  "other_name": "Bat Flower, Devil Flower, Cat's Whiskers",
   "family": "string",
   "genus": "string",
   "species_epithet": "string",
@@ -235,13 +273,13 @@ Return ONLY valid JSON:
   "subspecies": null,
   "cultivar": null,
   "variety": null,
-  "origin": ["native regions"],
+  "origin": "Southeast Asia, Malaysia, Thailand",
   "type": "tree|shrub|herb|vine|fern|cactus|succulent|palm|grass|flower|bulb",
   "cycle": "Perennial|Annual|Biennial|Biannual",
   "watering": "Frequent|Average|Minimum|None",
   "watering_benchmark_value": "7",
   "watering_benchmark_unit": "days",
-  "sunlight": ["full sun","part shade"],
+  "sunlight": "full sun, part shade",
   "hardiness_min": "9",
   "hardiness_max": "11",
   "dimension_type": "Height",
@@ -251,12 +289,12 @@ Return ONLY valid JSON:
   "growth_rate": "Low|Medium|High",
   "maintenance": "Low|Moderate|High",
   "care_level": "Easy|Moderate|Hard",
-  "soil": ["well-draining"],
-  "pruning_month": ["March"],
-  "propagation": ["cuttings"],
-  "attracts": ["butterflies"],
-  "pest_susceptibility": ["spider mites"],
-  "plant_anatomy": [{"part":"leaf","color":["green"]}],
+  "soil": "well-draining, moist",
+  "pruning_month": "March, April",
+  "propagation": "cuttings, division",
+  "attracts": "butterflies",
+  "pest_susceptibility": "spider mites, mealybugs",
+  "plant_anatomy": "leaf: green",
   "drought_tolerant": false,
   "salt_tolerant": false,
   "thorny": false,
@@ -290,6 +328,8 @@ Return ONLY valid JSON:
 Rules:
 - found must be false if this is not a real plant species
 - Prefer the accepted scientific name
+- ALL text fields must be plain strings, never JSON arrays or objects
+- If a field has multiple values, join them with commas (example: "full sun, part shade")
 - image_url MUST be a direct image file URL (jpg/png/webp), preferably upload.wikimedia.org, never a wiki HTML page
 - Use null for unknown fields, never empty placeholder text
 - Booleans must be true or false`,
