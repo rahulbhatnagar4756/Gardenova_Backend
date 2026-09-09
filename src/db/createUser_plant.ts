@@ -65,11 +65,8 @@ export async function userplantTable(): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
         -- Foreign Keys
-        CONSTRAINT fk_user
-            FOREIGN KEY(user_id)
-            REFERENCES users(id)
-            ON DELETE CASCADE,
-
+        -- Note: no FK to users(id) with ON DELETE CASCADE — account delete must
+        -- keep user_plants so re-registering with the same user id restores them.
         CONSTRAINT fk_plant
             FOREIGN KEY(plant_id)
             REFERENCES plantstable(id)
@@ -82,6 +79,12 @@ export async function userplantTable(): Promise<void> {
     `;
 
     await client.query(query);
+
+    // Existing DBs may still have fk_user with ON DELETE CASCADE — drop it
+    await client.query(`
+      ALTER TABLE user_plants DROP CONSTRAINT IF EXISTS fk_user;
+    `);
+
     console.error("User plants table created successfully!");
 
   } catch (error: unknown) {

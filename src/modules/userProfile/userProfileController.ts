@@ -6,7 +6,13 @@ import {
 import { HTTP_STATUS, MESSAGES } from "../../core/utils/constants";
 import { error, warn } from "../../core/utils/logger";
 import { CustomError } from "../../interface/Error";
-import { findUserByEmail, findUserById, getRoleById, hashPassword } from "../auth/authRepository";
+import {
+  findUserByEmail,
+  findUserById,
+  getRoleById,
+  hashPassword,
+  recordDeletedAccount,
+} from "../auth/authRepository";
 import { getDB } from "../../core/config/db";
 import { IFullUserProfile, IUserProfileRow } from "../../interface/userProfile";
 import {
@@ -718,9 +724,6 @@ export const softDeleteUserProfile = async (
   next: NextFunction
 ): Promise<void> => {
   const userPayload = req.user as AuthUserPayload | undefined;
-
-
-
   try {
 
     //  Find user
@@ -740,13 +743,29 @@ export const softDeleteUserProfile = async (
     }
 
     const client = getDB();
-    //  Find existing profile
+    const email = (user.email || userPayload!.userEmail || "").toLowerCase();
+
+    if (!email) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(errorResponse("User email is required to delete account"));
+      return;
+    }
+
+    // Drop FKs that would wipe or null user-owned rows on account delete
+    await client.query(`ALTER TABLE user_plants DROP CONSTRAINT IF EXISTS fk_user`);
+    await client.query(
+      `ALTER TABLE diagnosis_scans DROP CONSTRAINT IF EXISTS diagnosis_scans_user_id_fkey`
+    );
+    await client.query(
+      `ALTER TABLE feature_usage DROP CONSTRAINT IF EXISTS feature_usage_user_id_fkey`
+    );
+    await recordDeletedAccount(user.id!, email);
+
     const result = await client.query(
       `DELETE FROM users WHERE id = $1 RETURNING id`,
       [user.id]
-    )
-
-
+    );
 
     if (result.rowCount === 0) {
       await warn("Profile delete failed - Profile not found", {
@@ -791,28 +810,26 @@ export const softDeleteUserProfile = async (
   }
 }
 /**
- * Adds a password for an authenticated SSO user who does not already
- * have a password set in the system.
+ * Adds a password to an authenticated SSO user who does not
+ * currently have a password set.
  *
- * This controller:
- * - Validates the authenticated user
- * - Checks whether the user exists
- * - Ensures the user has no existing password
- * - Validates the new password input
- * - Hashes the password securely
- * - Updates the user's password in the database
- * - Logs errors and warnings for debugging and monitoring
+ * The function:
+ * - Validates the authenticated user's payload.
+ * - Retrieves the user from the database.
+ * - Ensures the user exists and has a valid ID.
+ * - Prevents overwriting an existing password.
+ * - Validates the new password.
+ * - Hashes the password before storing it.
+ * - Updates the user's password in the database.
  *
- * @async
- * @function addPasswordForSSOUser
+ * @param req - Express authentication request containing the authenticated
+ * user payload and the new password in `req.body.new_password`.
+ * @param res - Express response used to return the operation result.
+ * @param next - Express next function used to forward unexpected errors.
+ * @returns A promise that resolves when the response has been sent or
+ * an error has been forwarded to the next middleware.
  *
- * @param {AuthRequest} req - Express request object containing authenticated user data and request body.
- * @param {Response} res - Express response object used to send API responses.
- * @param {NextFunction} next - Express middleware next function for error handling.
- *
- * @returns {Promise<void>} Sends a success or error response.
- *
- * @throws {Error} Passes unexpected errors to Express error middleware.
+ * @throws Forwards unexpected errors to the Express error-handling middleware.
  */
 export const addPasswordForSSOUser = async (
   req: AuthRequest,
