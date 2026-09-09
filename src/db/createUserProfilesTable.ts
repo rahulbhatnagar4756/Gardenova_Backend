@@ -30,6 +30,14 @@ export async function createUserProfilesTable(): Promise<void> {
 
     await client.query(query);
 
+    // Ensure ON DELETE CASCADE so profile is removed with the user
+    await client.query(`
+      ALTER TABLE userprofiles DROP CONSTRAINT IF EXISTS userprofiles_user_id_fkey;
+      ALTER TABLE userprofiles
+        ADD CONSTRAINT userprofiles_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    `);
+
     console.error("UserProfiles table created successfully!");
   } catch (error: unknown) {
     if (error instanceof Error) {

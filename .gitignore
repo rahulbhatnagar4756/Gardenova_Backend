@@ -9,10 +9,11 @@ uploads/garden-chat/*
 
 scan_images
 /dist
-.env
 
 # Firebase / Google keys — never commit
 src/core/config/*.json
 src/core/utils/serviceAccount.json
 src/core/config/googlePlayServiceAccount.json
 googlePlayServiceAccount.json
+config.bat
+node_modules

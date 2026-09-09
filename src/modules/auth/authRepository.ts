@@ -9,6 +9,99 @@ import { AppleJwtPayload } from "../../interface/auth";
 import { OtpCooldownError } from "../../core/middleware/errorHandler";
 import { sendVerificationEmail } from "../../core/services/emailService";
 
+let deletedAccountsTableReady: Promise<void> | null = null;
+
+/**
+ * Ensures `deleted_accounts` exists (idempotent).
+ *
+ * @returns {Promise<void>}
+ */
+async function ensureDeletedAccountsTable(): Promise<void> {
+  if (!deletedAccountsTableReady) {
+    deletedAccountsTableReady = (async (): Promise<void> => {
+      const client = getDB();
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS deleted_accounts (
+          user_id    UUID PRIMARY KEY,
+          email      VARCHAR(255) NOT NULL,
+          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_deleted_accounts_email_lower
+          ON deleted_accounts (LOWER(email));
+      `);
+    })().catch((err) => {
+      deletedAccountsTableReady = null;
+      throw err;
+    });
+  }
+  await deletedAccountsTableReady;
+}
+
+/**
+ * Records a deleted account so the same user id can be reused on re-registration.
+ *
+ * @param userId - Deleted user's UUID
+ * @param email - Deleted user's email
+ * @returns {Promise<void>}
+ */
+export async function recordDeletedAccount(
+  userId: string,
+  email: string
+): Promise<void> {
+  await ensureDeletedAccountsTable();
+  const client = getDB();
+  const normalizedEmail = email.toLowerCase();
+
+  await client.query(
+    `DELETE FROM deleted_accounts WHERE LOWER(email) = LOWER($1)`,
+    [normalizedEmail]
+  );
+
+  await client.query(
+    `INSERT INTO deleted_accounts (user_id, email, deleted_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id) DO UPDATE
+       SET email = EXCLUDED.email,
+           deleted_at = NOW()`,
+    [userId, normalizedEmail]
+  );
+}
+
+/**
+ * Finds a previously deleted account by email.
+ *
+ * @param email - Email to look up
+ * @returns Previous user id, or null
+ */
+export async function findDeletedAccountByEmail(
+  email: string
+): Promise<{ userId: string; email: string } | null> {
+  await ensureDeletedAccountsTable();
+  const client = getDB();
+  const { rows } = await client.query<{ user_id: string; email: string }>(
+    `SELECT user_id, email
+     FROM deleted_accounts
+     WHERE LOWER(email) = LOWER($1)
+     ORDER BY deleted_at DESC
+     LIMIT 1`,
+    [email.toLowerCase()]
+  );
+  if (!rows[0]) return null;
+  return { userId: rows[0].user_id, email: rows[0].email };
+}
+
+/**
+ * Removes a deleted-account record after the user re-registers.
+ *
+ * @param userId - Restored user id
+ * @returns {Promise<void>}
+ */
+export async function removeDeletedAccount(userId: string): Promise<void> {
+  await ensureDeletedAccountsTable();
+  const client = getDB();
+  await client.query(`DELETE FROM deleted_accounts WHERE user_id = $1`, [userId]);
+}
+
 /**
  * Hash password helper
  * @param password - The password to hash
@@ -83,7 +176,7 @@ export async function updatePasswordResetToken(
 
   await client.query(query, [hashedToken, resetTokenExpiry, userId]);
 }
-
+ 
 /**
  * Get a role by its ID
  * @param roleId - ID of the role
@@ -163,10 +256,26 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
     const parsedData = createUserDto.parse(data);
 
     const client = getDB();
-
     const hashedPassword = await hashPassword(parsedData.password);
+    const previous = await findDeletedAccountByEmail(parsedData.email);
 
-    const query = `
+    const query = previous
+      ? `
+      INSERT INTO users (
+        id,
+        name,
+        email,
+        password,
+        role_id,
+        phone_number,
+        is_email_verified,
+        is_phone_verified
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, name, email, role_id, phone_number,
+                is_email_verified, is_phone_verified, created_at, updated_at;
+    `
+      : `
       INSERT INTO users (
         name,
         email,
@@ -181,18 +290,35 @@ export async function createValidatedUser(data: unknown): Promise<IUser> {
                 is_email_verified, is_phone_verified, created_at, updated_at;
     `;
 
-    const values = [
-      parsedData.name,
-      parsedData.email,
-      hashedPassword ?? null,
-      parsedData.roleId,
-      parsedData.phoneNumber ?? null,
-      parsedData.isEmailVerified ?? false,
-      false,
-    ];
+    const values = previous
+      ? [
+          previous.userId,
+          parsedData.name,
+          parsedData.email,
+          hashedPassword ?? null,
+          parsedData.roleId,
+          parsedData.phoneNumber ?? null,
+          parsedData.isEmailVerified ?? false,
+          false,
+        ]
+      : [
+          parsedData.name,
+          parsedData.email,
+          hashedPassword ?? null,
+          parsedData.roleId,
+          parsedData.phoneNumber ?? null,
+          parsedData.isEmailVerified ?? false,
+          false,
+        ];
 
     const result = await client.query(query, values);
-    return result.rows[0] as IUser;
+    const created = result.rows[0] as IUser;
+
+    if (previous) {
+      await removeDeletedAccount(previous.userId);
+    }
+
+    return created;
   } catch (err) {
     if (err instanceof ZodError) {
       throw err;
@@ -396,14 +522,30 @@ export async function createUserFromOAuth(
   else if (isAppleToken) uidColumn = "apple_uid";
   else throw new Error("No OAuth provider flag provided");
 
-  // Build dynamic SQL using the selected UID column
-  const query = `
+  const previous = await findDeletedAccountByEmail(email);
+
+  const query = previous
+    ? `
+    INSERT INTO users (id, name, email, ${uidColumn}, role_id, is_email_verified, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+    RETURNING id, name, email, role_id, is_email_verified;
+  `
+    : `
     INSERT INTO users (name, email, ${uidColumn}, role_id, is_email_verified, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
     RETURNING id, name, email, role_id, is_email_verified;
   `;
 
-  const result = await db.query(query, [name, email, uid, roleId, isVerified]);
+  const result = await db.query(
+    query,
+    previous
+      ? [previous.userId, name, email, uid, roleId, isVerified]
+      : [name, email, uid, roleId, isVerified]
+  );
+
+  if (previous) {
+    await removeDeletedAccount(previous.userId);
+  }
 
   return result.rows[0];
 }

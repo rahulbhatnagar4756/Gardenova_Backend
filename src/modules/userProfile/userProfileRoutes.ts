@@ -126,14 +126,13 @@ router.put(
  * @swagger
  * /api/v1/userProfile/soft-delete:
  *   patch:
- *     summary: Soft delete the current user's profile
+ *     summary: Delete the current user's account
  *     tags: [UserProfile]
  *     security:
  *       - bearerAuth: []
  *     description: |
- *       Marks the current user's profile as deleted (`is_deleted = true`) without
- *       removing the record from the database. Returns an appropriate response
- *       if the profile is already deleted or if the user/profile is not found.
+ *       Saves the user's id and email in `deleted_accounts`, then deletes the
+ *       user row. Re-registering with the same email reuses the previous user id.
  *     responses:
  *       200:
  *         description: User profile soft deleted successfully

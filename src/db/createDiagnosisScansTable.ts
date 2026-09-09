@@ -13,7 +13,7 @@ export async function createDiagnosisScansTable(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS diagnosis_scans (
         id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id            UUID REFERENCES users(id) ON DELETE SET NULL,
+        user_id            UUID,
         image_url          TEXT NOT NULL,
         predicted_disease  TEXT NOT NULL,
         confidence_score   DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -30,6 +30,9 @@ export async function createDiagnosisScansTable(): Promise<void> {
         ON diagnosis_scans (user_id);
       CREATE INDEX IF NOT EXISTS idx_diagnosis_scans_disease
         ON diagnosis_scans (predicted_disease);
+
+      -- Keep user_id after account delete so re-register with same id restores scans
+      ALTER TABLE diagnosis_scans DROP CONSTRAINT IF EXISTS diagnosis_scans_user_id_fkey;
     `);
     console.error("diagnosis_scans table ready");
   } catch (error: unknown) {
