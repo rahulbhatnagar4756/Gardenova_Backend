@@ -24,6 +24,7 @@ import { ZodError } from "zod";
 import { getPlantDetailsByIdService } from "./myPlantServices";
 import { FlatUpdateUserPlantInput } from "../../interface/myPlants";
 import { MESSAGES } from "../../core/utils/constants";
+import { trackGamification } from "../gamification/gamificationService";
 
 
 /**
@@ -732,6 +733,8 @@ export const getNotificationsController = async (
       page,
       limit
     );
+
+    trackGamification(user.id!, { type: "care_routine_viewed" });
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(data, "Notifications retrieved successfully")

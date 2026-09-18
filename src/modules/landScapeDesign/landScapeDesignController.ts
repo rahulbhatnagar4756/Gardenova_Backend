@@ -4,6 +4,7 @@ import { processDesign, processDesignWithLocation, processDesignWithSurvey } fro
 import { checkAndConsumeUsage } from "../../core/utils/planLimits";
 import { HTTP_STATUS } from "../../core/utils/constants";
 import { errorResponse } from "../../core/utils/responseFormatter";
+import { trackGamification } from "../gamification/gamificationService";
 
 
 /**
@@ -59,6 +60,12 @@ export const getLandScapeDesign = async (req: AuthRequest, res: Response, next: 
         const result = await processDesign({
             image_base64,
             userId: userPayload.userId,
+        });
+
+        trackGamification(userPayload.userId, {
+            type: "landscape_created",
+            spaceCategory: result.detectedSpace?.category ?? null,
+            spaceType: result.detectedSpace?.spaceType ?? null,
         });
 
         res.status(200).json({
@@ -148,6 +155,12 @@ export const getLandScapeDesignWithLocation = async (
             userId: userPayload.userId,
         });
 
+        trackGamification(userPayload.userId, {
+            type: "landscape_created",
+            spaceCategory: result.detectedSpace?.category ?? null,
+            spaceType: result.detectedSpace?.spaceType ?? null,
+        });
+
         res.status(HTTP_STATUS.OK).json({
             success: true,
             message: "Location-aware landscape design generated successfully",
@@ -206,6 +219,12 @@ export const getLandScapeDesignWithSurvey = async (
             ...(typeof responseId === "string" && responseId.trim()
                 ? { responseId: responseId.trim() }
                 : {}),
+        });
+
+        trackGamification(userPayload.userId, {
+            type: "landscape_created",
+            spaceCategory: result.detectedSpace?.category ?? null,
+            spaceType: result.detectedSpace?.spaceType ?? null,
         });
 
         res.status(HTTP_STATUS.OK).json({
