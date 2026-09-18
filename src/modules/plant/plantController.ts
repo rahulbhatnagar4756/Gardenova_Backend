@@ -20,6 +20,10 @@ import { identifyPlantService } from "./plantRepository";
 import { AuthRequest } from "../../interface/auth";
 import { checkAndConsumeUsage } from "../../core/utils/planLimits";
 import { logDiagnosisScan } from "./diagnosisScanLog";
+import {
+  doesScanMatchOwnedPlant,
+  trackGamification,
+} from "../gamification/gamificationService";
 
 /**
  * AUTH + ROLE CHECK HELPER (ADMIN ONLY)
@@ -380,6 +384,25 @@ export const diagnosePlantController = async (
     if (longitude !== undefined) logPayload.longitude = longitude;
 
     const scanId = await logDiagnosisScan(logPayload);
+
+    const plantName =
+      apiResponse.plantInfo?.commonNames?.[0] ??
+      apiResponse.plantInfo?.scientificName ??
+      null;
+    const matchedOwnedPlant = await doesScanMatchOwnedPlant(
+      user.id!,
+      plantName
+    );
+    trackGamification(user.id!, {
+      type: "scan_completed",
+      scanId,
+      plantName,
+      isHealthy: apiResponse.healthStatus?.isHealthy ?? null,
+      predictedDisease:
+        apiResponse.healthStatus?.issues?.[0]?.name ??
+        (apiResponse.healthStatus?.isHealthy ? "Healthy" : null),
+      matchedOwnedPlant,
+    });
 
     res.status(HTTP_STATUS.OK).json(
       successResponse(
