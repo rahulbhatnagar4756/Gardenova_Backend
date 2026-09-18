@@ -6,6 +6,7 @@ import {
   extractPredictedDisease,
   logDiagnosisScan,
 } from "./diagnosisScanLog";
+import { trackGamification } from "../gamification/gamificationService";
 
 export interface UserPlantScanListItem {
   id: string;
@@ -404,6 +405,19 @@ export async function compareUserPlantScan(input: {
   const savedNewScan = newScanId
     ? await getUserScanRow(input.userId, newScanId)
     : null;
+
+  trackGamification(input.userId, {
+    type: "compare_scan_completed",
+    scanId: newScanId,
+    plantName:
+      savedNewScan?.plantName ??
+      diagnosis.plantInfo?.commonNames?.[0] ??
+      null,
+    isHealthy: diagnosis.healthStatus?.isHealthy ?? null,
+    predictedDisease:
+      diagnosis.healthStatus?.issues?.[0]?.name ??
+      (diagnosis.healthStatus?.isHealthy ? "Healthy" : null),
+  });
 
   const historyCard = toCompareItem({
     id: history.id,

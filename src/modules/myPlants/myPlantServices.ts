@@ -25,6 +25,10 @@ import { pipeline } from "stream/promises";
 import pg from "pg";
 import copyFrom from "pg-copy-streams";
 import env from "../../core/config/env";
+import {
+    getPlantAttrsForGamification,
+    trackGamification,
+} from "../gamification/gamificationService";
 
 /**
  * Converts a local image file path into a public image URL.
@@ -622,6 +626,23 @@ export const addPlantToUserService = async (
                 generic_care_note ?? null,
             ]
         );
+
+        const planted = result.rows[0] as { id?: string; plant_id?: string | number };
+        try {
+            const attrs = await getPlantAttrsForGamification(plant_id);
+            trackGamification(userId, {
+                type: "plant_added",
+                plantId: plant_id,
+                userPlantId: planted?.id,
+                indoor: attrs.indoor,
+                flowers: attrs.flowers,
+                leaf: attrs.leaf,
+                maintenance: attrs.maintenance,
+                growthForm: attrs.growthForm,
+            });
+        } catch {
+            // never block plant add on gamification attribute lookup
+        }
 
         return result.rows[0];
     } catch (err) {
@@ -2249,6 +2270,12 @@ export const completeNotificationService = async (
          WHERE id = $3 AND user_id = $4`,
         [preferredTime, frequency, userPlantId, userId]
     );
+
+    trackGamification(userId, {
+        type: "care_completed",
+        userPlantId,
+        activityType,
+    });
 };
 /**
  * Disables a plant care notification for a specific activity.

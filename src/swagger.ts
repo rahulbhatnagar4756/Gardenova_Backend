@@ -70,6 +70,7 @@ const options = {
     "./src/modules/contactus/*.ts",
     "./src/modules/Blog/*.ts",
     "./src/modules/reminder/*.ts",
+    "./src/modules/gamification/*.ts"
   ],
 };
 

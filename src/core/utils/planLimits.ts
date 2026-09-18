@@ -67,6 +67,70 @@ const UNLIMITED_USER_IDS = new Set<string>([
   "b0cef028-48e7-4ea2-9410-788dbc24bcb3",
 ]);
 
+export interface FeatureUsageSnapshot {
+  limit: number;
+  used: number;
+  remaining: number;
+  unlimited: boolean;
+}
+
+/**
+ * Reads current monthly usage for a feature without consuming quota.
+ *
+ * @param userId - Authenticated user id
+ * @param featureType - Feature to inspect
+ * @returns Limit / used / remaining for the current month
+ */
+export const getFeatureUsageSnapshot = async (
+  userId: string,
+  featureType: FeatureType
+): Promise<FeatureUsageSnapshot> => {
+  if (UNLIMITED_USER_IDS.has(userId)) {
+    return { limit: -1, used: 0, remaining: -1, unlimited: true };
+  }
+
+  const pool = getDB();
+  const plan = await getUserActivePlan(userId);
+  const limitRaw = plan?.features?.[FEATURE_LIMIT_KEY[featureType]] as
+    | number
+    | undefined;
+  const limit = typeof limitRaw === "number" ? limitRaw : 0;
+
+  if (!plan || limit <= 0) {
+    return { limit: 0, used: 0, remaining: 0, unlimited: false };
+  }
+
+  const period = new Date().toISOString().slice(0, 7);
+  const { rows } = await pool.query<{ count: number }>(
+    `SELECT count FROM feature_usage
+      WHERE user_id = $1 AND feature_type = $2 AND period = $3
+      LIMIT 1`,
+    [userId, featureType, period]
+  );
+  const used = rows[0]?.count ?? 0;
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    unlimited: false,
+  };
+};
+
+/**
+ * Returns true when the user still has quota for the feature (or is unlimited).
+ *
+ * @param snapshot - Usage snapshot from getFeatureUsageSnapshot
+ * @param needed - How many uses the challenge would require (default 1)
+ * @returns Whether the challenge is quota-safe
+ */
+export const hasFeatureQuota = (
+  snapshot: FeatureUsageSnapshot,
+  needed = 1
+): boolean => {
+  if (snapshot.unlimited || snapshot.remaining < 0) return true;
+  return snapshot.remaining >= needed;
+};
+
 /**
  * Returns true when the user has a paid (non-free) active subscription.
  *
