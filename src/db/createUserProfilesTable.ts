@@ -11,7 +11,7 @@ export async function createUserProfilesTable(): Promise<void> {
     const query = `
       CREATE TABLE IF NOT EXISTS userprofiles (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL UNIQUE,
         profile_image TEXT,
         date_of_birth DATE,
         gender VARCHAR(10) CHECK (gender IN ('male', 'female', 'other', '')),
@@ -30,12 +30,9 @@ export async function createUserProfilesTable(): Promise<void> {
 
     await client.query(query);
 
-    // Ensure ON DELETE CASCADE so profile is removed with the user
+    // Keep profile after account delete so re-register with same user id restores it
     await client.query(`
       ALTER TABLE userprofiles DROP CONSTRAINT IF EXISTS userprofiles_user_id_fkey;
-      ALTER TABLE userprofiles
-        ADD CONSTRAINT userprofiles_user_id_fkey
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
     `);
 
     console.error("UserProfiles table created successfully!");

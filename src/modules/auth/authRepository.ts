@@ -197,7 +197,9 @@ export async function getRoleById(roleId: string): Promise<IRole | null> {
 }
 
 /**
- * Create a new user profile for a given user ID
+ * Create a new user profile for a given user ID.
+ * On re-registration with a restored user id, keeps the existing profile row.
+ *
  * @param userId - ID of the user
  * @returns void
  */
@@ -206,7 +208,8 @@ export async function createUserProfile(userId: string): Promise<void> {
 
   const query = `
     INSERT INTO userprofiles (user_id, created_at, updated_at)
-    VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+    VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT (user_id) DO NOTHING;
   `;
 
   await client.query(query, [userId]);
@@ -568,7 +571,8 @@ export async function createUserProfileWithImage(
   const db = await getDB();
   const query = `
     INSERT INTO userprofiles (user_id, profile_image, created_at, updated_at)
-    VALUES ($1, $2, NOW(), NOW());
+    VALUES ($1, $2, NOW(), NOW())
+    ON CONFLICT (user_id) DO NOTHING;
   `;
   await db.query(query, [userId, pictureLink]);
 }

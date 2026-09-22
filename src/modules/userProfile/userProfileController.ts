@@ -760,6 +760,9 @@ export const softDeleteUserProfile = async (
     await client.query(
       `ALTER TABLE feature_usage DROP CONSTRAINT IF EXISTS feature_usage_user_id_fkey`
     );
+    await client.query(
+      `ALTER TABLE userprofiles DROP CONSTRAINT IF EXISTS userprofiles_user_id_fkey`
+    );
     await recordDeletedAccount(user.id!, email);
 
     const result = await client.query(
