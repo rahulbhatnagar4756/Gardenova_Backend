@@ -118,6 +118,11 @@ export const completeDailyChallengeController = async (
     res.status(HTTP_STATUS.OK).json(successResponse(result, message));
   } catch (err) {
     if (err instanceof Error) {
+      if (err.message.startsWith("You're close!")) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(errorResponse(err.message));
+        return;
+      }
+
       const known: Record<string, number> = {
         "Challenge not found": HTTP_STATUS.NOT_FOUND,
         "Challenge has expired": HTTP_STATUS.BAD_REQUEST,

@@ -157,6 +157,13 @@ export async function completeDailyChallengeService(
     };
   }
 
+  // Prevent manual completion before the required task progress is actually done.
+  if (existing.progress_count < existing.target_count) {
+    throw new Error(
+      `You're close! Finish this task first.`
+    );
+  }
+
   const completed = await markChallengeCompleted(challengeId, userId);
   if (!completed) {
     const again = await findDailyChallengeById(userId, challengeId);

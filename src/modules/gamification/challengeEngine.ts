@@ -379,6 +379,28 @@ function isLowMaintenance(value?: string | null): boolean {
 }
 
 /**
+ * Normalizes a value for case-insensitive text matching.
+ * @param value
+ * @returns {string}
+ */
+function normalizeText(value?: string | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+/**
+ * Checks whether two values match with a tolerant text comparison.
+ * @param eventValue
+ * @param expected
+ * @returns {boolean}
+ */
+function matchesText(eventValue?: string | null, expected?: unknown): boolean {
+  const left = normalizeText(eventValue);
+  const right = normalizeText(typeof expected === "string" ? expected : null);
+  if (!left || !right) return false;
+  return left.includes(right) || right.includes(left);
+}
+
+/**
  * Returns how much progress an event should add for a given assigned challenge.
  * @param challenge
  * @param event
@@ -422,7 +444,7 @@ export function progressDeltaForEvent(
       return event.type === "plant_added" && event.indoor === true ? 1 : 0;
     case "ADD_BALCONY_PLANT":
       return event.type === "plant_added" &&
-        (event.indoor === true || event.indoor === false)
+        (ctx.isBalconySpace || normalizeText(event.growthForm).includes("balcony"))
         ? 1
         : 0;
     case "ADD_OUTDOOR_PLANT":
@@ -468,8 +490,9 @@ export function progressDeltaForEvent(
         ? 1
         : 0;
     case "SCAN_UNUSUAL_SYMPTOMS":
-      return event.type === "scan_completed" ||
-        event.type === "compare_scan_completed"
+      return (event.type === "scan_completed" ||
+        event.type === "compare_scan_completed") &&
+        (event.isHealthy === false || Boolean(normalizeText(event.predictedDisease)))
         ? 1
         : 0;
     case "SCAN_OWNED":
@@ -477,9 +500,31 @@ export function progressDeltaForEvent(
       if (event.type === "scan_completed" && event.matchedOwnedPlant) return 1;
       return 0;
     case "CHECK_UNHEALTHY":
+      return (event.type === "scan_completed" ||
+        event.type === "compare_scan_completed") &&
+        event.isHealthy === false
+        ? 1
+        : 0;
     case "FOLLOW_UP_ISSUE":
-    case "CHECK_PLANT_IMPROVED":
+      return (event.type === "scan_completed" ||
+        event.type === "compare_scan_completed") &&
+        matchesText(event.predictedDisease, meta.issue)
+        ? 1
+        : 0;
+    case "CHECK_PLANT_IMPROVED": {
+      if (event.type !== "scan_completed" && event.type !== "compare_scan_completed") {
+        return 0;
+      }
+      const samePlant = matchesText(event.plantName, meta.plantName);
+      if (!samePlant) return 0;
+      return event.isHealthy === true ? 1 : 0;
+    }
     case "RESCAN_AFTER_7_DAYS":
+      return (event.type === "scan_completed" ||
+        event.type === "compare_scan_completed") &&
+        ctx.hasScanOlderThan7Days
+        ? 1
+        : 0;
     case "SCAN_NOT_RECENT":
       return event.type === "scan_completed" ||
         event.type === "compare_scan_completed"
@@ -500,8 +545,13 @@ export function progressDeltaForEvent(
         : 0;
     case "WATERING_ROUTINE":
     case "FOLLOW_WATERING_FREQ":
-      return event.type === "care_completed" &&
-        event.activityType.toLowerCase() === "water"
+      if (event.type !== "care_completed") return 0;
+      const activityType = event.activityType.toLowerCase();
+      const wateringFrequency =
+        typeof meta.wateringFrequency === "string"
+          ? normalizeText(meta.wateringFrequency)
+          : "";
+      return activityType === "water" || activityType === wateringFrequency
         ? 1
         : 0;
     case "CARE_OLDEST":
@@ -524,8 +574,16 @@ export function progressDeltaForEvent(
 
     case "FIRST_LANDSCAPE":
     case "IMPROVE_DESIGN":
-    case "DESIGN_SPACE_TYPE":
       return event.type === "landscape_created" ? 1 : 0;
+    case "DESIGN_SPACE_TYPE": {
+      if (event.type !== "landscape_created") return 0;
+      const expected = meta.spaceType;
+      if (!expected) return 1;
+      return matchesText(event.spaceType, expected) ||
+        matchesText(event.spaceCategory, expected)
+        ? 1
+        : 0;
+    }
     case "DESIGN_OUTDOOR":
       return event.type === "landscape_created" &&
         ((event.spaceCategory ?? event.spaceType ?? "")
