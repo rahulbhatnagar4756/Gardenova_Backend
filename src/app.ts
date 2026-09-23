@@ -38,6 +38,8 @@ import contactRoutes from "./modules/contactus/contactRoutes";
 import blogRouter from "./modules/Blog/blogRoute";
 import { startReminderCron } from "./modules/reminder/reminder.cron";
 import { autoRescheduleMissedNotificationsService } from "./modules/myPlants/myPlantServices";
+import { createMissedNotificationsTable } from "./db/createMissedNotificationsTable";
+import missedNotificationsRoutes from "./modules/missedNotifications/missedNotificationsRoutes";
 // import { createBlogTable } from "./db/createBlogTable";
 // import { createFcmTokensTable } from "./db/createFcm_tokensTable";
 // import { createnotification_logTable } from "./db/createnotification_logTable";
@@ -53,6 +55,8 @@ connectDB().catch((error) => {
   logger.error("Failed to connect to database", { error: error.message });
   process.exit(1);
 });
+
+void createMissedNotificationsTable();
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/plant-images', express.static(path.join(process.cwd(), 'plant_images')));
@@ -77,9 +81,10 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(translationMiddleware()); // enable translation globally
 
-cron.schedule("0 0 * * *", async () => {
+cron.schedule("*/5 * * * *", async () => {
     try {
         await autoRescheduleMissedNotificationsService();
+    logger.info("autoRescheduleMissedNotificationsService executed successfully");
     } catch (err) {
         console.error("autoRescheduleMissedNotificationsService failed:", err);
     }
@@ -139,6 +144,7 @@ app.use("/api/v1/reminders",reminderRoutes);
 app.use("/api/v1/blogs", blogRouter);
 
 app.use("/api/v1/contact", contactRoutes);
+app.use("/api/v1/missed-notifications", missedNotificationsRoutes);
 app.use("/",blogRouter);
 // registerBlockExpiredTrialsCron();
 app.use(errorHandler);

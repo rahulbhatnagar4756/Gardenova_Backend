@@ -1249,8 +1249,5 @@ router.patch(
     auth,
     disableNotificationController
 );
-
-
-
  
 export default router;

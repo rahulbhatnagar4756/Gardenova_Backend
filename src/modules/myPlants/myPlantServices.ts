@@ -29,6 +29,7 @@ import {
     getPlantAttrsForGamification,
     trackGamification,
 } from "../gamification/gamificationService";
+import { normalizeMissedNotificationFeature, recordMissedNotification } from "../missedNotifications/missedNotificationService";
 
 /**
  * Converts a local image file path into a public image URL.
@@ -2311,6 +2312,7 @@ export const disableNotificationService = async (
         [userPlantId, userId]
     );
 };
+
 /**
  * Advances next_at for any overdue (missed) reminders across all activity
  * types, for all users. Meant to run once daily (e.g. at midnight IST) so a
@@ -2335,6 +2337,25 @@ export const autoRescheduleMissedNotificationsService = async (): Promise<void> 
 
     for (const activity of ALL_ACTIVITY_TYPES) {
         const cols = getColumns(activity);
+
+        const missedResult = await pool.query(
+            `
+                SELECT user_id, plant_id
+                FROM user_plants
+                WHERE ${cols.enabled} = true
+                  AND ${cols.frequency} > 0
+                  AND ${cols.next_at} IS NOT NULL
+                  AND ${cols.next_at} < NOW()
+            `
+        );
+
+        for (const row of missedResult.rows) {
+            await recordMissedNotification({
+                userId: row.user_id,
+                plantId: row.plant_id,
+                feature: normalizeMissedNotificationFeature(activity),
+            });
+        }
 
         await pool.query(`
             UPDATE user_plants
