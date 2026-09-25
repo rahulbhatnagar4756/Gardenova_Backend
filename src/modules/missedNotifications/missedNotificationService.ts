@@ -73,6 +73,40 @@ export async function recordMissedNotification(params: {
   );
 }
 
+/**
+ * Resolves the base application URL for public assets.
+ *
+ * Uses `APPPROD_URL` when running in production, otherwise `APPDEV_URL`.
+ * Falls back to the available one if the preferred variable is missing.
+ *
+ * @returns {string} Base URL without trailing slash.
+ */
+function getBaseUrl(): string {
+  const devBase = (process.env.APPDEV_URL ?? "").replace(/\/$/, "");
+  const prodBase = (process.env.APPPROD_URL ?? "").replace(/\/$/, "");
+
+  if (process.env.NODE_ENV === "production") {
+    return prodBase || devBase;
+  }
+
+  return devBase || prodBase;
+}
+
+/**
+ * Converts a stored local plant image path to a public URL.
+ *
+ * @param {string | null} localPath - Stored local image path.
+ * @returns {string | null} Public image URL or null.
+ */
+function toImageUrl(localPath: string | null): string | null {
+  if (!localPath) return null;
+  const filename = localPath.split(/[\\/]/).pop();
+  if (!filename) return null;
+
+  const baseUrl = getBaseUrl();
+  return baseUrl ? `${baseUrl}/plant-images/${filename}` : `/plant-images/${filename}`;
+}
+
 export interface MissedNotificationRow {
   id: string;
   user_id: string;
@@ -84,6 +118,7 @@ export interface MissedNotificationRow {
   updated_at: string;
   common_name: string | null;
   scientific_name: string | null;
+  image_url: string | null;
 }
 
 export interface MissedNotificationsResult {
@@ -135,7 +170,8 @@ export async function getMissedNotificationsService(
         mn.created_at,
         mn.updated_at,
         p.common_name,
-        p.scientific_name
+        p.scientific_name,
+        p.local_image_path as image_url
      FROM missed_notifications mn
      LEFT JOIN plant_table_final p ON p.id::text = mn.plant_id
      WHERE mn.user_id = $1
@@ -144,8 +180,13 @@ export async function getMissedNotificationsService(
     [userId, limit, offset]
   );
 
+  const items = result.rows.map((row) => ({
+    ...row,
+    image_url: toImageUrl(row.image_url),
+  }));
+
   return {
-    items: result.rows,
+    items,
     pagination: {
       page,
       limit,

@@ -81,7 +81,7 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(translationMiddleware()); // enable translation globally
 
-cron.schedule("*/5 * * * *", async () => {
+cron.schedule("0 0 * * *", async () => {
     try {
         await autoRescheduleMissedNotificationsService();
     logger.info("autoRescheduleMissedNotificationsService executed successfully");
