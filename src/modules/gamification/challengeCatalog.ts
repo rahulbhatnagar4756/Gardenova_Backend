@@ -8,7 +8,8 @@ export type ChallengeCategory =
   | "scan"
   | "care"
   | "landscape"
-  | "explore";
+  | "explore"
+  | "compare"
 
 export type ChallengeRepeat = "once" | "daily";
 
@@ -266,7 +267,7 @@ export const CHALLENGE_CATALOG: ChallengeDefinition[] = [
     title: "Compare your plant's progress",
     description: "Run a compare scan against a previous diagnosis.",
     points: 5,
-    category: "scan",
+    category: "compare",
     repeat: "daily",
     target: 1,
     events: ["compare_scan_completed"],

@@ -302,6 +302,13 @@ export function selectDailyChallenges(
  * @returns {AssignedChallengeView}
  */
 function toView(row: UserDailyChallengeRow): AssignedChallengeView {
+  const status: AssignedChallengeView["status"] =
+    row.status !== "active"
+      ? row.status
+      : row.progress_count < row.target_count
+        ? "pending"
+        : "active";
+
   return {
     id: row.id,
     code: row.challenge_code,
@@ -311,7 +318,7 @@ function toView(row: UserDailyChallengeRow): AssignedChallengeView {
     points: row.points,
     targetCount: row.target_count,
     progressCount: row.progress_count,
-    status: row.status,
+    status,
     completedAt: row.completed_at,
     metadata: row.metadata,
   };

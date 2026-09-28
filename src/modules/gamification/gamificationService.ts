@@ -52,6 +52,13 @@ function toChallengeView(row: {
   completed_at: string | null;
   metadata: Record<string, unknown>;
 }): AssignedChallengeView {
+  const status: AssignedChallengeView["status"] =
+    row.status !== "active"
+      ? row.status
+      : row.progress_count < row.target_count
+        ? "pending"
+        : "active";
+
   return {
     id: row.id,
     code: row.challenge_code,
@@ -61,7 +68,7 @@ function toChallengeView(row: {
     points: row.points,
     targetCount: row.target_count,
     progressCount: row.progress_count,
-    status: row.status,
+    status,
     completedAt: row.completed_at,
     metadata: row.metadata,
   };

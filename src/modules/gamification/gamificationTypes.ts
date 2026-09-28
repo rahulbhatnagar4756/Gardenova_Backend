@@ -129,7 +129,7 @@ export interface AssignedChallengeView {
   points: number;
   targetCount: number;
   progressCount: number;
-  status: "active" | "completed" | "expired";
+  status: "pending" | "active" | "completed" | "expired";
   completedAt: string | null;
   metadata: Record<string, unknown>;
 }
