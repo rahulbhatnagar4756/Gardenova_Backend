@@ -369,7 +369,8 @@ export async function updateChallengeMetadata(
 }
 
 /**
- * Increments progress on an active daily challenge and completes it when target is met.
+ * Increments progress on an active daily challenge without auto-completing it.
+ * Completion is only performed by the mark-as-complete API.
  * @param challengeId
  * @param amount
  * @returns {Promise<UserDailyChallengeRow | null>}
@@ -382,16 +383,7 @@ export async function incrementChallengeProgress(
   const db = getDB();
   const result = await db.query<UserDailyChallengeRow>(
     `UPDATE user_daily_challenges
-        SET progress_count = LEAST(target_count, progress_count + $2),
-            status = CASE
-              WHEN progress_count + $2 >= target_count THEN 'completed'
-              ELSE status
-            END,
-            completed_at = CASE
-              WHEN progress_count + $2 >= target_count AND completed_at IS NULL
-                THEN now()
-              ELSE completed_at
-            END
+        SET progress_count = LEAST(target_count, progress_count + $2)
       WHERE id = $1
         AND status = 'active'
       RETURNING id, user_id, challenge_code, challenge_date::text, title, description,

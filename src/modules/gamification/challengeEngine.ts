@@ -5,7 +5,6 @@ import {
   DAILY_CHALLENGE_COUNT,
 } from "./challengeCatalog";
 import {
-  awardChallengePoints,
   getIstDateString,
   incrementChallengeProgress,
   insertDailyChallenge,
@@ -614,7 +613,8 @@ export function progressDeltaForEvent(
 }
 
 /**
- * Applies an activity event to today's challenges and awards points on completion.
+ * Applies an activity event to today's challenges by updating progress only.
+ * Challenges are marked completed only via mark-as-complete API.
  * @param userId
  * @param event
  * @returns {Promise<AssignedChallengeView[]>}
@@ -627,7 +627,7 @@ export async function applyEventToDailyChallenges(
   const today = getIstDateString();
   const rows = await listDailyChallenges(userId, today);
   const ctx = await buildUserChallengeContext(userId);
-  const completedNow: AssignedChallengeView[] = [];
+  const progressedNow: AssignedChallengeView[] = [];
 
   for (const row of rows) {
     const delta = progressDeltaForEvent(row, event, ctx);
@@ -652,18 +652,8 @@ export async function applyEventToDailyChallenges(
 
     const updated = await incrementChallengeProgress(row.id, delta);
     if (!updated) continue;
-
-    if (updated.status === "completed") {
-      await awardChallengePoints({
-        userId,
-        challengeCode: updated.challenge_code,
-        points: updated.points,
-        challengeDate: today,
-        dailyChallengeId: updated.id,
-      });
-      completedNow.push(toView(updated));
-    }
+    progressedNow.push(toView(updated));
   }
 
-  return completedNow;
+  return progressedNow;
 }
