@@ -27,8 +27,9 @@ import copyFrom from "pg-copy-streams";
 import env from "../../core/config/env";
 import {
     getPlantAttrsForGamification,
-    trackGamification,
+    recordGamificationEventSafe,
 } from "../gamification/gamificationService";
+import { GamificationEventFeedback } from "../gamification/gamificationTypes";
 import { normalizeMissedNotificationFeature, recordMissedNotification } from "../missedNotifications/missedNotificationService";
 
 /**
@@ -629,9 +630,10 @@ export const addPlantToUserService = async (
         );
 
         const planted = result.rows[0] as { id?: string; plant_id?: string | number };
+        let gamification: GamificationEventFeedback | null = null;
         try {
             const attrs = await getPlantAttrsForGamification(plant_id);
-            trackGamification(userId, {
+            gamification = await recordGamificationEventSafe(userId, {
                 type: "plant_added",
                 plantId: plant_id,
                 userPlantId: planted?.id,
@@ -645,7 +647,10 @@ export const addPlantToUserService = async (
             // never block plant add on gamification attribute lookup
         }
 
-        return result.rows[0];
+        return {
+            ...result.rows[0],
+            gamification,
+        };
     } catch (err) {
         if (
             err instanceof Error &&
@@ -2226,7 +2231,7 @@ export const completeNotificationService = async (
     userId: string,
     userPlantId: string,
     activityType: string  // label: "water" | "prune" | "fertilize" | "generic"
-): Promise<void> => {
+): Promise<GamificationEventFeedback | null> => {
     const pool = await getDB();
     await assertUserPlantExists(userId, userPlantId);
 
@@ -2272,11 +2277,13 @@ export const completeNotificationService = async (
         [preferredTime, frequency, userPlantId, userId]
     );
 
-    trackGamification(userId, {
+    const gamification = await recordGamificationEventSafe(userId, {
         type: "care_completed",
         userPlantId,
         activityType,
     });
+
+    return gamification;
 };
 /**
  * Disables a plant care notification for a specific activity.

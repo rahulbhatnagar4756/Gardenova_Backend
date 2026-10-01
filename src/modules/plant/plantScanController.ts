@@ -139,7 +139,7 @@ export const comparePlantScanController = async (
       longitude?: number;
     };
 
-    const plants = await compareUserPlantScan({
+    const compareResult = await compareUserPlantScan({
       userId: userPayload.userId,
       historyScanId: scanId,
       imageBase64: body.image_base64 ?? "",
@@ -147,14 +147,14 @@ export const comparePlantScanController = async (
       ...(typeof body.longitude === "number" ? { longitude: body.longitude } : {}),
     });
 
-    if (!plants) {
+    if (!compareResult) {
       res.status(HTTP_STATUS.NOT_FOUND).json(errorResponse("Scan not found"));
       return;
     }
 
     res
       .status(HTTP_STATUS.OK)
-      .json(successResponse({ plants }, MESSAGES.PLANT_SCAN_COMPARED));
+      .json(successResponse(compareResult, MESSAGES.PLANT_SCAN_COMPARED));
   } catch (err) {
     next(err);
   }

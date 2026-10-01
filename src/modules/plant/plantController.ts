@@ -22,7 +22,7 @@ import { checkAndConsumeUsage } from "../../core/utils/planLimits";
 import { logDiagnosisScan } from "./diagnosisScanLog";
 import {
   doesScanMatchOwnedPlant,
-  trackGamification,
+  recordGamificationEventSafe,
 } from "../gamification/gamificationService";
 
 /**
@@ -393,7 +393,7 @@ export const diagnosePlantController = async (
       user.id!,
       plantName
     );
-    trackGamification(user.id!, {
+    const gamification = await recordGamificationEventSafe(user.id!, {
       type: "scan_completed",
       scanId,
       plantName,
@@ -408,6 +408,7 @@ export const diagnosePlantController = async (
       successResponse(
         {
           scanId,
+          gamification,
           ...apiResponse,
         },
         "Plant diagnosed successfully"

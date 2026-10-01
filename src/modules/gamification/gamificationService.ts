@@ -17,6 +17,7 @@ import {
 } from "./gamificationRepository";
 import {
   AssignedChallengeView,
+  GamificationEventFeedback,
   GamificationEvent,
   GamificationSummary,
   PlanQuotaView,
@@ -218,7 +219,7 @@ export async function completeDailyChallengeService(
 export async function recordGamificationEvent(
   userId: string,
   event: GamificationEvent
-): Promise<AssignedChallengeView[]> {
+): Promise<GamificationEventFeedback> {
   await ensureUserGamification(userId);
   await logActivity(userId, event.type, { ...event });
 
@@ -230,6 +231,29 @@ export async function recordGamificationEvent(
   }
 
   return applyEventToDailyChallenges(userId, event);
+}
+
+/**
+ * Safe event recorder that never throws; returns null when gamification fails.
+ * Useful for product endpoints that should still succeed without gamification.
+ * @param userId
+ * @param event
+ * @returns {Promise<GamificationEventFeedback | null>}
+ */
+export async function recordGamificationEventSafe(
+  userId: string,
+  event: GamificationEvent
+): Promise<GamificationEventFeedback | null> {
+  try {
+    return await recordGamificationEvent(userId, event);
+  } catch (err: unknown) {
+    logger.error("Gamification sync tracking failed", {
+      userId,
+      eventType: event.type,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 /**

@@ -5,14 +5,17 @@ import {
   DAILY_CHALLENGE_COUNT,
 } from "./challengeCatalog";
 import {
+  awardChallengePoints,
   getIstDateString,
   incrementChallengeProgress,
   insertDailyChallenge,
   listDailyChallenges,
+  markChallengeCompleted,
   updateChallengeMetadata,
 } from "./gamificationRepository";
 import {
   AssignedChallengeView,
+  GamificationEventFeedback,
   GamificationEvent,
   UserChallengeContext,
   UserDailyChallengeRow,
@@ -620,21 +623,23 @@ export function progressDeltaForEvent(
 }
 
 /**
- * Applies an activity event to today's challenges by updating progress only.
- * Challenges are marked completed only via mark-as-complete API.
+ * Applies an activity event to today's challenges and auto-completes any challenge
+ * that reaches its target during this event.
  * @param userId
  * @param event
- * @returns {Promise<AssignedChallengeView[]>}
+ * @returns {Promise<GamificationEventFeedback>}
  */
 export async function applyEventToDailyChallenges(
   userId: string,
   event: GamificationEvent
-): Promise<AssignedChallengeView[]> {
+): Promise<GamificationEventFeedback> {
   await ensureDailyChallengesAssigned(userId);
   const today = getIstDateString();
   const rows = await listDailyChallenges(userId, today);
   const ctx = await buildUserChallengeContext(userId);
   const progressedNow: AssignedChallengeView[] = [];
+  const completedNow: AssignedChallengeView[] = [];
+  let pointsAwarded = 0;
 
   for (const row of rows) {
     const delta = progressDeltaForEvent(row, event, ctx);
@@ -660,7 +665,32 @@ export async function applyEventToDailyChallenges(
     const updated = await incrementChallengeProgress(row.id, delta);
     if (!updated) continue;
     progressedNow.push(toView(updated));
+
+    if (
+      updated.status === "active" &&
+      updated.progress_count >= updated.target_count
+    ) {
+      const completed = await markChallengeCompleted(updated.id, userId);
+      if (!completed) continue;
+
+      const awarded = await awardChallengePoints({
+        userId,
+        challengeCode: completed.challenge_code,
+        points: completed.points,
+        challengeDate: completed.challenge_date,
+        dailyChallengeId: completed.id,
+      });
+
+      if (awarded) {
+        pointsAwarded += completed.points;
+      }
+      completedNow.push(toView(completed));
+    }
   }
 
-  return progressedNow;
+  return {
+    progressedChallenges: progressedNow,
+    completedChallenges: completedNow,
+    pointsAwarded,
+  };
 }

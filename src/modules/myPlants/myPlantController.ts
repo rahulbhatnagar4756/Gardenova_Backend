@@ -850,14 +850,17 @@ export const completeNotificationController = async (
             return;
         }
  
-        await completeNotificationService(
+        const gamification = await completeNotificationService(
             user.id!,
             userPlantId!,
             activityType.trim().toLowerCase()
         );
  
         res.status(HTTP_STATUS.OK).json(
-            successResponse(null, "Task marked as completed successfully")
+            successResponse(
+                { gamification },
+                "Task marked as completed successfully"
+            )
         );
     } catch (err) {
         if (err instanceof Error) {

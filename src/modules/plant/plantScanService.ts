@@ -6,7 +6,8 @@ import {
   extractPredictedDisease,
   logDiagnosisScan,
 } from "./diagnosisScanLog";
-import { trackGamification } from "../gamification/gamificationService";
+import { recordGamificationEventSafe } from "../gamification/gamificationService";
+import { GamificationEventFeedback } from "../gamification/gamificationTypes";
 
 export interface UserPlantScanListItem {
   id: string;
@@ -374,7 +375,7 @@ export async function compareUserPlantScan(input: {
   imageBase64: string;
   latitude?: number;
   longitude?: number;
-}): Promise<PlantScanCompareItem[] | null> {
+}): Promise<{ plants: PlantScanCompareItem[]; gamification: GamificationEventFeedback | null } | null> {
   const history = await getUserPlantScanById(input.userId, input.historyScanId);
   if (!history) {
     return null;
@@ -406,7 +407,7 @@ export async function compareUserPlantScan(input: {
     ? await getUserScanRow(input.userId, newScanId)
     : null;
 
-  trackGamification(input.userId, {
+  const gamification = await recordGamificationEventSafe(input.userId, {
     type: "compare_scan_completed",
     scanId: newScanId,
     plantName:
@@ -433,5 +434,8 @@ export async function compareUserPlantScan(input: {
     diagnosis,
   });
 
-  return [historyCard, newCard];
+  return {
+    plants: [historyCard, newCard],
+    gamification,
+  };
 }

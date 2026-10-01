@@ -152,4 +152,10 @@ export interface PlanQuotaView {
   canLandscape: boolean;
 }
 
+export interface GamificationEventFeedback {
+  progressedChallenges: AssignedChallengeView[];
+  completedChallenges: AssignedChallengeView[];
+  pointsAwarded: number;
+}
+
 export type ChallengeEvent = ChallengeEventType;
